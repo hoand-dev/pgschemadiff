@@ -1,0 +1,302 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pgschemadiff"
+version = "0.0.0"
+description = "Compare PostgreSQL schemas, generate safe migrations, with TUI and CLI."
+readme = "README.md"
+requires-python = ">=3.13"
+license = { file = "LICENSE" }
+authors = [{ name = "hoand-dev", email = "hoand.dev@mdfhongnghi.vn" }]
+keywords = ["postgres", "postgresql", "schema", "diff", "migration", "tui", "cli"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+    "Topic :: Software Development :: Version Control",
+    "Typing :: Typed",
+]
+dependencies = [
+    "psycopg[binary,pool]>=3.2",
+    "pydantic>=2.8",
+    "typer>=0.12",
+    "structlog>=24.4",
+    "textual>=0.83",
+    "rich>=13.9",
+    "anyio>=4.4",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-benchmark>=4.0",
+    "pytest-cov>=5.0",
+    "syrupy>=4.7",
+    "hypothesis>=6.112",
+    "testcontainers[postgres]>=4.8",
+    "import-linter>=2.1",
+    "pre-commit>=3.8",
+    "textual-dev>=1.7",
+    "types-pyyaml>=6.0",
+]
+
+[project.scripts]
+pgsd = "pgschemadiff.presentation.cli.main:app"
+pgschemadiff = "pgschemadiff.presentation.cli.main:app"
+
+[project.urls]
+Repository = "https://github.com/hoand-dev/pgschemadiff"
+Issues = "https://github.com/hoand-dev/pgschemadiff/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pgschemadiff"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/pgschemadiff", "README.md", "LICENSE", "pyproject.toml"]
+
+# ---------------------------------------------------------------------------
+# Ruff (lint + format)
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src", "tests"]
+extend-exclude = [
+    "migrations",
+    # Root-level Home prototype (preserved from main's "init" commit)
+    "app.py", "home.py", "profile.py", "profile_detail.py",
+    "profile_item.py", "yaml_loader.py",
+    # Legacy prototype migrated into src/ via consolidation of exploration branches
+    "src/pgschemadiff/__main__.py",
+    "src/pgschemadiff/presentation/app.py",
+    "src/pgschemadiff/presentation/screens",
+    "src/pgschemadiff/presentation/widgets",
+    "src/pgschemadiff/domain/models",
+    "src/pgschemadiff/infrastructure/config",
+    # Legacy top-level tests from exploration branches (duplicate coverage)
+    "tests/test_domain_models.py",
+    "tests/test_home_screen.py",
+    "tests/test_models.py",
+    "tests/test_profile.py",
+    "tests/test_screens.py",
+    "tests/test_yaml_loader.py",
+    "tests/domain",
+    "tests/infrastructure",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+    "SIM", # flake8-simplify
+    "RUF", # ruff-specific
+    "N",   # pep8-naming
+    "ASYNC", # async-correctness
+    "PIE", # misc
+    "PL",  # pylint subset
+    "PT",  # pytest style
+    "TID", # tidy imports
+    "TCH", # type-checking imports
+]
+ignore = [
+    "PLR0913", # too many arguments — common in domain models
+    "PLR2004", # magic value in tests
+    "PLR0911", # too many returns — diff comparators need it
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["PLR2004", "S101", "ASYNC"]
+"src/pgschemadiff/domain/**" = ["ASYNC"]  # domain is pure-sync by design
+
+[tool.ruff.lint.isort]
+known-first-party = ["pgschemadiff"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+
+# ---------------------------------------------------------------------------
+# Mypy strict
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.13"
+strict = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+disallow_any_unimported = true
+disallow_any_generics = true
+disallow_subclassing_any = true
+disallow_untyped_calls = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+strict_equality = true
+extra_checks = true
+plugins = ["pydantic.mypy"]
+mypy_path = "src"
+namespace_packages = true
+explicit_package_bases = true
+files = ["src", "tests"]
+exclude = [
+    # Root-level Home prototype
+    "^app\\.py$",
+    "^home\\.py$",
+    "^profile\\.py$",
+    "^profile_detail\\.py$",
+    "^profile_item\\.py$",
+    "^yaml_loader\\.py$",
+    "^__main__\\.py$",
+    # Legacy prototype migrated into src/ via consolidation
+    "src/pgschemadiff/__main__\\.py$",
+    "src/pgschemadiff/presentation/app\\.py$",
+    "src/pgschemadiff/presentation/screens/",
+    "src/pgschemadiff/presentation/widgets/",
+    "src/pgschemadiff/domain/models/",
+    "src/pgschemadiff/infrastructure/config/",
+    # Duplicate legacy tests from exploration branches
+    "tests/test_domain_models\\.py$",
+    "tests/test_home_screen\\.py$",
+    "tests/test_models\\.py$",
+    "tests/test_profile\\.py$",
+    "tests/test_screens\\.py$",
+    "tests/test_yaml_loader\\.py$",
+    "tests/domain/",
+    "tests/infrastructure/",
+]
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+
+# ---------------------------------------------------------------------------
+# Pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--showlocals",
+    "--tb=short",
+    # Legacy prototype tests from consolidated exploration branches —
+    # canonical coverage lives under tests/unit/. Skip duplicates that
+    # depend on the unfinished ComparingScreen flow.
+    "--ignore=tests/test_screens.py",
+]
+asyncio_mode = "auto"
+markers = [
+    "unit: pure unit test, no IO",
+    "integration: requires postgres container",
+    "slow: takes more than 1 second",
+    "benchmark: performance benchmark",
+]
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning:testcontainers.*",
+]
+
+# ---------------------------------------------------------------------------
+# Coverage
+# ---------------------------------------------------------------------------
+[tool.coverage.run]
+source = ["src/pgschemadiff"]
+branch = true
+parallel = true
+omit = ["src/pgschemadiff/presentation/tui/*"]  # Phase 4, excluded for now
+
+[tool.coverage.report]
+precision = 1
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "@overload",
+    "@abstractmethod",
+]
+
+# ---------------------------------------------------------------------------
+# import-linter — enforce Clean Architecture layer boundaries
+# ---------------------------------------------------------------------------
+[tool.importlinter]
+root_packages = ["pgschemadiff"]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Layered architecture: domain < application < infrastructure < presentation"
+type = "layers"
+layers = [
+    "pgschemadiff.presentation",
+    "pgschemadiff.infrastructure",
+    "pgschemadiff.application",
+    "pgschemadiff.domain",
+]
+
+[[tool.importlinter.contracts]]
+name = "Domain layer is pure — no IO libs"
+type = "forbidden"
+source_modules = ["pgschemadiff.domain"]
+forbidden_modules = [
+    "psycopg",
+    "psycopg_pool",
+    "asyncio",
+    "anyio",
+    "textual",
+    "typer",
+    "click",
+]
+
+[[tool.importlinter.contracts]]
+name = "Application layer cannot import infrastructure"
+type = "forbidden"
+source_modules = ["pgschemadiff.application"]
+forbidden_modules = [
+    "pgschemadiff.infrastructure",
+    "pgschemadiff.presentation",
+    "psycopg",
+    "psycopg_pool",
+]
+
+[[tool.importlinter.contracts]]
+name = "Domain cannot import application or higher"
+type = "forbidden"
+source_modules = ["pgschemadiff.domain"]
+forbidden_modules = [
+    "pgschemadiff.application",
+    "pgschemadiff.infrastructure",
+    "pgschemadiff.presentation",
+]
+
+# ---------------------------------------------------------------------------
+# uv configuration
+# ---------------------------------------------------------------------------
+[tool.uv]
+required-version = ">=0.8"
+package = true
+
+[tool.uv.sources]
+# (none — all from PyPI)
