@@ -30,18 +30,23 @@ class ProfileDetail(Container):
                 yield Button("Test connection", id="btn-test")
 
     def on_mount(self) -> None:
-        self._render()
+        self._update_detail()
 
     def set_profile(self, profile: Profile | None) -> None:
         self._profile = profile
-        self._render()
+        self._update_detail()
 
-    def _render(self) -> None:
+    def _update_detail(self) -> None:
         title = self.query_one("#detail-title", Static)
         if self._profile is None:
             title.update("No profile selected")
-            for fid in ("field-source", "field-target", "field-schemas",
-                        "field-ignore", "field-mode"):
+            for fid in (
+                "field-source",
+                "field-target",
+                "field-schemas",
+                "field-ignore",
+                "field-mode",
+            ):
                 self.query_one(f"#{fid}", Static).update(" ")
             return
 
@@ -59,9 +64,5 @@ class ProfileDetail(Container):
             f"[#6c7086]schemas[/]  [#cdd6f4]{', '.join(p.schemas)}[/]"
         )
         ignore = ", ".join(p.ignore_patterns) if p.ignore_patterns else "(none)"
-        self.query_one("#field-ignore", Static).update(
-            f"[#6c7086]ignore [/]  [#cdd6f4]{ignore}[/]"
-        )
-        self.query_one("#field-mode", Static).update(
-            f"[#6c7086]mode   [/]  [#cdd6f4]{p.mode}[/]"
-        )
+        self.query_one("#field-ignore", Static).update(f"[#6c7086]ignore [/]  [#cdd6f4]{ignore}[/]")
+        self.query_one("#field-mode", Static).update(f"[#6c7086]mode   [/]  [#cdd6f4]{p.mode}[/]")

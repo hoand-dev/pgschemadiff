@@ -3,7 +3,7 @@ name = "pgschemadiff"
 version = "0.1.0"
 description = "PostgreSQL schema diff & migration tool with TUI"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 authors = [{ name = "Henrik" }]
 dependencies = [
     "textual>=0.83.0",
@@ -30,4 +30,22 @@ dev = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
     "textual-dev>=1.7.0",
+    "types-PyYAML>=6.0.0",
 ]
+
+[tool.ruff]
+src = ["src"]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = []
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
