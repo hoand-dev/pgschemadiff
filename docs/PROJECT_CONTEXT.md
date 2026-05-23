@@ -23,7 +23,9 @@ Last updated: **2026-05-23** — Phase 0 bootstrapped, awaiting CI green.
 
 ## Active task
 
-`P0-DOC-04` — author ADR-0001 through ADR-0012 (in progress in this session).
+`P1-DOM-01` — implement `domain/identity.py` (`QualifiedName`, `ObjectRef`, `ObjectKind`).
+
+Routed to: `backend-engineer` (see `.claude/agents/README.md` for the roster).
 
 ## Done in current session
 
@@ -88,6 +90,8 @@ See `docs/adr/` for the full set. Numbered list:
 1. `git pull origin claude/stoic-pascal-LOygS`
 2. Read this file (`docs/PROJECT_CONTEXT.md`)
 3. Read `docs/ROADMAP.md` for phase status
-4. Read `/root/.claude/plans/t-i-ang-thi-t-k-groovy-blum.md` (master plan)
-5. `git log --oneline -20` to confirm real progress vs. claimed
-6. Respond with: **Current State → Team Analysis → Next Best Action → Immediate Tasks**
+4. Read `docs/TASKS.md` for the task board (single source of truth in-repo)
+5. Read `.claude/agents/README.md` for the sub-agent roster + routing rules
+6. `git log --oneline -20` to confirm real progress vs. claimed
+7. Respond with: **Current State → Team Analysis → Next Best Action → Immediate Tasks**
+8. Dispatch the next `[ ]` task (whose deps are `[x]`) to the right sub-agent — usually `backend-engineer`
