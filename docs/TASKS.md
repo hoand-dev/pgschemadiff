@@ -39,7 +39,7 @@
 
 | Status | ID | Title | Owner | Pri | Deps | Cx |
 |---|---|---|---|---|---|---|
-| [ ] | P1-DOM-01 | `domain/identity.py` — QualifiedName, ObjectRef, ObjectKind | backend-engineer | P0 | P0-ARCH-01 | S |
+| [x] | P1-DOM-01 | `domain/identity.py` — QualifiedName, ObjectRef, ObjectKind | backend-engineer | P0 | P0-ARCH-01 | S |
 | [ ] | P1-DOM-02 | `domain/column.py` — Column + GeneratedColumn + IdentitySpec | backend-engineer | P0 | P1-DOM-01 | M |
 | [ ] | P1-DOM-03 | `domain/constraint.py` — discriminated union (PK/Unique/Check/FK/Exclusion) | backend-engineer | P0 | P1-DOM-01 | M |
 | [ ] | P1-DOM-04 | `domain/table.py` — Table aggregate (cols, constraints, partition) | backend-engineer | P0 | P1-DOM-02, P1-DOM-03 | M |

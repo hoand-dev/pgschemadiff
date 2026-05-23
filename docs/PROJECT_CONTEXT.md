@@ -23,9 +23,10 @@ Last updated: **2026-05-23** — Phase 0 bootstrapped, awaiting CI green.
 
 ## Active task
 
-`P1-DOM-01` — implement `domain/identity.py` (`QualifiedName`, `ObjectRef`, `ObjectKind`).
+`P1-DOM-02` — `domain/column.py` (Column + GeneratedColumn + IdentitySpec).
 
-Routed to: `backend-engineer` (see `.claude/agents/README.md` for the roster).
+Routed to: `backend-engineer`. Parallel-ready siblings (after P1-DOM-01):
+`P1-DOM-03`, `P1-DOM-05`, `P1-DOM-06`.
 
 ## Done in current session
 
@@ -45,6 +46,7 @@ Routed to: `backend-engineer` (see `.claude/agents/README.md` for the roster).
 - `P0-DOC-02` — `docs/ROADMAP.md`
 - `P0-DOC-03` — `docs/adr/0000-template.md`
 - `P0-QUAL-01` — smoke tests passing (5/5)
+- `P1-DOM-01` — `domain/identity.py` with QualifiedName / ObjectRef / ObjectKind; 29 unit tests, domain coverage 100%. Note: field renamed `schema` → `namespace` to avoid `BaseModel.schema` shadow (rationale in module docstring).
 
 ## Blockers
 
