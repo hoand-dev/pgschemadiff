@@ -1,0 +1,130 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.13"
+
+jobs:
+  lint:
+    name: Lint & Format (ruff)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+      - name: Sync deps
+        run: uv sync --extra dev
+      - name: ruff check
+        run: uv run ruff check .
+      - name: ruff format --check
+        run: uv run ruff format --check .
+
+  typecheck:
+    name: Type-check (mypy strict)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - run: uv python install ${{ env.PYTHON_VERSION }}
+      - run: uv sync --extra dev
+      - run: uv run mypy src/ tests/
+
+  architecture:
+    name: Architecture (import-linter)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - run: uv python install ${{ env.PYTHON_VERSION }}
+      - run: uv sync --extra dev
+      - run: uv run lint-imports
+
+  unit-test:
+    name: Unit tests (Python 3.13)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - run: uv python install ${{ env.PYTHON_VERSION }}
+      - run: uv sync --extra dev
+      - name: pytest (unit)
+        run: |
+          uv run pytest tests/unit \
+            --cov=pgschemadiff \
+            --cov-branch \
+            --cov-report=xml \
+            --cov-report=term-missing
+      - name: Upload coverage
+        if: matrix.os == 'ubuntu-24.04'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-unit
+          path: coverage.xml
+          retention-days: 7
+
+  integration-test:
+    name: Integration tests (PostgreSQL 18)
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: pgsd_test
+          POSTGRES_USER: pgsd_test
+          POSTGRES_DB: pgsd_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pgsd_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PGSD_TEST_DSN: postgresql://pgsd_test:pgsd_test@localhost:5432/pgsd_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - run: uv python install ${{ env.PYTHON_VERSION }}
+      - run: uv sync --extra dev
+      - name: Wait for postgres
+        run: |
+          for i in {1..30}; do
+            if pg_isready -h localhost -p 5432 -U pgsd_test; then exit 0; fi
+            sleep 1
+          done
+          exit 1
+      - name: pytest (integration)
+        run: |
+          uv run pytest tests/integration \
+            -v \
+            --cov=pgschemadiff \
+            --cov-branch \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            || (echo "No integration tests yet — Phase 0 is unit-only." && exit 0)
