@@ -1,82 +1,96 @@
-# pgschemadiff — Home screen prototype
+# pgschemadiff
 
-Prototype màn hình Home cho công cụ PostgreSQL schema diff & migration. Đây là bước đầu trong roadmap kiến trúc — chỉ có Home screen, các màn hình khác (Comparing / Diff explorer / SQL preview) chưa được implement.
+> Compare PostgreSQL schemas, generate safe migrations, with an interactive TUI and a scriptable CLI.
 
-## Cấu trúc
+**Status:** Pre-alpha. Phase 0 baseline + first slice of Phase 1 (domain identity) + Phase 4 TUI shell. See [`docs/ROADMAP.md`](docs/ROADMAP.md) and [`docs/PROJECT_CONTEXT.md`](docs/PROJECT_CONTEXT.md).
 
-```
-pgschemadiff/
-├── pyproject.toml                       uv project, target Python 3.13
-├── config/
-│   └── profiles.yaml                    4 profile mẫu để demo
-└── src/pgschemadiff/
-    ├── __main__.py                      entry: python -m pgschemadiff
-    ├── domain/models/
-    │   └── profile.py                   Profile, ConnectionInfo (Pydantic frozen)
-    ├── infrastructure/config/
-    │   └── yaml_loader.py               load/save YAML
-    └── presentation/
-        ├── app.py                       Textual App
-        ├── styles.tcss                  Catppuccin Mocha theme
-        ├── screens/
-        │   └── home.py                  HomeScreen — màn hình chính
-        └── widgets/
-            ├── profile_item.py          ListItem 2 dòng cho ListView
-            ├── profile_detail.py        (unused — đã inline vào HomeScreen)
-            └── confirm_dialog.py        Modal confirm dialog
-```
+## What it does
 
-## Chạy thử
+- Connect to two PostgreSQL 18 databases (or one DB and a target schema file)
+- Introspect schemas via `pg_catalog` (async, consistent snapshot)
+- Diff every object kind: tables, columns, indexes, constraints, foreign keys, views, materialized views, functions, procedures, sequences, enums, triggers, RLS policies, composite/domain types, extensions
+- Classify each change by risk: `SAFE` / `WARNING` / `DANGEROUS` / `DESTRUCTIVE` / `BLOCKED`
+- Generate ordered migration SQL (topologically sorted; non-transactional units split out)
+- Apply migrations with per-unit transaction semantics and lock-timeout safety
+- Drive everything from a Textual TUI or a `pgsd` CLI
 
-Trên Ubuntu 26.04 với Python 3.13:
+## Quickstart
+
+> The project is still being bootstrapped. The commands below describe the intended UX once Phase 1+ ships.
 
 ```bash
-# Cài uv nếu chưa có
-curl -LsSf https://astral.sh/uv/install.sh | sh
+# install (Phase 5)
+uv tool install pgschemadiff
 
-# Sync deps + chạy
-cd pgschemadiff_proto
-uv sync
-uv run python -m pgschemadiff
+# launch the TUI
+pgsd                  # or: pgsd tui
+
+# inspect a schema (Phase 1)
+pgsd inspect postgresql://user:pass@host:5432/db > snapshot.json
+
+# diff two databases (Phase 2)
+pgsd diff postgresql://user:pass@host/src postgresql://user:pass@host/tgt
+
+# generate a migration (Phase 3)
+pgsd generate \
+  --source postgresql://.../src \
+  --target postgresql://.../tgt \
+  --output ./migrations/
+
+# apply (Phase 3)
+pgsd apply ./migrations/20260523_120000_diff/
 ```
 
-Hoặc dùng pip:
+## Development
 
 ```bash
-pip install textual pydantic pyyaml
-PYTHONPATH=src python -m pgschemadiff
+# requires Python 3.13 and uv 0.8+
+uv sync --extra dev
+
+# run the test suite
+uv run pytest
+
+# lint + format
+uv run ruff check .
+uv run ruff format .
+
+# type-check
+uv run mypy src/
+
+# architecture enforcement
+uv run lint-imports
+
+# launch the TUI
+uv run pgsd tui
 ```
 
-## Key bindings
+## Architecture
 
-| Phím | Hành động |
-|---|---|
-| `↑ ↓` | Navigate profile list (detail panel update real-time) |
-| `enter` | Compare (hiện tại chỉ show notification) |
-| `n` | New profile (chưa wired) |
-| `e` | Edit profile (chưa wired) |
-| `d` | Delete profile (mở modal confirm — đã wired) |
-| `?` | Help notification |
-| `q` | Quit |
+Clean Architecture, 4 layers, enforced by `import-linter`:
 
-## Những gì đã hoạt động (verified bằng Textual Pilot)
+```
+presentation/   ← Textual TUI, typer CLI
+infrastructure/ ← psycopg async, pg_catalog queries, file IO
+application/    ← use cases: CompareSchemas, GenerateMigration, ApplyMigration
+domain/         ← pure Pydantic models, no IO
+```
 
-- App khởi động, load 4 profile từ YAML
-- Navigate ↑↓ trong list, detail panel update real-time
-- Bấm `d` mở modal `ConfirmDialog`, bấm `Delete` thật sự xóa khỏi list
-- Bấm `esc` hoặc `Cancel` đóng modal về lại home
-- Footer hiển thị key bindings tự động từ `BINDINGS`
+See [`docs/architecture.md`](docs/architecture.md) and [`docs/adr/`](docs/adr/) for the decision log.
 
-## Bước tiếp theo trong roadmap
+## Home screen prototype (legacy)
 
-1. `screens/comparing.py` — màn hình loading với Worker async + ProgressBar
-2. `screens/diff_explorer.py` — Tree widget cho diff, 3 cột
-3. `screens/sql_preview.py` — RichLog với syntax highlight SQL
-4. `infrastructure/postgres/inspector.py` — query pg_catalog thật
-5. `domain/diff/comparator.py` — diff logic
-6. `domain/migration/generator.py` — sinh SQL migration
+A standalone Home-screen prototype lives at the **repository root** (`app.py`, `home.py`, `profile.py`, `profile_detail.py`, `profile_item.py`, `yaml_loader.py`, `__main__.py`, `styles.tcss`, `profiles.yaml`). It pre-dates the Clean Architecture refactor and is preserved as a reference for the Connection-screen behaviour the user designed.
 
-## Lưu ý kỹ thuật
+Run it directly:
 
-- Textual 8.2.7 có bug khi extend `Vertical`/`Container` với compose phức tạp — workaround là inline compose vào Screen thay vì tạo widget class riêng. Ghi nhớ điều này khi build các màn hình sau.
-- `psycopg[binary,pool]` đã được liệt kê trong `pyproject.toml` nhưng chưa dùng vì màn hình này chưa kết nối DB. Sẽ active khi implement `screens/comparing.py`.
+```bash
+PYTHONPATH=. python -m pgschemadiff           # uses the root-level __main__.py
+# or
+python app.py
+```
+
+It is **not** wired into the `pgsd` CLI. The Phase 4 task `P4-TUI-02 (ConnectionView)` will integrate its `Profile` / `ConnectionInfo` data model and the `profiles.yaml` loader into `src/pgschemadiff/{domain,infrastructure,presentation}/`. Until then the two trees coexist; new development goes under `src/pgschemadiff/`.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
