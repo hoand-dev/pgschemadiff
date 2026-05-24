@@ -27,7 +27,25 @@ packages = ["src/pgschemadiff"]
 dev = [
     "ruff>=0.7.0",
     "mypy>=1.13.0",
+    "types-PyYAML>=6.0.12",
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
     "textual-dev>=1.7.0",
 ]
+
+[tool.ruff]
+src = ["src"]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+mypy_path = "src"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
