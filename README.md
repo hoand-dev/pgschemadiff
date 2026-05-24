@@ -1,6 +1,6 @@
-# pgschemadiff — Home screen prototype
+# pgschemadiff — Home + Comparing screens
 
-Prototype màn hình Home cho công cụ PostgreSQL schema diff & migration. Đây là bước đầu trong roadmap kiến trúc — chỉ có Home screen, các màn hình khác (Comparing / Diff explorer / SQL preview) chưa được implement.
+Prototype các màn hình Home và Comparing cho công cụ PostgreSQL schema diff & migration. Home screen đầy đủ, Comparing screen có Worker async + ProgressBar (mock). Các màn hình Diff explorer / SQL preview chưa được implement.
 
 ## Cấu trúc
 
@@ -24,6 +24,9 @@ pgschemadiff/
             ├── profile_item.py          ListItem 2 dòng cho ListView
             ├── profile_detail.py        (unused — đã inline vào HomeScreen)
             └── confirm_dialog.py        Modal confirm dialog
+        └── screens/
+            ├── home.py                  HomeScreen — màn hình chính
+            └── comparing.py             ComparingScreen — Worker async + ProgressBar
 ```
 
 ## Chạy thử
@@ -52,7 +55,7 @@ PYTHONPATH=src python -m pgschemadiff
 | Phím | Hành động |
 |---|---|
 | `↑ ↓` | Navigate profile list (detail panel update real-time) |
-| `enter` | Compare (hiện tại chỉ show notification) |
+| `enter` | Compare (mở ComparingScreen với Worker async) |
 | `n` | New profile (chưa wired) |
 | `e` | Edit profile (chưa wired) |
 | `d` | Delete profile (mở modal confirm — đã wired) |
@@ -66,10 +69,11 @@ PYTHONPATH=src python -m pgschemadiff
 - Bấm `d` mở modal `ConfirmDialog`, bấm `Delete` thật sự xóa khỏi list
 - Bấm `esc` hoặc `Cancel` đóng modal về lại home
 - Footer hiển thị key bindings tự động từ `BINDINGS`
+- Bấm `enter` mở `ComparingScreen` với Worker async, ProgressBar tiến độ theo từng bước, RichLog hiển thị log, `esc` để quay lại Home
 
 ## Bước tiếp theo trong roadmap
 
-1. `screens/comparing.py` — màn hình loading với Worker async + ProgressBar
+1. ~~`screens/comparing.py`~~ — **Done** (mock Worker, ProgressBar, RichLog)
 2. `screens/diff_explorer.py` — Tree widget cho diff, 3 cột
 3. `screens/sql_preview.py` — RichLog với syntax highlight SQL
 4. `infrastructure/postgres/inspector.py` — query pg_catalog thật
