@@ -1,0 +1,68 @@
+profiles:
+  - name: dev → staging
+    source:
+      host: localhost
+      port: 5432
+      database: app_dev
+      user: henrik
+      password: ""
+    target:
+      host: staging.db.local
+      port: 5432
+      database: app
+      user: app
+      password: ""
+    schemas: [public, billing, audit]
+    ignore_patterns: ["temp_*", "_migrations"]
+    mode: schema-only
+
+  - name: staging → prod
+    source:
+      host: staging.db.local
+      port: 5432
+      database: app
+      user: app
+      password: ""
+    target:
+      host: prod.db.local
+      port: 5432
+      database: app
+      user: readonly
+      password: ""
+    schemas: [public, billing]
+    ignore_patterns: []
+    mode: schema-only
+
+  - name: feature-x branch
+    source:
+      host: localhost
+      port: 5432
+      database: app_dev
+      user: henrik
+      password: ""
+    target:
+      host: localhost
+      port: 5433
+      database: app_dev
+      user: henrik
+      password: ""
+    schemas: [public]
+    ignore_patterns: []
+    mode: schema-only
+
+  - name: CI baseline
+    source:
+      host: localhost
+      port: 5432
+      database: app_baseline
+      user: ci
+      password: ""
+    target:
+      host: localhost
+      port: 5432
+      database: app_current
+      user: ci
+      password: ""
+    schemas: [public, audit]
+    ignore_patterns: ["pg_temp_*"]
+    mode: schema-only
