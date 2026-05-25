@@ -108,12 +108,19 @@
 | [ ] | P3-MVPB-09 | Composite types | backend-engineer | P1 | P3-CLI-01 | M |
 | [ ] | P3-MVPB-10 | Domain types | backend-engineer | P1 | P3-CLI-01 | M |
 
-## Phase 4 — TUI (BLOCKED on UI design)
+## Phase 4 — TUI
 
 | Status | ID | Title | Owner | Pri | Deps | Cx |
 |---|---|---|---|---|---|---|
-| [ ] | P4-UX-01 | Import user UI design → `docs/ui-design.md` | tui-engineer | P0 | user input | — |
-| [ ] | P4-TUI-XX | Screen implementation per design | tui-engineer | P0 | P4-UX-01, P3-CLI-01 | XL |
+| [x] | P4-UX-01 | Import user UI design → `docs/ui-design.md` (+ bundle in `docs/ui-design/reference/`) | tui-engineer | P0 | user input | S |
+| [x] | P4-TUI-01 | TUI app shell — Catppuccin theme, vim chord dispatcher, command palette, help modal, 7 placeholder views, `pgsd tui` entry | tui-engineer | P0 | P4-UX-01 | L |
+| [ ] | P4-TUI-02 | ConnectionView wired to real source/target profiles | tui-engineer | P1 | P1-INFRA-05 | M |
+| [ ] | P4-TUI-03 | OverviewView wired to `application/diff` | tui-engineer | P1 | P2-DIFF-01 | M |
+| [ ] | P4-TUI-04 | DiffView (side / inline / tree modes) | tui-engineer | P1 | P2-DIFF-02 | L |
+| [ ] | P4-TUI-05 | MigrationView wired to `application/sql_emit` | tui-engineer | P1 | P3-OUT-01 | M |
+| [ ] | P4-TUI-06 | ApplyView with progress worker + log stream | tui-engineer | P1 | P3-APPLY-01 | L |
+| [ ] | P4-TUI-07 | HistoryView reading the migration manifest store | tui-engineer | P1 | P3-OUT-01 | M |
+| [ ] | P4-TUI-08 | SettingsView with live config.toml preview | tui-engineer | P2 | P4-TUI-01 | M |
 
 ## Phase 5 — Production readiness
 
