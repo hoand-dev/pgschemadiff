@@ -23,10 +23,11 @@ Last updated: **2026-05-23** — Phase 0 bootstrapped, awaiting CI green.
 
 ## Active task
 
-`P1-DOM-02` — `domain/column.py` (Column + GeneratedColumn + IdentitySpec).
+Backend track: `P1-DOM-02` (Column model) — backend-engineer, parallel-ready
+siblings `P1-DOM-03/05/06`.
 
-Routed to: `backend-engineer`. Parallel-ready siblings (after P1-DOM-01):
-`P1-DOM-03`, `P1-DOM-05`, `P1-DOM-06`.
+TUI track unblocked at the shell level by `P4-TUI-01`. Remaining
+`P4-TUI-02..08` are blocked on the Phase 1-3 data they each consume.
 
 ## Done in current session
 
@@ -47,6 +48,8 @@ Routed to: `backend-engineer`. Parallel-ready siblings (after P1-DOM-01):
 - `P0-DOC-03` — `docs/adr/0000-template.md`
 - `P0-QUAL-01` — smoke tests passing (5/5)
 - `P1-DOM-01` — `domain/identity.py` with QualifiedName / ObjectRef / ObjectKind; 29 unit tests, domain coverage 100%. Note: field renamed `schema` → `namespace` to avoid `BaseModel.schema` shadow (rationale in module docstring).
+- `P4-UX-01` — imported the user's claude.ai/design bundle into `docs/ui-design/reference/`; authored `docs/ui-design.md` as the Textual implementation contract (layout, theme tokens, vim bindings, screen specs).
+- `P4-TUI-01` — TUI app shell: `PgsdApp` (`presentation/tui/app.py`), Catppuccin Mocha ↔ Latte switching, vim chord dispatcher (`gc/go/gd/gm/ga/gh/gs`, `gT`, `ZZ`), vim `:` command palette with stub parser, `?` help modal, 7 placeholder views, `pgsd tui` CLI command (also `pgsd` with no sub-command). 8 Pilot-driven unit tests passing.
 
 ## Blockers
 
