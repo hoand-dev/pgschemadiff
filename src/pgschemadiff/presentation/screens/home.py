@@ -13,7 +13,7 @@ from pgschemadiff.presentation.widgets.confirm_dialog import ConfirmDialog
 from pgschemadiff.presentation.widgets.profile_item import ProfileListItem
 
 
-class HomeScreen(Screen):
+class HomeScreen(Screen[None]):
     """Home: pick profile để compare."""
 
     BINDINGS = [

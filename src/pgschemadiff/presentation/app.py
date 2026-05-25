@@ -10,7 +10,7 @@ from pgschemadiff.infrastructure.config.yaml_loader import ProfileLoader
 from pgschemadiff.presentation.screens.home import HomeScreen
 
 
-class PgSchemaDiffApp(App):
+class PgSchemaDiffApp(App[None]):
     """Main TUI application."""
 
     CSS_PATH = "styles.tcss"
