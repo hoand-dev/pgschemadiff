@@ -30,13 +30,13 @@ class ProfileDetail(Container):
                 yield Button("Test connection", id="btn-test")
 
     def on_mount(self) -> None:
-        self._render()
+        self._update_display()
 
     def set_profile(self, profile: Profile | None) -> None:
         self._profile = profile
-        self._render()
+        self._update_display()
 
-    def _render(self) -> None:
+    def _update_display(self) -> None:
         title = self.query_one("#detail-title", Static)
         if self._profile is None:
             title.update("No profile selected")
