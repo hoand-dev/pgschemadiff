@@ -40,8 +40,13 @@ class ProfileDetail(Container):
         title = self.query_one("#detail-title", Static)
         if self._profile is None:
             title.update("No profile selected")
-            for fid in ("field-source", "field-target", "field-schemas",
-                        "field-ignore", "field-mode"):
+            for fid in (
+                "field-source",
+                "field-target",
+                "field-schemas",
+                "field-ignore",
+                "field-mode",
+            ):
                 self.query_one(f"#{fid}", Static).update(" ")
             return
 

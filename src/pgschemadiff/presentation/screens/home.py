@@ -65,8 +65,13 @@ class HomeScreen(Screen):
         title = self.query_one("#detail-title", Static)
         if profile is None:
             title.update("No profile selected")
-            for fid in ("field-source", "field-target", "field-schemas",
-                        "field-ignore", "field-mode"):
+            for fid in (
+                "field-source",
+                "field-target",
+                "field-schemas",
+                "field-ignore",
+                "field-mode",
+            ):
                 self.query_one(f"#{fid}", Static).update(" ")
             return
 
@@ -82,7 +87,9 @@ class HomeScreen(Screen):
         self.query_one("#field-schemas", Static).update(
             f"[#6c7086]schemas[/]  [#cdd6f4]{', '.join(profile.schemas)}[/]"
         )
-        ignore = ", ".join(profile.ignore_patterns) if profile.ignore_patterns else "(none)"
+        ignore = (
+            ", ".join(profile.ignore_patterns) if profile.ignore_patterns else "(none)"
+        )
         self.query_one("#field-ignore", Static).update(
             f"[#6c7086]ignore [/]  [#cdd6f4]{ignore}[/]"
         )
@@ -144,7 +151,10 @@ class HomeScreen(Screen):
         self.app.push_screen(
             ConfirmDialog(
                 title="Delete profile?",
-                body=f"This will permanently delete '{profile.name}'.\nThis action cannot be undone.",
+                body=(
+                    f"This will permanently delete '{profile.name}'."
+                    "\nThis action cannot be undone."
+                ),
             ),
             on_confirm,
         )
