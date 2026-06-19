@@ -109,6 +109,14 @@ Set the gating task(s) to `needs-human`/`blocked`. Surface the full list at the 
 - **`review-fix` tasks are not re-reviewed by the find-new-commits trigger** (§3) — they are reviewed once on completion, then the PR is marked review-complete. This closes the infinite review loop.
 - **Merge is a human gate.** When a PR has: CI green + reviewer approved + zero open `review-fix` → write it to `## Ready To Merge` in `AI_STATE.md` and escalate as a (non-blocking) `NEEDS_HUMAN` "ready to merge" note. A human (or an explicitly human-approved auto-merge gate) performs the merge. Orchestrator does **not** auto-merge.
 
+## 7.1 LINEAR HISTORY (required)
+History on `main` must stay linear — no merge commits, no diverging bubbles.
+- **Branch from latest `main`.** Before starting work and before opening a PR, `git fetch origin` then **rebase** the working branch onto `origin/main`. Never `git merge main` into a branch.
+- **Resolve drift by rebase.** If `main` advanced while a branch was in flight, `git rebase origin/main` and re-run validation. Never create a merge commit to "catch up".
+- **Merge mode = squash or rebase only.** PRs land via `gh pr merge --squash` (preferred — one clean commit per task) or `--rebase`. **Never `--merge` (no-ff merge commits).**
+- **Force-push after rebase** uses `git push --force-with-lease` on the **working branch only** — never on `main` or any shared branch. Force-pushing a shared branch is a §5 escalation.
+- **Recommended repo setting** (one-time human action): GitHub branch protection → disallow merge commits, allow squash/rebase only, require linear history. Record as a `NEEDS_HUMAN` note if not yet enabled.
+
 ---
 
 # 8. SUB-AGENTS (you spawn these; each single-purpose)
@@ -155,6 +163,7 @@ The role names above are logical. When dispatching, call the `Agent` tool with t
 
 # 9. GLOBAL GUARDRAILS (orchestrator + every sub-agent)
 - **Never merge to main.** All work lands on working branches via PR.
+- **Linear history only** (§7.1): rebase onto `main`, never merge `main` into a branch; PRs land squash/rebase, never no-ff. Never force-push a shared branch.
 - **Never skip, disable, or delete tests/validation** to make checks pass.
 - **No commit touching code** without passing tests, build, and lint. (Doc-only commits: exempt from tests, still must not break build/lint.)
 - **Gate binding:** the test/build/lint gate binds `developer`, `ci-recovery`, and code-touching `maintainer` work. `planner` and `reviewer` produce no code and are exempt.
