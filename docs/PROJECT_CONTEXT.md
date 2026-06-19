@@ -23,9 +23,9 @@ Last updated: **2026-06-19** — P1-TEST-01 complete: session-scoped pg18 contai
 
 ## Active task
 
-Backend track: `P1-INFRA-05` (`PgCatalogInspector` for MVP-A). P1-INFRA-01..04
-are complete. The full domain model layer (`P1-DOM-02..09`) is now complete, so
-`P1-DOM-08` ports are available for `P1-INFRA-05`.
+Backend track: `P1-INFRA-06` (Type normalizer). P1-INFRA-05 is now complete.
+The `PgCatalogInspector` maps pg_catalog rows to domain objects using a single
+REPEATABLE READ transaction per ADR-0012 MVP.
 
 TUI track unblocked at the shell level by `P4-TUI-01`. Remaining
 `P4-TUI-02..08` are blocked on the Phase 1-3 data they each consume.
@@ -39,6 +39,7 @@ TUI track unblocked at the shell level by `P4-TUI-01`. Remaining
 - `P1-INFRA-03` — `catalog/indexes.sql` + `catalog/constraints.sql`: pg_catalog queries for all indexes (btree/hash/gist/gin/brin/exclusion/PK) and constraints (PK/unique/check/FK/exclusion).
 - `P1-INFRA-04` — `catalog/extensions.sql` + `catalog/schemas.sql`: pg_available_extensions and pg_namespace queries.
 - All SQL files loaded via `importlib.resources`; 60 new tests (46 structural + 6 snapshot + 14 pool); all 328 tests pass.
+- `P1-INFRA-05` — `infrastructure/postgres/inspector.py`: `PgCatalogInspector` concrete `SchemaInspector` implementation. Single REPEATABLE READ transaction per ADR-0012 MVP. Loads all 6 SQL files via `importlib.resources`. Maps schemas, tables, columns (identity/generated/default), indexes (btree/hash/gist/gin/brin/spgist, expression columns, sort/nulls), constraints (PK/Unique/Check/FK/Exclusion), extensions to domain objects. Schema filter support. 64 new unit tests with mocked psycopg connections; all 347 tests pass.
 
 - `P0-ENV-01` — `pyproject.toml` PEP 621 with all runtime + dev deps
 - `P0-ENV-02` — `uv.lock` generated; `.python-version` set to 3.13

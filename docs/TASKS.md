@@ -52,7 +52,7 @@
 | [x] | P1-INFRA-02 | `catalog/tables.sql` + `columns.sql` | backend-engineer | P0 | — | M |
 | [x] | P1-INFRA-03 | `catalog/indexes.sql` + `constraints.sql` | backend-engineer | P0 | — | M |
 | [x] | P1-INFRA-04 | `catalog/extensions.sql` + schemas | backend-engineer | P0 | — | S |
-| [ ] | P1-INFRA-05 | `PgCatalogInspector` for MVP-A | backend-engineer | P0 | P1-INFRA-01..04, P1-DOM-08 | XL |
+| [x] | P1-INFRA-05 | `PgCatalogInspector` for MVP-A | backend-engineer | P0 | P1-INFRA-01..04, P1-DOM-08 | XL |
 | [ ] | P1-INFRA-06 | Type normalizer | backend-engineer | P0 | P1-INFRA-05 | M |
 | [ ] | P1-INFRA-07 | Multi-connection `pg_export_snapshot` (deferred) | backend-engineer | P2 | P1-INFRA-05 | M |
 | [x] | P1-TEST-01 | Session-scoped pg18 container fixture | qa-engineer | P0 | P0-CI-02 | M |
