@@ -4,7 +4,7 @@
 > changes the phase status, finishes a milestone, or adds an ADR. Read me at
 > the start of every chat session.
 
-Last updated: **2026-05-23** — Phase 0 bootstrapped, awaiting CI green.
+Last updated: **2026-06-01** — Phase 1 domain layer complete (P1-DOM-02..09).
 
 ---
 
@@ -23,8 +23,10 @@ Last updated: **2026-05-23** — Phase 0 bootstrapped, awaiting CI green.
 
 ## Active task
 
-Backend track: `P1-DOM-02` (Column model) — backend-engineer, parallel-ready
-siblings `P1-DOM-03/05/06`.
+Backend track: `P1-INFRA-01` (`infrastructure/postgres/pool.py` —
+AsyncConnectionPool wrapper). Catalog-SQL drafts `P1-INFRA-02/03/04` are
+parallel-ready (batch B2). The full domain model layer (`P1-DOM-02..09`) is
+now complete, so `P1-DOM-08` ports are available for `P1-INFRA-05`.
 
 TUI track unblocked at the shell level by `P4-TUI-01`. Remaining
 `P4-TUI-02..08` are blocked on the Phase 1-3 data they each consume.
@@ -48,6 +50,7 @@ TUI track unblocked at the shell level by `P4-TUI-01`. Remaining
 - `P0-DOC-03` — `docs/adr/0000-template.md`
 - `P0-QUAL-01` — smoke tests passing (5/5)
 - `P1-DOM-01` — `domain/identity.py` with QualifiedName / ObjectRef / ObjectKind; 29 unit tests, domain coverage 100%. Note: field renamed `schema` → `namespace` to avoid `BaseModel.schema` shadow (rationale in module docstring).
+- `P1-DOM-02..09` — full domain model layer: `column.py` (Column / IdentitySpec / generated cols), `constraint.py` (Pydantic discriminated union over PK / Unique / Check / FK / Exclusion, `kind` discriminator), `table.py` (Table aggregate + partition info, column-name + constraint-reference validation), `index.py` (Index + key columns / opclass / INCLUDE / predicate), `schema.py` + `extension.py`, `database.py` (top-level aggregate with ObjectRef/QualifiedName lookup helpers), `ports.py` (`SchemaInspector` / `MigrationWriter` runtime-checkable Protocols; `Database` import under `TYPE_CHECKING` to keep domain pure). 181 new unit tests (268 total). Domain re-exported from `domain/__init__.py`. `pyproject.toml`: domain per-file-ignore extended with `TC001-TC003` (Pydantic needs field-type imports at runtime).
 - `P4-UX-01` — imported the user's claude.ai/design bundle into `docs/ui-design/reference/`; authored `docs/ui-design.md` as the Textual implementation contract (layout, theme tokens, vim bindings, screen specs).
 - `P4-TUI-01` — TUI app shell: `PgsdApp` (`presentation/tui/app.py`), Catppuccin Mocha ↔ Latte switching, vim chord dispatcher (`gc/go/gd/gm/ga/gh/gs`, `gT`, `ZZ`), vim `:` command palette with stub parser, `?` help modal, 7 placeholder views, `pgsd tui` CLI command (also `pgsd` with no sub-command). 8 Pilot-driven unit tests passing.
 
