@@ -49,6 +49,15 @@ from pgschemadiff.shared.errors import InspectionError
 if TYPE_CHECKING:
     from pgschemadiff.infrastructure.postgres.pool import Pool
 
+# Type alias for the concrete constraint union
+_AnyConstraint = (
+    PrimaryKeyConstraint
+    | UniqueConstraint
+    | CheckConstraint
+    | ForeignKeyConstraint
+    | ExclusionConstraint
+)
+
 # ---------------------------------------------------------------------------
 # SQL loading — done once at module import
 # ---------------------------------------------------------------------------
@@ -77,7 +86,6 @@ _SQL_EXTENSIONS: str = _load_sql("extensions.sql")
 _RE_COL_LIST = re.compile(r"\(([^)]+)\)")
 
 # Matches "FOREIGN KEY (local_col) REFERENCES schema.table (ref_col)"
-# or "FOREIGN KEY (a, b) REFERENCES schema.table (c, d)"
 _RE_FK = re.compile(
     r"FOREIGN KEY\s*\(([^)]+)\)\s*REFERENCES\s+(\S+)\s*\(([^)]+)\)",
     re.IGNORECASE,
@@ -85,10 +93,12 @@ _RE_FK = re.compile(
 
 # Match ON DELETE / ON UPDATE actions
 _RE_ON_DELETE = re.compile(
-    r"ON DELETE (CASCADE|RESTRICT|SET NULL|SET DEFAULT|NO ACTION)", re.IGNORECASE
+    r"ON DELETE (CASCADE|RESTRICT|SET NULL|SET DEFAULT|NO ACTION)",
+    re.IGNORECASE,
 )
 _RE_ON_UPDATE = re.compile(
-    r"ON UPDATE (CASCADE|RESTRICT|SET NULL|SET DEFAULT|NO ACTION)", re.IGNORECASE
+    r"ON UPDATE (CASCADE|RESTRICT|SET NULL|SET DEFAULT|NO ACTION)",
+    re.IGNORECASE,
 )
 
 # Match MATCH clause
@@ -120,26 +130,24 @@ def _parse_columns_from_definition(definition: str) -> tuple[str, ...]:
 
 def _map_fk_action(text: str) -> FKAction:
     """Map pg_get_constraintdef action text to an :class:`FKAction`."""
-    upper = text.upper()
-    if upper == "CASCADE":
-        return FKAction.CASCADE
-    if upper == "RESTRICT":
-        return FKAction.RESTRICT
-    if upper == "SET NULL":
-        return FKAction.SET_NULL
-    if upper == "SET DEFAULT":
-        return FKAction.SET_DEFAULT
-    return FKAction.NO_ACTION
+    _lookup: dict[str, FKAction] = {
+        "CASCADE": FKAction.CASCADE,
+        "RESTRICT": FKAction.RESTRICT,
+        "SET NULL": FKAction.SET_NULL,
+        "SET DEFAULT": FKAction.SET_DEFAULT,
+        "NO ACTION": FKAction.NO_ACTION,
+    }
+    return _lookup.get(text.upper(), FKAction.NO_ACTION)
 
 
 def _map_fk_match(text: str) -> FKMatch:
     """Map MATCH clause text to an :class:`FKMatch`."""
-    upper = text.upper()
-    if upper == "FULL":
-        return FKMatch.FULL
-    if upper == "PARTIAL":
-        return FKMatch.PARTIAL
-    return FKMatch.SIMPLE
+    _lookup: dict[str, FKMatch] = {
+        "FULL": FKMatch.FULL,
+        "PARTIAL": FKMatch.PARTIAL,
+        "SIMPLE": FKMatch.SIMPLE,
+    }
+    return _lookup.get(text.upper(), FKMatch.SIMPLE)
 
 
 def _map_deferrability(deferrable: bool, initially_deferred: bool) -> ConstraintDeferrability:
@@ -153,11 +161,12 @@ def _map_deferrability(deferrable: bool, initially_deferred: bool) -> Constraint
 
 def _map_partition_strategy(code: str) -> PartitionStrategy:
     """Map single-character partition strategy code to enum."""
-    if code == "h":
-        return PartitionStrategy.HASH
-    if code == "l":
-        return PartitionStrategy.LIST
-    return PartitionStrategy.RANGE
+    _lookup: dict[str, PartitionStrategy] = {
+        "h": PartitionStrategy.HASH,
+        "l": PartitionStrategy.LIST,
+        "r": PartitionStrategy.RANGE,
+    }
+    return _lookup.get(code, PartitionStrategy.RANGE)
 
 
 def _map_index_method(name: str) -> IndexMethod:
@@ -168,38 +177,12 @@ def _map_index_method(name: str) -> IndexMethod:
         return IndexMethod.BTREE
 
 
-def _parse_index_key_columns(index_definition: str) -> tuple[IndexKeyColumn, ...]:  # noqa: PLR0912
-    """Extract key column entries from a full ``CREATE INDEX`` definition string.
-
-    This is a best-effort MVP parser.  It finds the column list between the
-    outermost parentheses of the index definition and splits on commas.  For
-    each entry it tries to detect expression columns (those wrapped in parens)
-    versus plain column names.  Sort order and ``NULLS`` clauses are parsed if
-    present; opclass names are captured as a trailing token before any
-    ``ASC``/``DESC`` or ``NULLS`` keyword.
-    """
-    # Find outermost parens - skip schema.table part
-    depth = 0
-    start = -1
-    for i, ch in enumerate(index_definition):
-        if ch == "(":
-            if depth == 0:
-                start = i + 1
-            depth += 1
-        elif ch == ")":
-            depth -= 1
-            if depth == 0:
-                raw_cols = index_definition[start:i]
-                break
-    else:
-        # No parens found — return a minimal key column
-        return (IndexKeyColumn(column_name="?"),)
-
-    # Split at top-level commas
+def _split_top_level_commas(raw: str) -> list[str]:
+    """Split *raw* at top-level commas (not inside parentheses)."""
     cols: list[str] = []
     depth = 0
     current: list[str] = []
-    for ch in raw_cols:
+    for ch in raw:
         if ch == "(":
             depth += 1
         elif ch == ")":
@@ -211,77 +194,88 @@ def _parse_index_key_columns(index_definition: str) -> tuple[IndexKeyColumn, ...
             current.append(ch)
     if current:
         cols.append("".join(current).strip())
+    return cols
 
-    key_columns: list[IndexKeyColumn] = []
-    for col_str in cols:
-        parts = col_str.split()
-        if not parts:
-            continue
 
-        # Check if first part is an expression (starts with '(')
-        is_expr = col_str.strip().startswith("(")
+def _extract_paren_body(text: str) -> str | None:
+    """Return the text between the first outermost pair of parentheses."""
+    depth = 0
+    start = -1
+    for i, ch in enumerate(text):
+        if ch == "(":
+            if depth == 0:
+                start = i + 1
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return text[start:i]
+    return None
 
-        sort_order = SortOrder.ASC
-        nulls_order: NullsOrder | None = None
-        opclass: str | None = None
 
-        # Parse trailing sort/nulls/opclass tokens
-        # Format: col_or_expr [opclass] [ASC|DESC] [NULLS FIRST|LAST]
-        remaining_parts = list(parts)
+def _parse_key_column_entry(col_str: str) -> IndexKeyColumn:
+    """Parse one key column token into an :class:`IndexKeyColumn`."""
+    parts = col_str.split()
+    is_expr = col_str.strip().startswith("(")
 
-        # Extract NULLS FIRST / LAST from end
-        if (
-            len(remaining_parts) >= 2
-            and remaining_parts[-1].upper() in ("FIRST", "LAST")
-            and remaining_parts[-2].upper() == "NULLS"
-        ):
-            nulls_order = (
-                NullsOrder.FIRST if remaining_parts[-1].upper() == "FIRST" else NullsOrder.LAST
-            )
-            remaining_parts = remaining_parts[:-2]
+    sort_order = SortOrder.ASC
+    nulls_order: NullsOrder | None = None
+    remaining = list(parts)
 
-        # Extract ASC / DESC
-        if remaining_parts and remaining_parts[-1].upper() in ("ASC", "DESC"):
-            sort_order = SortOrder.DESC if remaining_parts[-1].upper() == "DESC" else SortOrder.ASC
-            remaining_parts = remaining_parts[:-1]
+    # Extract NULLS FIRST / LAST from end (combined condition avoids SIM102)
+    if (
+        len(remaining) >= 2
+        and remaining[-1].upper() in ("FIRST", "LAST")
+        and remaining[-2].upper() == "NULLS"
+    ):
+        nulls_order = NullsOrder.FIRST if remaining[-1].upper() == "FIRST" else NullsOrder.LAST
+        remaining = remaining[:-2]
 
-        if is_expr:
-            # Re-assemble expression (everything before trailing sort tokens)
-            key_columns.append(
-                IndexKeyColumn(
-                    expression=col_str.strip(),
-                    sort_order=sort_order,
-                    nulls_order=nulls_order,
-                )
-            )
-        else:
-            # First token is the column name
-            col_name = remaining_parts[0].strip('"') if remaining_parts else "?"
-            # Remaining tokens after column name are opclass
-            if len(remaining_parts) > 1:
-                opclass = remaining_parts[1]
-            key_columns.append(
-                IndexKeyColumn(
-                    column_name=col_name,
-                    opclass=opclass,
-                    sort_order=sort_order,
-                    nulls_order=nulls_order,
-                )
-            )
+    # Extract ASC / DESC
+    if remaining and remaining[-1].upper() in ("ASC", "DESC"):
+        sort_order = SortOrder.DESC if remaining[-1].upper() == "DESC" else SortOrder.ASC
+        remaining = remaining[:-1]
 
+    if is_expr:
+        return IndexKeyColumn(
+            expression=col_str.strip(),
+            sort_order=sort_order,
+            nulls_order=nulls_order,
+        )
+
+    col_name = remaining[0].strip('"') if remaining else "?"
+    opclass: str | None = remaining[1] if len(remaining) > 1 else None
+    return IndexKeyColumn(
+        column_name=col_name,
+        opclass=opclass,
+        sort_order=sort_order,
+        nulls_order=nulls_order,
+    )
+
+
+def _parse_index_key_columns(index_definition: str) -> tuple[IndexKeyColumn, ...]:
+    """Extract key column entries from a full ``CREATE INDEX`` definition string.
+
+    Best-effort MVP parser: finds the column list between the outermost
+    parentheses of the index definition and splits on top-level commas.
+    """
+    raw_cols = _extract_paren_body(index_definition)
+    if raw_cols is None:
+        return (IndexKeyColumn(column_name="?"),)
+
+    col_strings = _split_top_level_commas(raw_cols)
+    key_columns = [_parse_key_column_entry(s) for s in col_strings if s.strip()]
     return tuple(key_columns) if key_columns else (IndexKeyColumn(column_name="?"),)
 
 
 def _parse_exclusion_elements(body: str) -> tuple[ExclusionElement, ...]:
     """Parse exclusion elements from the body of an EXCLUDE clause."""
-    elements: list[ExclusionElement] = []
-    for m in _RE_EXCL_ELEM.finditer(body):
-        col_or_expr = m.group(1).strip()
-        operator = m.group(2).strip()
-        elements.append(ExclusionElement(column_or_expr=col_or_expr, operator=operator))
+    elements = [
+        ExclusionElement(column_or_expr=m.group(1).strip(), operator=m.group(2).strip())
+        for m in _RE_EXCL_ELEM.finditer(body)
+    ]
     if not elements:
-        # Fallback: create a minimal element
-        elements.append(ExclusionElement(column_or_expr="?", operator="="))
+        elements = [ExclusionElement(column_or_expr="?", operator="=")]
     return tuple(elements)
 
 
@@ -305,13 +299,10 @@ def _map_column(row: Any) -> Column:
             )
         )
 
-    generated_expression: str | None = None
-    if is_generated:
-        generated_expression = row.generated_expr or None
-
-    default_expr: str | None = None
-    if not is_identity and not is_generated:
-        default_expr = row.default_expr or None
+    generated_expression: str | None = row.generated_expr or None if is_generated else None
+    default_expr: str | None = (
+        row.default_expr or None if not is_identity and not is_generated else None
+    )
 
     return Column(
         name=row.column_name,
@@ -330,150 +321,191 @@ def _map_index(row: Any) -> Index:
     schema_name: str = row.schema_name
     table_name: str = row.table_name
     index_name: str = row.index_name
-    index_definition: str = row.index_definition
-
-    index_ref = ObjectRef(
-        kind=ObjectKind.INDEX,
-        qname=QualifiedName(namespace=schema_name, name=index_name),
-    )
-    table_ref = ObjectRef(
-        kind=ObjectKind.TABLE,
-        qname=QualifiedName(namespace=schema_name, name=table_name),
-    )
-
-    key_columns = _parse_index_key_columns(index_definition)
-    method = _map_index_method(row.index_method)
-    predicate: str | None = row.predicate or None
 
     return Index(
-        ref=index_ref,
-        table_ref=table_ref,
-        method=method,
-        key_columns=key_columns,
+        ref=ObjectRef(
+            kind=ObjectKind.INDEX,
+            qname=QualifiedName(namespace=schema_name, name=index_name),
+        ),
+        table_ref=ObjectRef(
+            kind=ObjectKind.TABLE,
+            qname=QualifiedName(namespace=schema_name, name=table_name),
+        ),
+        method=_map_index_method(row.index_method),
+        key_columns=_parse_index_key_columns(row.index_definition),
         unique=bool(row.is_unique),
-        predicate=predicate,
+        predicate=row.predicate or None,
     )
 
 
-Constraint = (
-    PrimaryKeyConstraint
-    | UniqueConstraint
-    | CheckConstraint
-    | ForeignKeyConstraint
-    | ExclusionConstraint
-)
+def _map_pk_constraint(
+    name: str,
+    definition: str,
+    deferrability: ConstraintDeferrability,
+) -> PrimaryKeyConstraint:
+    cols = _parse_columns_from_definition(definition) or ("?",)
+    return PrimaryKeyConstraint(name=name, columns=cols, deferrability=deferrability)
 
 
-def _map_constraint(row: Any) -> Constraint:  # noqa: PLR0912, PLR0915
+def _map_unique_constraint(
+    name: str,
+    definition: str,
+    deferrability: ConstraintDeferrability,
+) -> UniqueConstraint:
+    cols = _parse_columns_from_definition(definition) or ("?",)
+    nulls_not_distinct = "NULLS NOT DISTINCT" in definition.upper()
+    return UniqueConstraint(
+        name=name,
+        columns=cols,
+        nulls_not_distinct=nulls_not_distinct,
+        deferrability=deferrability,
+    )
+
+
+def _map_check_constraint(
+    name: str,
+    definition: str,
+    deferrability: ConstraintDeferrability,
+) -> CheckConstraint:
+    m = re.search(r"CHECK\s*\((.+)\)$", definition, re.IGNORECASE | re.DOTALL)
+    expression = m.group(1) if m else definition
+    no_inherit = "NO INHERIT" in definition.upper()
+    return CheckConstraint(
+        name=name,
+        expression=expression,
+        no_inherit=no_inherit,
+        deferrability=deferrability,
+    )
+
+
+def _resolve_fk_target(row: Any, ref_target: str) -> tuple[str, str]:
+    """Return ``(ref_namespace, ref_table_name)`` for a foreign-key row."""
+    if row.ref_schema and row.ref_table:
+        return str(row.ref_schema), str(row.ref_table)
+    if "." in ref_target:
+        parts = ref_target.split(".", 1)
+        return parts[0].strip('"'), parts[1].strip('"')
+    return "public", ref_target.strip('"') or "?"
+
+
+def _map_fk_constraint(
+    name: str,
+    definition: str,
+    deferrability: ConstraintDeferrability,
+    row: Any,
+) -> ForeignKeyConstraint:
+    fk_m = _RE_FK.search(definition)
+    if fk_m:
+        local_cols = tuple(c.strip().strip('"') for c in fk_m.group(1).split(","))
+        ref_target = fk_m.group(2).strip()
+        ref_cols = tuple(c.strip().strip('"') for c in fk_m.group(3).split(","))
+    else:
+        local_cols = ("?",)
+        ref_cols = ("?",)
+        ref_target = ""
+
+    ref_namespace, ref_table_name = _resolve_fk_target(row, ref_target)
+
+    del_m = _RE_ON_DELETE.search(definition)
+    upd_m = _RE_ON_UPDATE.search(definition)
+    match_m = _RE_MATCH.search(definition)
+
+    return ForeignKeyConstraint(
+        name=name,
+        columns=local_cols,
+        ref_namespace=ref_namespace,
+        ref_table=ref_table_name,
+        ref_columns=ref_cols,
+        on_delete=_map_fk_action(del_m.group(1)) if del_m else FKAction.NO_ACTION,
+        on_update=_map_fk_action(upd_m.group(1)) if upd_m else FKAction.NO_ACTION,
+        match_type=_map_fk_match(match_m.group(1)) if match_m else FKMatch.SIMPLE,
+        deferrability=deferrability,
+    )
+
+
+def _map_exclusion_constraint(
+    name: str,
+    definition: str,
+    deferrability: ConstraintDeferrability,
+) -> ExclusionConstraint:
+    excl_m = _RE_EXCLUDE.search(definition)
+    if excl_m:
+        index_method = excl_m.group(1)
+        elements = _parse_exclusion_elements(excl_m.group(2))
+        predicate_str: str | None = excl_m.group(3) or None
+    else:
+        index_method = "gist"
+        elements = (ExclusionElement(column_or_expr="?", operator="="),)
+        predicate_str = None
+
+    return ExclusionConstraint(
+        name=name,
+        index_method=index_method,
+        elements=elements,
+        predicate=predicate_str,
+        deferrability=deferrability,
+    )
+
+
+def _map_constraint(row: Any) -> _AnyConstraint:
     """Map a constraints.sql result row to a concrete constraint domain object."""
     constraint_type: str = row.constraint_type
     name: str = row.constraint_name
     definition: str = row.definition
-    deferrable: bool = bool(row.deferrable)
-    initially_deferred: bool = bool(row.initially_deferred)
-    deferrability = _map_deferrability(deferrable, initially_deferred)
+    deferrability = _map_deferrability(bool(row.deferrable), bool(row.initially_deferred))
 
     if constraint_type == "p":
-        cols = _parse_columns_from_definition(definition)
-        if not cols:
-            cols = ("?",)
-        return PrimaryKeyConstraint(
-            name=name,
-            columns=cols,
-            deferrability=deferrability,
-        )
-
+        return _map_pk_constraint(name, definition, deferrability)
     if constraint_type == "u":
-        cols = _parse_columns_from_definition(definition)
-        if not cols:
-            cols = ("?",)
-        nulls_not_distinct = "NULLS NOT DISTINCT" in definition.upper()
-        return UniqueConstraint(
-            name=name,
-            columns=cols,
-            nulls_not_distinct=nulls_not_distinct,
-            deferrability=deferrability,
-        )
-
+        return _map_unique_constraint(name, definition, deferrability)
     if constraint_type == "c":
-        # CheckConstraint: extract the CHECK (...) expression
-        m = re.search(r"CHECK\s*\((.+)\)$", definition, re.IGNORECASE | re.DOTALL)
-        expression = m.group(1) if m else definition
-        no_inherit = "NO INHERIT" in definition.upper()
-        return CheckConstraint(
-            name=name,
-            expression=expression,
-            no_inherit=no_inherit,
-            deferrability=deferrability,
-        )
-
+        return _map_check_constraint(name, definition, deferrability)
     if constraint_type == "f":
-        fk_m = _RE_FK.search(definition)
-        if fk_m:
-            local_cols = tuple(c.strip().strip('"') for c in fk_m.group(1).split(","))
-            ref_target = fk_m.group(2).strip()
-            ref_cols = tuple(c.strip().strip('"') for c in fk_m.group(3).split(","))
-        else:
-            local_cols = ("?",)
-            ref_cols = ("?",)
-            ref_target = ""
-
-        # Determine ref_namespace and ref_table
-        ref_namespace: str
-        ref_table_name: str
-        if row.ref_schema and row.ref_table:
-            ref_namespace = row.ref_schema
-            ref_table_name = row.ref_table
-        elif "." in ref_target:
-            parts = ref_target.split(".", 1)
-            ref_namespace = parts[0].strip('"')
-            ref_table_name = parts[1].strip('"')
-        else:
-            ref_namespace = "public"
-            ref_table_name = ref_target.strip('"') or "?"
-
-        # Parse ON DELETE / ON UPDATE
-        del_m = _RE_ON_DELETE.search(definition)
-        upd_m = _RE_ON_UPDATE.search(definition)
-        on_delete = _map_fk_action(del_m.group(1)) if del_m else FKAction.NO_ACTION
-        on_update = _map_fk_action(upd_m.group(1)) if upd_m else FKAction.NO_ACTION
-
-        match_m = _RE_MATCH.search(definition)
-        match_type = _map_fk_match(match_m.group(1)) if match_m else FKMatch.SIMPLE
-
-        return ForeignKeyConstraint(
-            name=name,
-            columns=local_cols,
-            ref_namespace=ref_namespace,
-            ref_table=ref_table_name,
-            ref_columns=ref_cols,
-            on_delete=on_delete,
-            on_update=on_update,
-            match_type=match_type,
-            deferrability=deferrability,
-        )
-
+        return _map_fk_constraint(name, definition, deferrability, row)
     if constraint_type == "x":
-        excl_m = _RE_EXCLUDE.search(definition)
-        if excl_m:
-            index_method = excl_m.group(1)
-            elements_str = excl_m.group(2)
-            predicate_str: str | None = excl_m.group(3) or None
-            elements = _parse_exclusion_elements(elements_str)
-        else:
-            index_method = "gist"
-            elements = (ExclusionElement(column_or_expr="?", operator="="),)
-            predicate_str = None
-
-        return ExclusionConstraint(
-            name=name,
-            index_method=index_method,
-            elements=elements,
-            predicate=predicate_str,
-            deferrability=deferrability,
-        )
-
+        return _map_exclusion_constraint(name, definition, deferrability)
     raise InspectionError(f"Unknown constraint type: {constraint_type!r}")
+
+
+def _safe_map_constraints(
+    rows: list[Any],
+    col_names: frozenset[str],
+) -> list[_AnyConstraint]:
+    """Map constraint rows, skipping any that fail validation."""
+    result: list[_AnyConstraint] = []
+    for crow in rows:
+        try:
+            ct = _map_constraint(crow)
+            # Skip PK/Unique/FK whose columns don't exist (partition inheritance)
+            if isinstance(
+                ct, (PrimaryKeyConstraint, UniqueConstraint, ForeignKeyConstraint)
+            ) and not all(c in col_names for c in ct.columns):
+                continue
+            result.append(ct)
+        except Exception:
+            continue
+    return result
+
+
+def _build_partition_info(row: Any) -> PartitionInfo | None:
+    """Build a :class:`PartitionInfo` from a tables row, or ``None``."""
+    if row.partition_strategy is not None and row.partition_expr is not None:
+        return PartitionInfo(
+            strategy=_map_partition_strategy(row.partition_strategy),
+            partition_key=row.partition_expr,
+        )
+    return None
+
+
+def _build_partition_of(row: Any) -> PartitionOf | None:
+    """Build a :class:`PartitionOf` from a tables row, or ``None``."""
+    if row.partition_of_schema is not None and row.partition_of_table is not None:
+        return PartitionOf(
+            parent_namespace=row.partition_of_schema,
+            parent_name=row.partition_of_table,
+            partition_bound=row.partition_bound or None,
+        )
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -528,7 +560,6 @@ class PgCatalogInspector:
             await conn.set_autocommit(False)
             await conn.execute("BEGIN ISOLATION LEVEL REPEATABLE READ")
             try:
-                # Use a cursor with namedtuple rows for attribute-style access
                 async with conn.cursor(row_factory=psycopg.rows.namedtuple_row) as cur:
                     await cur.execute(_SQL_SCHEMAS)
                     schemas_rows = await cur.fetchall()
@@ -559,7 +590,7 @@ class PgCatalogInspector:
             extensions_rows=extensions_rows,
         )
 
-    def _assemble(  # noqa: PLR0912, PLR0915
+    def _assemble(
         self,
         *,
         schemas_rows: list[Any],
@@ -570,140 +601,148 @@ class PgCatalogInspector:
         extensions_rows: list[Any],
     ) -> Database:
         """Assemble domain objects from raw catalog rows."""
-        # --- Extensions ---
         extensions = self._build_extensions(extensions_rows)
 
-        # --- Filter schemas ---
-        allowed_schemas: set[str] | None = set(self._schemas) if self._schemas is not None else None
-        schema_names: list[str] = [
-            row.schema_name
-            for row in schemas_rows
-            if allowed_schemas is None or row.schema_name in allowed_schemas
+        allowed: set[str] | None = set(self._schemas) if self._schemas is not None else None
+        schema_names = [
+            row.schema_name for row in schemas_rows if allowed is None or row.schema_name in allowed
         ]
 
-        # --- Tables: first pass — shell Table objects keyed by (schema, table) ---
-        # Build column/index/constraint lists grouped by table key
-        cols_by_table: dict[tuple[str, str], list[Column]] = {}
-        for row in columns_rows:
-            key = (row.schema_name, row.table_name)
-            if allowed_schemas is not None and row.schema_name not in allowed_schemas:
-                continue
-            cols_by_table.setdefault(key, []).append(_map_column(row))
+        cols_by_table = self._group_columns(columns_rows, allowed)
+        idxs_by_table = self._group_indexes(indexes_rows, allowed)
+        cons_by_table = self._group_constraints(constraints_rows, allowed)
 
-        indexes_by_table: dict[tuple[str, str], list[Index]] = {}
-        for row in indexes_rows:
-            key = (row.schema_name, row.table_name)
-            if allowed_schemas is not None and row.schema_name not in allowed_schemas:
-                continue
-            indexes_by_table.setdefault(key, []).append(_map_index(row))
+        tables_by_schema, idxs_by_schema = self._build_tables(
+            tables_rows, schema_names, cols_by_table, idxs_by_table, cons_by_table
+        )
 
-        constraints_by_table: dict[tuple[str, str], list[Any]] = {}
-        for row in constraints_rows:
-            key = (row.schema_name, row.table_name)
-            if allowed_schemas is not None and row.schema_name not in allowed_schemas:
-                continue
-            constraints_by_table.setdefault(key, []).append(row)
+        return Database(
+            name="inspected",
+            schemas=tuple(self._build_schemas(schema_names, tables_by_schema, idxs_by_schema)),
+            extensions=tuple(extensions),
+        )
 
-        # --- Build Table objects ---
-        # Collect all tables whose schema passes the filter
-        tables_by_schema: dict[str, list[Table]] = {name: [] for name in schema_names}
-        indexes_by_schema: dict[str, list[Index]] = {name: [] for name in schema_names}
+    # ------------------------------------------------------------------
+    # Grouping helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _group_columns(
+        rows: list[Any],
+        allowed: set[str] | None,
+    ) -> dict[tuple[str, str], list[Column]]:
+        result: dict[tuple[str, str], list[Column]] = {}
+        for row in rows:
+            if allowed is not None and row.schema_name not in allowed:
+                continue
+            result.setdefault((row.schema_name, row.table_name), []).append(_map_column(row))
+        return result
+
+    @staticmethod
+    def _group_indexes(
+        rows: list[Any],
+        allowed: set[str] | None,
+    ) -> dict[tuple[str, str], list[Index]]:
+        result: dict[tuple[str, str], list[Index]] = {}
+        for row in rows:
+            if allowed is not None and row.schema_name not in allowed:
+                continue
+            result.setdefault((row.schema_name, row.table_name), []).append(_map_index(row))
+        return result
+
+    @staticmethod
+    def _group_constraints(
+        rows: list[Any],
+        allowed: set[str] | None,
+    ) -> dict[tuple[str, str], list[Any]]:
+        result: dict[tuple[str, str], list[Any]] = {}
+        for row in rows:
+            if allowed is not None and row.schema_name not in allowed:
+                continue
+            result.setdefault((row.schema_name, row.table_name), []).append(row)
+        return result
+
+    # ------------------------------------------------------------------
+    # Table builder
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_tables(
+        tables_rows: list[Any],
+        schema_names: list[str],
+        cols_by_table: dict[tuple[str, str], list[Column]],
+        idxs_by_table: dict[tuple[str, str], list[Index]],
+        cons_by_table: dict[tuple[str, str], list[Any]],
+    ) -> tuple[dict[str, list[Table]], dict[str, list[Index]]]:
+        tables_by_schema: dict[str, list[Table]] = {n: [] for n in schema_names}
+        idxs_by_schema: dict[str, list[Index]] = {n: [] for n in schema_names}
 
         for row in tables_rows:
             schema_name: str = row.schema_name
             if schema_name not in tables_by_schema:
                 continue
+
             table_name: str = row.table_name
+            key = (schema_name, table_name)
 
-            table_key = (schema_name, table_name)
-
-            # Sort columns by position
-            cols: list[Column] = sorted(cols_by_table.get(table_key, []), key=lambda c: c.position)
-
-            # Map constraint rows to domain objects
-            constraint_objects: list[Any] = []
+            cols = sorted(cols_by_table.get(key, []), key=lambda c: c.position)
             col_names: frozenset[str] = frozenset(c.name for c in cols)
-            for crow in constraints_by_table.get(table_key, []):
-                try:
-                    ct = _map_constraint(crow)
-                    # Validate FK/PK/Unique columns exist before adding
-                    if isinstance(
-                        ct, (PrimaryKeyConstraint, UniqueConstraint, ForeignKeyConstraint)
-                    ):
-                        valid = all(c in col_names for c in ct.columns)
-                        if not valid:
-                            # Skip constraints referencing unknown columns
-                            # (can happen with partition inheritance)
-                            continue
-                    constraint_objects.append(ct)
-                except (InspectionError, Exception):
-                    # Skip malformed constraints in MVP
-                    continue
 
-            # Build partition info
-            partition_info: PartitionInfo | None = None
-            if row.partition_strategy is not None and row.partition_expr is not None:
-                strategy = _map_partition_strategy(row.partition_strategy)
-                partition_info = PartitionInfo(
-                    strategy=strategy,
-                    partition_key=row.partition_expr,
+            tables_by_schema[schema_name].append(
+                Table(
+                    ref=ObjectRef(
+                        kind=ObjectKind.TABLE,
+                        qname=QualifiedName(namespace=schema_name, name=table_name),
+                    ),
+                    columns=tuple(cols),
+                    constraints=tuple(_safe_map_constraints(cons_by_table.get(key, []), col_names)),
+                    partition_info=_build_partition_info(row),
+                    partition_of=_build_partition_of(row),
                 )
-
-            partition_of: PartitionOf | None = None
-            if row.partition_of_schema is not None and row.partition_of_table is not None:
-                partition_of = PartitionOf(
-                    parent_namespace=row.partition_of_schema,
-                    parent_name=row.partition_of_table,
-                    partition_bound=row.partition_bound or None,
-                )
-
-            table_ref = ObjectRef(
-                kind=ObjectKind.TABLE,
-                qname=QualifiedName(namespace=schema_name, name=table_name),
             )
-            table = Table(
-                ref=table_ref,
-                columns=tuple(cols),
-                constraints=tuple(constraint_objects),
-                partition_info=partition_info,
-                partition_of=partition_of,
-            )
-            tables_by_schema[schema_name].append(table)
+            idxs_by_schema[schema_name].extend(idxs_by_table.get(key, []))
 
-            # Collect indexes for the schema-level index list
-            indexes_by_schema[schema_name].extend(indexes_by_table.get(table_key, []))
+        return tables_by_schema, idxs_by_schema
 
-        # --- Build Schema objects ---
-        schema_objects: list[Schema] = []
+    # ------------------------------------------------------------------
+    # Schema builder
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_schemas(
+        schema_names: list[str],
+        tables_by_schema: dict[str, list[Table]],
+        idxs_by_schema: dict[str, list[Index]],
+    ) -> list[Schema]:
+        result: list[Schema] = []
         for name in schema_names:
-            schema_ref = ObjectRef(
-                kind=ObjectKind.SCHEMA,
-                qname=QualifiedName(namespace=name, name=name),
+            result.append(
+                Schema(
+                    ref=ObjectRef(
+                        kind=ObjectKind.SCHEMA,
+                        qname=QualifiedName(namespace=name, name=name),
+                    ),
+                    tables=tuple(tables_by_schema.get(name, [])),
+                    indexes=tuple(idxs_by_schema.get(name, [])),
+                )
             )
-            schema = Schema(
-                ref=schema_ref,
-                tables=tuple(tables_by_schema.get(name, [])),
-                indexes=tuple(indexes_by_schema.get(name, [])),
-            )
-            schema_objects.append(schema)
+        return result
 
-        return Database(
-            name="inspected",
-            schemas=tuple(schema_objects),
-            extensions=tuple(extensions),
-        )
+    # ------------------------------------------------------------------
+    # Extension builder
+    # ------------------------------------------------------------------
 
-    def _build_extensions(self, rows: list[Any]) -> list[Extension]:
+    @staticmethod
+    def _build_extensions(rows: list[Any]) -> list[Extension]:
         """Map extension rows to :class:`Extension` domain objects."""
         result: list[Extension] = []
         for row in rows:
-            ext_ref = ObjectRef(
-                kind=ObjectKind.EXTENSION,
-                qname=QualifiedName(namespace="public", name=row.extension_name),
-            )
             result.append(
                 Extension(
-                    ref=ext_ref,
+                    ref=ObjectRef(
+                        kind=ObjectKind.EXTENSION,
+                        qname=QualifiedName(namespace="public", name=row.extension_name),
+                    ),
                     version=row.installed_version or "0",
                 )
             )
