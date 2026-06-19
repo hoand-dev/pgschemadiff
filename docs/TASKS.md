@@ -48,10 +48,10 @@
 | [x] | P1-DOM-07 | `domain/database.py` — top-level aggregate | backend-engineer | P0 | P1-DOM-04..06 | S |
 | [x] | P1-DOM-08 | `domain/ports.py` — SchemaInspector, MigrationWriter Protocols | backend-engineer | P0 | P1-DOM-07 | S |
 | [x] | P1-DOM-09 | Unit tests for all domain models | qa-engineer | P0 | P1-DOM-07 | M |
-| [ ] | P1-INFRA-01 | `infrastructure/postgres/pool.py` — AsyncConnectionPool wrapper | backend-engineer | P0 | P0-ENV-01 | M |
-| [ ] | P1-INFRA-02 | `catalog/tables.sql` + `columns.sql` | backend-engineer | P0 | — | M |
-| [ ] | P1-INFRA-03 | `catalog/indexes.sql` + `constraints.sql` | backend-engineer | P0 | — | M |
-| [ ] | P1-INFRA-04 | `catalog/extensions.sql` + schemas | backend-engineer | P0 | — | S |
+| [x] | P1-INFRA-01 | `infrastructure/postgres/pool.py` — AsyncConnectionPool wrapper | backend-engineer | P0 | P0-ENV-01 | M |
+| [x] | P1-INFRA-02 | `catalog/tables.sql` + `columns.sql` | backend-engineer | P0 | — | M |
+| [x] | P1-INFRA-03 | `catalog/indexes.sql` + `constraints.sql` | backend-engineer | P0 | — | M |
+| [x] | P1-INFRA-04 | `catalog/extensions.sql` + schemas | backend-engineer | P0 | — | S |
 | [ ] | P1-INFRA-05 | `PgCatalogInspector` for MVP-A | backend-engineer | P0 | P1-INFRA-01..04, P1-DOM-08 | XL |
 | [ ] | P1-INFRA-06 | Type normalizer | backend-engineer | P0 | P1-INFRA-05 | M |
 | [ ] | P1-INFRA-07 | Multi-connection `pg_export_snapshot` (deferred) | backend-engineer | P2 | P1-INFRA-05 | M |

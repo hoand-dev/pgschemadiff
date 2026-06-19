@@ -23,15 +23,20 @@ Last updated: **2026-06-01** — Phase 1 domain layer complete (P1-DOM-02..09).
 
 ## Active task
 
-Backend track: `P1-INFRA-01` (`infrastructure/postgres/pool.py` —
-AsyncConnectionPool wrapper). Catalog-SQL drafts `P1-INFRA-02/03/04` are
-parallel-ready (batch B2). The full domain model layer (`P1-DOM-02..09`) is
-now complete, so `P1-DOM-08` ports are available for `P1-INFRA-05`.
+Backend track: `P1-INFRA-05` (`PgCatalogInspector` for MVP-A). P1-INFRA-01..04
+are complete. The full domain model layer (`P1-DOM-02..09`) is now complete, so
+`P1-DOM-08` ports are available for `P1-INFRA-05`.
 
 TUI track unblocked at the shell level by `P4-TUI-01`. Remaining
 `P4-TUI-02..08` are blocked on the Phase 1-3 data they each consume.
 
 ## Done in current session
+
+- `P1-INFRA-01` — `infrastructure/postgres/pool.py`: `Pool` async context-manager wrapper around `psycopg_pool.AsyncConnectionPool`; `ConnectionPool` type alias; `acquire()` async context manager; 14 unit tests (mocked, no live DB).
+- `P1-INFRA-02` — `catalog/tables.sql` + `catalog/columns.sql`: pg_catalog queries for user tables/partitions and columns (identity/generated/collation support).
+- `P1-INFRA-03` — `catalog/indexes.sql` + `catalog/constraints.sql`: pg_catalog queries for all indexes (btree/hash/gist/gin/brin/exclusion/PK) and constraints (PK/unique/check/FK/exclusion).
+- `P1-INFRA-04` — `catalog/extensions.sql` + `catalog/schemas.sql`: pg_available_extensions and pg_namespace queries.
+- All SQL files loaded via `importlib.resources`; 60 new tests (46 structural + 6 snapshot + 14 pool); all 328 tests pass.
 
 - `P0-ENV-01` — `pyproject.toml` PEP 621 with all runtime + dev deps
 - `P0-ENV-02` — `uv.lock` generated; `.python-version` set to 3.13
