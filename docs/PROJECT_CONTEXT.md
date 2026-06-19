@@ -4,7 +4,7 @@
 > changes the phase status, finishes a milestone, or adds an ADR. Read me at
 > the start of every chat session.
 
-Last updated: **2026-06-01** — Phase 1 domain layer complete (P1-DOM-02..09).
+Last updated: **2026-06-19** — P1-TEST-01 complete: session-scoped pg18 container fixture + connection smoke test.
 
 ---
 
@@ -31,6 +31,8 @@ TUI track unblocked at the shell level by `P4-TUI-01`. Remaining
 `P4-TUI-02..08` are blocked on the Phase 1-3 data they each consume.
 
 ## Done in current session
+
+- `P1-TEST-01` — `tests/integration/conftest.py`: session-scoped `postgres_container` fixture (postgres:18-alpine), `pg_admin_dsn` (session), `pg_test_dsn` (function-scoped — creates/drops `test_<uuid>` DB with FORCE). `tests/integration/test_connection.py`: smoke test asserting PostgreSQL 18 version string. Implements ADR-0010 strategy 3. Both ruff and mypy strict pass; 283 unit tests unaffected.
 
 - `P1-INFRA-01` — `infrastructure/postgres/pool.py`: `Pool` async context-manager wrapper around `psycopg_pool.AsyncConnectionPool`; `ConnectionPool` type alias; `acquire()` async context manager; 14 unit tests (mocked, no live DB).
 - `P1-INFRA-02` — `catalog/tables.sql` + `catalog/columns.sql`: pg_catalog queries for user tables/partitions and columns (identity/generated/collation support).
