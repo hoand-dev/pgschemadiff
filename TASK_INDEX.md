@@ -64,7 +64,7 @@ _Canonical task list lives in `docs/TASKS.md` — this file mirrors the executio
 ### Batch C — EXECUTION QUEUE (unblocked)
 
 ```
-[ ] P1-INFRA-06  Type normalizer                        ← dispatch next
+[>] P1-INFRA-06  Type normalizer                        ← DISPATCHED
 [ ] P1-TEST-02   Inspector integration tests
 [ ] P1-CLI-01    pgsd inspect <conn-url>
 ```
@@ -111,7 +111,7 @@ P4-TUI-02..08: blocked on domain + infrastructure work.
 
 | Gate | Condition | Status |
 |---|---|---|
-| M0 | CI green; layered arch enforced | ✅ (locally clean; CI push in progress) |
-| M1 | `pgsd inspect` dumps schema JSON | ❌ P1-INFRA-05 not started |
+| M0 | CI green; layered arch enforced | ✅ (CI green on `claude/brave-gauss-f3he8w` run 27811581234) |
+| M1 | `pgsd inspect` dumps schema JSON | ❌ P1-CLI-01 not started (P1-INFRA-05 ✅) |
 | M2 | `pgsd diff` emits typed DeltaSet | ❌ |
 | M3 | round-trip integration test green | ❌ |
