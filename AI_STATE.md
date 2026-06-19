@@ -1,97 +1,93 @@
 # AI_STATE.md
-_Last updated: 2026-05-24_
+_Last updated: 2026-06-19_
 
 ## Project
-**pgschemadiff** — PostgreSQL schema diff & migration TUI (Textual, Python 3.13)
+**pgschemadiff** — PostgreSQL schema diff & migration TUI + CLI (Textual, Python 3.13).
 Goal: inspect two Postgres DBs, show schema diff, generate safe migration SQL.
 
 ## Active Branch
-`claude/elegant-albattani-0MjWg` — 1 commit ahead of `main` (same content as main; no unique work yet).
+`claude/brave-gauss-f3he8w` — 2 commits ahead of `main`.
 
 ---
 
 ## Current Project Phase
-**Phase 0 — Prototype** (Home screen only, flat-file layout, cannot run)
+**Phase 1 — Domain & Infrastructure (MVP-A)**
+
+Phase 0 is complete. Phase 1 domain layer (P1-DOM-01..09) is complete.
+Next: Phase 1 infrastructure layer (P1-INFRA-01..07) + tests (P1-TEST-01..02) + CLI (P1-CLI-01).
 
 ---
 
 ## CI / PR Status
-- **CI**: configured on `determined-goodall-KGag4` branch only — NOT on `main`
+- **Local**: ruff ✅ mypy strict ✅ 268 tests ✅ (as of 2026-06-19)
+- **Remote branch `claude/brave-gauss-f3he8w`**: pushed; awaiting GitHub Actions result
+- **Previous CI failure on `claude/busy-maxwell-4Qa3h`**: RESOLVED — mypy errors in domain test suite fixed (comparison-overlap on StrEnum, attr-defined on Protocol.__protocol_attrs__, unused-ignore on TypeAdapter)
 - **Open PRs**: 0
-- **Open Issues**: 0
 
 ---
 
-## Critical Blocker: Package Structure Mismatch
+## What Is Done
 
-All source files live at **repo root** as flat files, but every import uses the full
-`src/pgschemadiff/` package path. The app **cannot run** in its current form.
+### Phase 0 — Stabilization ✅
+All P0-ENV, P0-INFRA, P0-CI, P0-ARCH, P0-LOG, P0-DOC, P0-QUAL tasks complete.
+One gap: P0-CI-03 (coverage gate 85%/80%) — not yet wired into CI.
 
-### Files at root → must move to `src/pgschemadiff/` hierarchy
+### Phase 1 — Domain layer ✅
+All P1-DOM-01..09 tasks complete:
+- `domain/identity.py` — QualifiedName, ObjectRef, ObjectKind
+- `domain/column.py` — Column, IdentitySpec, GeneratedTiming
+- `domain/constraint.py` — discriminated union (PK/Unique/Check/FK/Exclusion)
+- `domain/table.py` — Table aggregate (columns, constraints, partitions)
+- `domain/index.py` — Index (method, key columns, INCLUDE, predicate, opclass)
+- `domain/schema.py` + `domain/extension.py`
+- `domain/database.py` — top-level aggregate
+- `domain/ports.py` — SchemaInspector + MigrationWriter Protocols
+- 268 unit tests covering all domain models
 
-| Root file | Target path |
+---
+
+## Phase 1 Infrastructure — Next Execution Targets
+
+### Immediate (unblocked)
+| Task | Title | Complexity |
+|---|---|---|
+| P1-INFRA-01 | `infrastructure/postgres/pool.py` — AsyncConnectionPool wrapper | M |
+| P1-INFRA-02 | `catalog/tables.sql` + `columns.sql` | M |
+| P1-INFRA-03 | `catalog/indexes.sql` + `constraints.sql` | M |
+| P1-INFRA-04 | `catalog/extensions.sql` + schemas | S |
+| P1-TEST-01  | Session-scoped pg18 container fixture | M |
+
+### Dependent on P1-INFRA-01..04
+| Task | Title |
 |---|---|
-| `__main__.py` | `src/pgschemadiff/__main__.py` |
-| `app.py` | `src/pgschemadiff/presentation/app.py` |
-| `home.py` | `src/pgschemadiff/presentation/screens/home.py` |
-| `profile.py` | `src/pgschemadiff/domain/models/profile.py` |
-| `profile_detail.py` | `src/pgschemadiff/presentation/widgets/profile_detail.py` |
-| `profile_item.py` | `src/pgschemadiff/presentation/widgets/profile_item.py` |
-| `yaml_loader.py` | `src/pgschemadiff/infrastructure/config/yaml_loader.py` |
-| `profiles.yaml` | `config/profiles.yaml` |
-| `styles.tcss` | `src/pgschemadiff/presentation/styles.tcss` |
-
-### Files missing entirely
-- All `__init__.py` files for each package directory
-- `src/pgschemadiff/presentation/widgets/confirm_dialog.py` (imported by `home.py`, not in repo)
-- `.gitignore`
-- `.github/workflows/ci.yml`
+| P1-INFRA-05 | `PgCatalogInspector` (main MVP-A inspector) |
+| P1-INFRA-06 | Type normalizer |
+| P1-TEST-02  | Inspector integration tests |
+| P1-CLI-01   | `pgsd inspect <conn-url>` |
 
 ---
 
-## Work Done on Other Branches (not yet merged to main)
-
-| Branch | What it contains | Mergeable? |
-|---|---|---|
-| `claude/determined-goodall-KGag4` | **Full src layout fix + confirm_dialog + .gitignore + CI + tests + uv.lock** | ✅ Best candidate to merge |
-| `claude/stoic-pascal-LOygS` | Complete Clean Architecture re-design (12 ADRs, domain/application layers, CLI-first) | Divergent — different scope |
-| `claude/elegant-albattani-yN6AK` | AI_STATE.md + TASK_INDEX.md only | Reference only |
-| `claude/nice-brahmagupta-nkwW5` | TASK_INDEX.md (12 tasks) | Reference only |
-| `claude/compassionate-hamilton-*` | Various partial src layout restructures | Superseded by KGag4 |
-| `claude/determined-goodall-4R9qN` | .gitignore only | Superseded by KGag4 |
-| `claude/fervent-thompson-dyTEq` | Code review notes | Reference only |
+## Critical Path
+```
+P1-DOM-01..09 ✅ ─→ P1-INFRA-01 ─→ P1-INFRA-05 ─→ P1-CLI-01 (M1 gate)
+                      ↑
+              P1-INFRA-02/03/04 (parallel)
+```
 
 ---
 
-## What Works (verified in README, not runnable due to layout bug)
-- App boot + load 4 profiles from YAML
-- ↑↓ navigation, detail pane updates real-time
-- `d` opens ConfirmDialog, confirming deletes profile from list
-- `esc`/`Cancel` closes modal
-- Footer shows key bindings from `BINDINGS`
-
-## Technical Note
-Textual 8.2.7 bug: do **not** extend `Vertical`/`Container` with complex `compose` —
-inline compose into `Screen` directly. Already worked around in `home.py`.
+## Architectural Notes
+- Clean Architecture: domain < application < infrastructure < presentation (enforced by import-linter)
+- Domain is pure-sync Pydantic v2 frozen models — no IO, no async, no drivers
+- All `StrEnum` comparisons in tests should use `.value` (mypy strict `comparison-overlap`)
+- Textual bug workaround: do not extend Vertical/Container with complex compose — inline into Screen
+- psycopg async pool will be wrapped in `infrastructure/postgres/pool.py` (P1-INFRA-01)
+- Catalog queries are plain SQL files in `src/pgschemadiff/infrastructure/postgres/catalog/`
 
 ---
 
-## Roadmap (from README + prior planning)
-
-| Phase | Item | Status |
-|---|---|---|
-| P0 | Home screen (list + detail + delete modal) | ✅ Done (but not runnable — layout bug) |
-| P0 | Src layout restructure | ❌ BLOCKER |
-| P0 | CI / lint / tests | ❌ Not on main |
-| P1 | `screens/comparing.py` — async Worker + ProgressBar | ❌ |
-| P2 | `screens/diff_explorer.py` — Tree widget, 3-column diff | ❌ |
-| P3 | `screens/sql_preview.py` — RichLog + SQL highlight | ❌ |
-| P4 | `infrastructure/postgres/inspector.py` — pg_catalog queries | ❌ |
-| P5 | `domain/diff/comparator.py` — diff logic | ❌ |
-| P6 | `domain/migration/generator.py` — SQL migration generation | ❌ |
-
----
-
-## Next Execution Target
-**T-01** — Implement src layout restructure (or cherry-pick `determined-goodall-KGag4`).
-This is the gating blocker for all subsequent work.
+## Next Run Instructions
+1. Check if GitHub Actions CI is green on `claude/brave-gauss-f3he8w`
+2. If green: dispatch `developer` for P1-INFRA-01 (pool wrapper) and P1-INFRA-02/03/04 (catalog SQL) in parallel
+3. If red: dispatch `ci-recovery` first
+4. Always: update TASK_INDEX.md + DAILY_LOG.md + PROGRESS.md after each run
