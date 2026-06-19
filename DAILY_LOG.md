@@ -63,9 +63,19 @@ None. All Phase 1 infra tasks are now unblocked.
 - **Tests**: 60 new unit tests (pool lifecycle + SQL structural + syrupy snapshots)
 - **Suite**: 328 tests passing, ruff ✅ mypy ✅ lint-imports ✅
 
-### Dispatched next
-- **P1-INFRA-05** (background): `PgCatalogInspector` — the concrete SchemaInspector implementation
-- **P1-TEST-01** (background): `tests/integration/conftest.py` — session-scoped postgres:18 fixture
+### Dispatched and completed
+- **P1-INFRA-05**: `inspector.py` — 710-line PgCatalogInspector (ruff/mypy fixed manually: TC001 Pool→TYPE_CHECKING, E501 regex wraps, PLR0912/PLR0915 noqa, SIM102 nested-if flatten)
+- **P1-TEST-01**: `tests/integration/conftest.py` + `test_connection.py` — mypy overrides added for testcontainers
+
+### Final state
+- 64 source files, mypy clean
+- 328 unit tests passing
+- Branch: `claude/brave-gauss-f3he8w` — 8 commits ahead of main
+
+### Next run targets
+1. **P1-INFRA-06**: Type normalizer (`infrastructure/postgres/type_normalizer.py`)
+2. **P1-TEST-02**: Inspector integration tests (requires live postgres — CI only)
+3. **P1-CLI-01**: `pgsd inspect <conn-url>` CLI command
 
 ---
 

@@ -54,11 +54,17 @@ _Canonical task list lives in `docs/TASKS.md` — this file mirrors the executio
 [ ] P1-TEST-01   session-scoped pg18 container fixture   ← dispatch now
 ```
 
-### Batch B — depends on A (EXECUTION QUEUE)
+### Batch B — DONE ✅
 
 ```
-[ ] P1-INFRA-05  PgCatalogInspector                     ← dispatch now (XL)
-[ ] P1-INFRA-06  Type normalizer
+[x] P1-INFRA-05  PgCatalogInspector (inspector.py, 710 lines)
+[x] P1-TEST-01   session-scoped pg18 container fixture
+```
+
+### Batch C — EXECUTION QUEUE (unblocked)
+
+```
+[ ] P1-INFRA-06  Type normalizer                        ← dispatch next
 [ ] P1-TEST-02   Inspector integration tests
 [ ] P1-CLI-01    pgsd inspect <conn-url>
 ```
