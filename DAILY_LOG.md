@@ -52,3 +52,20 @@ Commit `2c4ddca` pushed to `origin/claude/brave-gauss-f3he8w`.
 None. All Phase 1 infra tasks are now unblocked.
 
 ---
+
+## 2026-06-19 — P1-INFRA-01..04 complete (same run, second dispatch)
+
+### Completed
+- **P1-INFRA-01**: `infrastructure/postgres/pool.py` — `Pool` async context-manager + `ConnectionPool` type alias
+- **P1-INFRA-02**: `catalog/tables.sql`, `catalog/columns.sql` — partition-aware table query, identity/generated column query
+- **P1-INFRA-03**: `catalog/indexes.sql`, `catalog/constraints.sql` — full index query, PK/unique/check/FK/exclusion constraint query
+- **P1-INFRA-04**: `catalog/extensions.sql`, `catalog/schemas.sql` — installed extensions, user schemas
+- **Tests**: 60 new unit tests (pool lifecycle + SQL structural + syrupy snapshots)
+- **Suite**: 328 tests passing, ruff ✅ mypy ✅ lint-imports ✅
+
+### Dispatched next
+- **P1-INFRA-05** (background): `PgCatalogInspector` — the concrete SchemaInspector implementation
+- **P1-TEST-01** (background): `tests/integration/conftest.py` — session-scoped postgres:18 fixture
+
+---
+

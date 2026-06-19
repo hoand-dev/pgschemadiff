@@ -48,19 +48,23 @@ All P1-DOM-01..09 tasks complete:
 
 ## Phase 1 Infrastructure — Next Execution Targets
 
-### Immediate (unblocked)
+### Completed this session
+| Task | Title | Status |
+|---|---|---|
+| P1-INFRA-01 | `infrastructure/postgres/pool.py` — AsyncConnectionPool wrapper | ✅ DONE |
+| P1-INFRA-02 | `catalog/tables.sql` + `columns.sql` | ✅ DONE |
+| P1-INFRA-03 | `catalog/indexes.sql` + `constraints.sql` | ✅ DONE |
+| P1-INFRA-04 | `catalog/extensions.sql` + schemas | ✅ DONE |
+
+### In progress (dispatched)
 | Task | Title | Complexity |
 |---|---|---|
-| P1-INFRA-01 | `infrastructure/postgres/pool.py` — AsyncConnectionPool wrapper | M |
-| P1-INFRA-02 | `catalog/tables.sql` + `columns.sql` | M |
-| P1-INFRA-03 | `catalog/indexes.sql` + `constraints.sql` | M |
-| P1-INFRA-04 | `catalog/extensions.sql` + schemas | S |
+| P1-INFRA-05 | `PgCatalogInspector` — concrete SchemaInspector | XL |
 | P1-TEST-01  | Session-scoped pg18 container fixture | M |
 
-### Dependent on P1-INFRA-01..04
+### Blocked on P1-INFRA-05
 | Task | Title |
 |---|---|
-| P1-INFRA-05 | `PgCatalogInspector` (main MVP-A inspector) |
 | P1-INFRA-06 | Type normalizer |
 | P1-TEST-02  | Inspector integration tests |
 | P1-CLI-01   | `pgsd inspect <conn-url>` |
