@@ -25,7 +25,7 @@ Batch C: P1-INFRA-06 ✅ + P1-CLI-01 ✅ (in PR #2, awaiting CI + human merge). 
 
 ## CI / PR Status
 - **Local**: ruff ✅ ruff format ✅ mypy strict ✅ import-linter 4/0 ✅ 552 unit tests ✅ (2026-06-20)
-- **Open PR**: **#2** `claude/clever-cray-9tgfsf` → `main` — CI running (unit/mypy/ruff/arch green on first run; integration in progress).
+- **Open PR**: **#2** `claude/clever-cray-9tgfsf` → `main` @ `923d00d` — **CI ALL GREEN** (run 27878515338, incl. Integration PG18). `mergeable_state: clean`. **Reviewer APPROVED** (code-reviewer, 0 blockers). → **READY TO MERGE** (human gate).
 - **main**: green at `a8b4174` (run 27857290956).
 
 ---
@@ -41,7 +41,13 @@ Batch C: P1-INFRA-06 ✅ + P1-CLI-01 ✅ (in PR #2, awaiting CI + human merge). 
 - After PR #2 merges: dispatch P1-TEST-02.
 
 ## Ready To Merge
-- _(pending CI green on PR #2)_
+- **PR #2** `claude/clever-cray-9tgfsf` @ `923d00d` — CI all green (incl. PG18 integration), reviewer APPROVED, 0 open review-fix. Reaches **M1**. Land via squash (preferred) or rebase. Orchestrator does NOT merge (§7).
+
+## Review Follow-ups (non-blocking, from PR #2 review — do NOT gate merge)
+- inspect.py:53 (low) — `InspectionError` stderr text can include DSN host/db/user (password redacted by libpq). Consider scrubbing / DEBUG-log full + generic stderr. Candidate small follow-up task post-merge.
+- type_normalizer.py:174-180 (trivial) — leading-underscore array branch dead on production `format_type()` path; kept defensively, well-tested.
+- inspect.py:56 (trivial) — redundant `file=sys.stdout`.
+- `_run` wiring in inspect_cmd untested at unit level (asyncio.run stub closes coroutine) — covered by deferred P1-TEST-02 integration tests.
 
 ## Needs Human
 - [ ] PR-2-merge | PR #2 reaches M1 (P1-INFRA-06 + P1-CLI-01) — orchestrator never merges (§7). Merge via squash/rebase once CI green + reviewed. | options: squash (preferred) / rebase | since: 2026-06-20-1  *(non-blocking)*
