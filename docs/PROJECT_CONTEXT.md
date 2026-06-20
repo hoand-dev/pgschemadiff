@@ -4,7 +4,7 @@
 > changes the phase status, finishes a milestone, or adds an ADR. Read me at
 > the start of every chat session.
 
-Last updated: **2026-06-20** — P1-INFRA-06 complete: type normalizer + wired into inspector._map_column.
+Last updated: **2026-06-20** — P1-CLI-01 complete: `pgsd inspect <conn-url>` dumps schema JSON to stdout.
 
 ---
 
@@ -23,7 +23,7 @@ Last updated: **2026-06-20** — P1-INFRA-06 complete: type normalizer + wired i
 
 ## Active task
 
-Backend track: `P1-TEST-02` (Inspector integration tests). P1-INFRA-06 is now complete.
+Backend track: `P1-TEST-02` (Inspector integration tests). P1-CLI-01 is now complete.
 The `PgCatalogInspector` maps pg_catalog rows to domain objects using a single
 REPEATABLE READ transaction per ADR-0012 MVP.
 
@@ -31,6 +31,8 @@ TUI track unblocked at the shell level by `P4-TUI-01`. Remaining
 `P4-TUI-02..08` are blocked on the Phase 1-3 data they each consume.
 
 ## Done in current session
+
+- `P1-CLI-01` — `pgsd inspect <conn-url>`: application use case `application/inspect/inspect_schema.py` (accepts a `SchemaInspector` Protocol, returns `Database.model_dump_json(indent=2)`); CLI command `presentation/cli/commands/inspect.py` (wires `Pool` + `PgCatalogInspector`, calls `asyncio.run`, exits 1 on `InspectionError`); registered as `@app.command("inspect")` in `main.py`. 17 new unit tests (all mocked, no live DB); 552 tests total pass. M1 milestone gate achieved.
 
 - `P1-INFRA-06` — `infrastructure/postgres/type_normalizer.py`: `normalize_type(raw: str) -> str` pure function mapping `format_type()` strings to canonical SQL type names. Handles: integer aliases (int2/int4/int8→smallint/integer/bigint), float aliases (float4/float8→real/double precision), bool→boolean, bpchar/char→character, varchar→character varying, decimal→numeric, timetz/timestamptz→time/timestamp with time zone. Preserves type modifiers (p,s) and array suffixes ([], [][] and leading-underscore `_typename` form). `"char"` (internal Postgres type) preserved as-is. Pass-through for unknown types. Wired into `inspector._map_column` at `data_type` field. 143 new unit tests; 535 tests total pass.
 

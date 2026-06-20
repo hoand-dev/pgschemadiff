@@ -11,6 +11,7 @@ from __future__ import annotations
 import typer
 
 from pgschemadiff import __version__
+from pgschemadiff.presentation.cli.commands.inspect import inspect_cmd
 from pgschemadiff.presentation.cli.commands.tui import launch as launch_tui
 from pgschemadiff.shared.logging import configure_logging
 
@@ -51,6 +52,24 @@ def main(
     configure_logging(level=log_level)
     if ctx.invoked_subcommand is None:
         launch_tui()
+
+
+@app.command("inspect")
+def inspect(
+    conn_url: str = typer.Argument(
+        ...,
+        metavar="<conn-url>",
+        help="PostgreSQL connection URL.",
+    ),
+    schemas: list[str] | None = typer.Option(  # noqa: B008
+        None,
+        "--schema",
+        "-s",
+        help="Schema(s) to inspect (repeatable).  Default: all user schemas.",
+    ),
+) -> None:
+    """Inspect a PostgreSQL database and print its schema as JSON to stdout."""
+    inspect_cmd(conn_url=conn_url, schemas=schemas)
 
 
 @app.command("tui")
