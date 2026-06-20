@@ -44,6 +44,7 @@ from pgschemadiff.domain.table import (
     PartitionStrategy,
     Table,
 )
+from pgschemadiff.infrastructure.postgres.type_normalizer import normalize_type
 from pgschemadiff.shared.errors import InspectionError
 
 if TYPE_CHECKING:
@@ -307,7 +308,7 @@ def _map_column(row: Any) -> Column:
     return Column(
         name=row.column_name,
         position=int(row.ordinal_position),
-        data_type=row.data_type,
+        data_type=normalize_type(row.data_type),
         nullable=bool(row.is_nullable),
         default_expr=default_expr,
         collation=row.collation or None,

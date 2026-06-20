@@ -4,7 +4,7 @@
 > changes the phase status, finishes a milestone, or adds an ADR. Read me at
 > the start of every chat session.
 
-Last updated: **2026-06-19** — P1-TEST-01 complete: session-scoped pg18 container fixture + connection smoke test.
+Last updated: **2026-06-20** — P1-INFRA-06 complete: type normalizer + wired into inspector._map_column.
 
 ---
 
@@ -23,7 +23,7 @@ Last updated: **2026-06-19** — P1-TEST-01 complete: session-scoped pg18 contai
 
 ## Active task
 
-Backend track: `P1-INFRA-06` (Type normalizer). P1-INFRA-05 is now complete.
+Backend track: `P1-TEST-02` (Inspector integration tests). P1-INFRA-06 is now complete.
 The `PgCatalogInspector` maps pg_catalog rows to domain objects using a single
 REPEATABLE READ transaction per ADR-0012 MVP.
 
@@ -31,6 +31,8 @@ TUI track unblocked at the shell level by `P4-TUI-01`. Remaining
 `P4-TUI-02..08` are blocked on the Phase 1-3 data they each consume.
 
 ## Done in current session
+
+- `P1-INFRA-06` — `infrastructure/postgres/type_normalizer.py`: `normalize_type(raw: str) -> str` pure function mapping `format_type()` strings to canonical SQL type names. Handles: integer aliases (int2/int4/int8→smallint/integer/bigint), float aliases (float4/float8→real/double precision), bool→boolean, bpchar/char→character, varchar→character varying, decimal→numeric, timetz/timestamptz→time/timestamp with time zone. Preserves type modifiers (p,s) and array suffixes ([], [][] and leading-underscore `_typename` form). `"char"` (internal Postgres type) preserved as-is. Pass-through for unknown types. Wired into `inspector._map_column` at `data_type` field. 143 new unit tests; 535 tests total pass.
 
 - `P1-TEST-01` — `tests/integration/conftest.py`: session-scoped `postgres_container` fixture (postgres:18-alpine), `pg_admin_dsn` (session), `pg_test_dsn` (function-scoped — creates/drops `test_<uuid>` DB with FORCE). `tests/integration/test_connection.py`: smoke test asserting PostgreSQL 18 version string. Implements ADR-0010 strategy 3. Both ruff and mypy strict pass; 283 unit tests unaffected.
 
