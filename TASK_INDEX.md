@@ -61,13 +61,14 @@ _Canonical task list lives in `docs/TASKS.md` — this file mirrors the executio
 [x] P1-TEST-01   session-scoped pg18 container fixture
 ```
 
-### Batch C — EXECUTION QUEUE (unblocked)
+### Batch C — EXECUTION QUEUE
 
 ```
-[>] P1-INFRA-06  Type normalizer                        ← DISPATCHED
-[ ] P1-TEST-02   Inspector integration tests
-[ ] P1-CLI-01    pgsd inspect <conn-url>
+[R] P1-INFRA-06  Type normalizer            ← review (PR #2, 394c177)  attempts:1
+[R] P1-CLI-01    pgsd inspect <conn-url>     ← review (PR #2, eaadf3e) — M1 gate  attempts:1
+[ ] P1-TEST-02   Inspector integration tests ← ready (next; CI-only, no local Docker)  attempts:0
 ```
+Status key: [R] review (branch pushed + PR open, awaiting CI + human merge).
 
 ### Optional (deferred)
 ```
@@ -112,6 +113,6 @@ P4-TUI-02..08: blocked on domain + infrastructure work.
 | Gate | Condition | Status |
 |---|---|---|
 | M0 | CI green; layered arch enforced | ✅ (CI green on `claude/brave-gauss-f3he8w` run 27811581234) |
-| M1 | `pgsd inspect` dumps schema JSON | ❌ P1-CLI-01 not started (P1-INFRA-05 ✅) |
+| M1 | `pgsd inspect` dumps schema JSON | 🟡 P1-CLI-01 done (eaadf3e) in PR #2 — awaiting CI green + merge |
 | M2 | `pgsd diff` emits typed DeltaSet | ❌ |
 | M3 | round-trip integration test green | ❌ |

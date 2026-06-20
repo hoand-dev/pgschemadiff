@@ -79,6 +79,39 @@ None. All Phase 1 infra tasks are now unblocked.
 
 ---
 
+## RUN 2026-06-20-1 — Batch C: P1-INFRA-06 + P1-CLI-01 → M1 (PR #2)
+NEEDS_HUMAN (open): 2 (both non-blocking) — (1) merge PR #2 [M1]; (2) confirm branch-protection / linear-history repo settings.
+
+### Assessment
+- State files named active branch `claude/brave-gauss-f3he8w` — that branch no longer exists; its history is now on `main`. Real working branch is `claude/clever-cray-9tgfsf`, which == `main` at start (a8b4174). **Corrected stale state.**
+- `main` CI green at a8b4174 (run 27857290956). 0 open PRs at start.
+- **P1-INFRA-06 dispatch from the 2026-06-19 run was lost**: the background agent never committed before that session ended (`type_normalizer.py` absent). Re-dispatched this run.
+- No `gh` CLI in this environment → used GitHub MCP tools for PR/CI. No Docker → integration tests can't run locally.
+
+### Dispatched
+- `backend-engineer` -> P1-INFRA-06 (type normalizer) -> done, committed `394c177`. Pure `normalize_type()` + alias map; wired into `PgCatalogInspector._map_column`; 143 new unit tests. Full local gate green (ruff/format/mypy strict/import-linter 4-0/535 tests).
+- `backend-engineer` -> P1-CLI-01 (`pgsd inspect`) -> done, committed `eaadf3e`. New `application/inspect/inspect_schema.py` use case + `presentation/cli/commands/inspect.py` command (composition root) + registered on app; 17 new unit tests (mocked inspector, CliRunner). Full local gate green (552 tests). **M1 milestone reached.**
+
+### Decisions
+- Ran the two code-writers **sequentially** on one branch (no worktrees) — §6 one-writer-per-branch, avoids merge surgery in an unattended run.
+- **Did NOT fold P1-TEST-02 into PR #2**: no local Docker means its integration tests can't be locally validated; keeping the M1 PR fully-green-locally and mergeable. P1-TEST-02 deferred to its own cycle (CI-validated).
+- Pushed branch + opened **PR #2** → `main` (§7). Orchestrator does NOT merge — escalated as non-blocking needs-human.
+
+### Blockers
+- P1-TEST-02: cannot validate locally (no Docker) -> deferred; will lean on CI's PG18 job.
+
+### Commits/PRs
+- `claude/clever-cray-9tgfsf` 394c177 "feat(infra): P1-INFRA-06 — type normalizer" | in PR #2
+- `claude/clever-cray-9tgfsf` eaadf3e "feat(cli): P1-CLI-01 — pgsd inspect dumps schema JSON" | in PR #2
+- PR #2 open → main | CI running (unit/mypy/ruff/arch green; integration in progress at persist time)
+
+### Next run targets
+1. Verify PR #2 CI green → Ready To Merge + human-merge escalation. If red → `ci-recovery`.
+2. After merge: dispatch P1-TEST-02 (qa-engineer, CI-validated).
+3. Then P0-CI-03 (coverage gate) or begin Phase 2 planning.
+
+---
+
 ## 2026-06-19 — Rebase + CI check + P1-INFRA-06 dispatch (third run)
 
 ### Summary
