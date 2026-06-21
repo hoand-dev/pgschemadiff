@@ -948,6 +948,11 @@ dev = [
     { name = "types-pyyaml" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "mypy" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "anyio", specifier = ">=4.4" },
@@ -973,6 +978,9 @@ requires-dist = [
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0" },
 ]
 provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "mypy", specifier = ">=2.1.0" }]
 
 [[package]]
 name = "platformdirs"

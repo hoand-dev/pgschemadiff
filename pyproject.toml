@@ -309,4 +309,9 @@ required-version = ">=0.8"
 package = true
 
 [tool.uv.sources]
+
+[dependency-groups]
+dev = [
+    "mypy>=2.1.0",
+]
 # (none — all from PyPI)

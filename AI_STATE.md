@@ -25,7 +25,7 @@ Batch C: P1-INFRA-06 ✅ + P1-CLI-01 ✅ (in PR #2, awaiting CI + human merge). 
 
 ## CI / PR Status
 - **Local**: ruff ✅ ruff format ✅ mypy strict ✅ import-linter 4/0 ✅ 552 unit tests ✅ (2026-06-20)
-- **Open PR**: **#2** `claude/clever-cray-9tgfsf` → `main` @ `923d00d` — **CI ALL GREEN** (run 27878515338, incl. Integration PG18). `mergeable_state: clean`. **Reviewer APPROVED** (code-reviewer, 0 blockers). → **READY TO MERGE** (human gate).
+- **Open PR**: **#2** `claude/clever-cray-9tgfsf` → `main` — CI was green at `923d00d`; independent review found merge-blockers (C1/C2: connection errors not caught; I1: tz modifier placement; I2: double-bracket for `_type[]`). Review-fixes applied; re-verification required.
 - **main**: green at `a8b4174` (run 27857290956).
 
 ---
@@ -41,7 +41,7 @@ Batch C: P1-INFRA-06 ✅ + P1-CLI-01 ✅ (in PR #2, awaiting CI + human merge). 
 - After PR #2 merges: dispatch P1-TEST-02.
 
 ## Ready To Merge
-- **PR #2** `claude/clever-cray-9tgfsf` @ `923d00d` — CI all green (incl. PG18 integration), reviewer APPROVED, 0 open review-fix. Reaches **M1**. Land via squash (preferred) or rebase. Orchestrator does NOT merge (§7).
+- **PR #2** `claude/clever-cray-9tgfsf` — NOT yet ready; review-fixes (C1/C2, I1, I2) applied and pushed. Awaiting CI green + human re-review before merge. Reaches **M1** once merged.
 
 ## Review Follow-ups (non-blocking, from PR #2 review — do NOT gate merge)
 - inspect.py:53 (low) — `InspectionError` stderr text can include DSN host/db/user (password redacted by libpq). Consider scrubbing / DEBUG-log full + generic stderr. Candidate small follow-up task post-merge.

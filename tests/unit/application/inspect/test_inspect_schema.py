@@ -14,13 +14,18 @@ Coverage goals:
 
 from __future__ import annotations
 
+import asyncio
+import io
 import json
+from contextlib import redirect_stderr
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+import psycopg
+import psycopg_pool
 import pytest
 import typer
 from typer.testing import CliRunner
@@ -382,3 +387,125 @@ def test_cli_inspect_help_text() -> None:
     assert result.exit_code == 0
     output_lower = result.stdout.lower()
     assert "conn-url" in output_lower or "postgresql" in output_lower
+
+
+# ---------------------------------------------------------------------------
+# Connection-failure tests (review-fix C1/C2)
+#
+# These tests exercise the REAL composition root path: asyncio.run is NOT
+# stubbed.  Instead, ``Pool.__aenter__`` is patched so that opening the pool
+# raises a connection-level error (psycopg_pool.PoolTimeout or
+# psycopg.OperationalError).  The CLI must catch either, emit "Error: …" to
+# stderr, and exit with code 1 — with no unhandled traceback.
+# ---------------------------------------------------------------------------
+
+
+class _RaisingPool:
+    """Minimal async context manager that raises a given exception on ``__aenter__``.
+
+    Used to stub ``Pool`` in the inspect command module without involving
+    ``AsyncMock``, which holds internal references to the asyncio event loop
+    and can trigger ``ResourceWarning: unclosed event loop`` when the event
+    loop created by ``asyncio.run()`` inside ``inspect_cmd`` is GC'd later
+    inside a pytest-asyncio-managed async test.
+    """
+
+    def __init__(self, exc: BaseException, *_args: object, **_kwargs: object) -> None:
+        self._exc = exc
+
+    async def __aenter__(self) -> None:
+        raise self._exc
+
+    async def __aexit__(self, *_args: object) -> bool:
+        return False
+
+
+def _pool_raising(exc: BaseException) -> type[_RaisingPool]:
+    """Return a Pool-compatible class whose ``async with Pool(...)`` raises *exc*.
+
+    The returned class replaces ``Pool`` in the inspect command module so the
+    real Pool is never constructed (no network call is made).
+    """
+
+    class _Configured(_RaisingPool):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            super().__init__(exc, *args, **kwargs)
+
+    return _Configured
+
+
+@pytest.mark.unit
+async def test_cli_connection_pool_timeout_exits_one() -> None:
+    """``pgsd inspect`` must exit 1 when Pool raises ``psycopg_pool.PoolTimeout``.
+
+    Exercises the REAL composition root path: asyncio.run is NOT stubbed.
+    ``inspect_cmd`` is run in a worker thread (via ``asyncio.to_thread``) so
+    that ``asyncio.run()`` inside ``inspect_cmd`` can create its own event loop
+    without conflicting with the pytest-asyncio-managed test loop.  Running in
+    a thread also prevents the "unclosed event loop" ``ResourceWarning`` that
+    would otherwise surface in a later async test when the GC collects the
+    loop created by ``asyncio.run()`` in a sync-test context.
+
+    The test verifies:
+    - ``typer.Exit`` with ``exit_code == 1`` is raised
+    - stderr contains an ``Error:`` message (no unhandled traceback)
+    """
+    pool_timeout_exc = psycopg_pool.PoolTimeout("timed out waiting for connection")
+    stderr_capture = io.StringIO()
+
+    def run_in_thread() -> typer.Exit:
+        """Run ``inspect_cmd`` synchronously; capture stderr; return the Exit."""
+        with (
+            redirect_stderr(stderr_capture),
+            patch(
+                "pgschemadiff.presentation.cli.commands.inspect.Pool",
+                new=_pool_raising(pool_timeout_exc),
+            ),
+        ):
+            try:
+                inspect_cmd(conn_url="postgresql://bad-host/db", schemas=None)
+            except typer.Exit as exc:
+                return exc
+        # Should not reach here; raise to signal unexpected success
+        raise AssertionError("inspect_cmd did not raise typer.Exit")  # pragma: no cover
+
+    exit_exc = await asyncio.to_thread(run_in_thread)
+
+    assert exit_exc.exit_code == 1
+    err_output = stderr_capture.getvalue()
+    assert "Error" in err_output, f"No 'Error' in stderr: {err_output!r}"
+
+
+@pytest.mark.unit
+async def test_cli_connection_operational_error_exits_one() -> None:
+    """``pgsd inspect`` must exit 1 when Pool raises ``psycopg.OperationalError``.
+
+    Exercises the REAL composition root path: asyncio.run is NOT stubbed.
+    ``inspect_cmd`` is run in a worker thread so that ``asyncio.run()`` inside
+    ``inspect_cmd`` creates a clean event loop without leaking into the
+    pytest-asyncio-managed test loop (see ``test_cli_connection_pool_timeout_exits_one``
+    for the full explanation).
+    """
+    op_error_exc = psycopg.OperationalError("connection refused")
+    stderr_capture = io.StringIO()
+
+    def run_in_thread() -> typer.Exit:
+        """Run ``inspect_cmd`` synchronously; capture stderr; return the Exit."""
+        with (
+            redirect_stderr(stderr_capture),
+            patch(
+                "pgschemadiff.presentation.cli.commands.inspect.Pool",
+                new=_pool_raising(op_error_exc),
+            ),
+        ):
+            try:
+                inspect_cmd(conn_url="postgresql://bad-host/db", schemas=None)
+            except typer.Exit as exc:
+                return exc
+        raise AssertionError("inspect_cmd did not raise typer.Exit")  # pragma: no cover
+
+    exit_exc = await asyncio.to_thread(run_in_thread)
+
+    assert exit_exc.exit_code == 1
+    err_output = stderr_capture.getvalue()
+    assert "Error" in err_output, f"No 'Error' in stderr: {err_output!r}"
