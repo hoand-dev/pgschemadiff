@@ -1,7 +1,7 @@
 # AI_STATE.md
-_Last updated: 2026-06-20_
+_Last updated: 2026-06-21_
 
-RUN_ID: 2026-06-20-1
+RUN_ID: 2026-06-21-1
 STATE: ACTIVE
 STALL_COUNTER: 0
 
@@ -24,8 +24,8 @@ Batch C: P1-INFRA-06 ✅ + P1-CLI-01 ✅ (in PR #2, awaiting CI + human merge). 
 ---
 
 ## CI / PR Status
-- **Local**: ruff ✅ ruff format ✅ mypy strict ✅ import-linter 4/0 ✅ 552 unit tests ✅ (2026-06-20)
-- **Open PR**: **#2** `claude/clever-cray-9tgfsf` → `main` — CI was green at `923d00d`; independent review found merge-blockers (C1/C2: connection errors not caught; I1: tz modifier placement; I2: double-bracket for `_type[]`). Review-fixes applied; re-verification required.
+- **Local** (2026-06-21): ruff ✅ ruff format ✅ mypy strict ✅ import-linter 4/0 ✅ 524 unit tests ✅
+- **Open PR**: **#2** `claude/clever-cray-9tgfsf` → `main` — review-fixes (C1/C2, I1, I2, I3) applied and pushed (commits `0c7f3ab`, `d7bf014`). Awaiting CI green + human re-review before merge.
 - **main**: green at `a8b4174` (run 27857290956).
 
 ---
@@ -41,7 +41,7 @@ Batch C: P1-INFRA-06 ✅ + P1-CLI-01 ✅ (in PR #2, awaiting CI + human merge). 
 - After PR #2 merges: dispatch P1-TEST-02.
 
 ## Ready To Merge
-- **PR #2** `claude/clever-cray-9tgfsf` — NOT yet ready; review-fixes (C1/C2, I1, I2) applied and pushed. Awaiting CI green + human re-review before merge. Reaches **M1** once merged.
+- **PR #2** `claude/clever-cray-9tgfsf` — NOT yet ready; review-fixes (C1/C2, I1, I2, I3) applied and pushed (2026-06-21). Awaiting CI green + human re-review before merge. Reaches **M1** once merged.
 
 ## Review Follow-ups (non-blocking, from PR #2 review — do NOT gate merge)
 - inspect.py:53 (low) — `InspectionError` stderr text can include DSN host/db/user (password redacted by libpq). Consider scrubbing / DEBUG-log full + generic stderr. Candidate small follow-up task post-merge.

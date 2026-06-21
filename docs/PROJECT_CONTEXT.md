@@ -4,7 +4,7 @@
 > changes the phase status, finishes a milestone, or adds an ADR. Read me at
 > the start of every chat session.
 
-Last updated: **2026-06-20** — P1-CLI-01 complete: `pgsd inspect <conn-url>` dumps schema JSON to stdout.
+Last updated: **2026-06-21** — Review-fixes RF-1 (C1/C2), RF-2 (I1/I2), I3 applied to PR #2; pushed to `claude/clever-cray-9tgfsf`. Awaiting CI green + human merge.
 
 ---
 
@@ -31,6 +31,12 @@ TUI track unblocked at the shell level by `P4-TUI-01`. Remaining
 `P4-TUI-02..08` are blocked on the Phase 1-3 data they each consume.
 
 ## Done in current session
+
+- **Review-fix RF-1 (C1/C2)**: `inspect_cmd` now catches `(psycopg.Error, psycopg_pool.PoolTimeout)` from `Pool.__aenter__`, wraps as `InspectionError("Connection failed: …")`, echoes to stderr, exits 1. `_POOL_OPEN_TIMEOUT` lowered to 5 s. Two new async integration-style unit tests (`test_cli_connection_pool_timeout_exits_one`, `test_cli_connection_operational_error_exits_one`) in `test_inspect_schema.py`; they run `inspect_cmd` via `asyncio.to_thread` to avoid ResourceWarning leakage from `asyncio.run()` in a sync-test context.
+
+- **Review-fix RF-2 (I1+I2)**: `normalize_type()` — (I1) precision modifier for `timetz`/`timestamptz` aliases is now placed BEFORE "with time zone" not after; (I2) `_typename[]` no longer double-brackets. 15 new parametrized tests added.
+
+- **Review-fix I3**: Removed false "READY TO MERGE" claim from `AI_STATE.md`.
 
 - `P1-CLI-01` — `pgsd inspect <conn-url>`: application use case `application/inspect/inspect_schema.py` (accepts a `SchemaInspector` Protocol, returns `Database.model_dump_json(indent=2)`); CLI command `presentation/cli/commands/inspect.py` (wires `Pool` + `PgCatalogInspector`, calls `asyncio.run`, exits 1 on `InspectionError`); registered as `@app.command("inspect")` in `main.py`. 17 new unit tests (all mocked, no live DB); 552 tests total pass. M1 milestone gate achieved.
 
