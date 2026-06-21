@@ -4,7 +4,7 @@
 > changes the phase status, finishes a milestone, or adds an ADR. Read me at
 > the start of every chat session.
 
-Last updated: **2026-06-19** — P1-TEST-01 complete: session-scoped pg18 container fixture + connection smoke test.
+Last updated: **2026-06-21** — P1-TEST-02 complete: PgCatalogInspector integration tests (36 cases) in PR on claude/p1-test-02-integration.
 
 ---
 
@@ -31,6 +31,8 @@ TUI track unblocked at the shell level by `P4-TUI-01`. Remaining
 `P4-TUI-02..08` are blocked on the Phase 1-3 data they each consume.
 
 ## Done in current session
+
+- `P1-TEST-02` — `tests/integration/test_inspector.py`: 36 `@pytest.mark.integration` test cases exercising `PgCatalogInspector.inspect()` against PostgreSQL 18. Covers: protocol conformance, empty-DB baseline, table/column round-trip (nullable, default expr, ordinal order), identity columns (ALWAYS / BY DEFAULT), PK/Unique/Check/FK constraints, btree/unique/partial indexes, custom schemas, schema filter, extensions, Database lookup helpers. ruff/mypy/lint-imports all pass; 392 unit tests unaffected.
 
 - `P1-TEST-01` — `tests/integration/conftest.py`: session-scoped `postgres_container` fixture (postgres:18-alpine), `pg_admin_dsn` (session), `pg_test_dsn` (function-scoped — creates/drops `test_<uuid>` DB with FORCE). `tests/integration/test_connection.py`: smoke test asserting PostgreSQL 18 version string. Implements ADR-0010 strategy 3. Both ruff and mypy strict pass; 283 unit tests unaffected.
 

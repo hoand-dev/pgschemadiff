@@ -56,7 +56,7 @@
 | [ ] | P1-INFRA-06 | Type normalizer | backend-engineer | P0 | P1-INFRA-05 | M |
 | [ ] | P1-INFRA-07 | Multi-connection `pg_export_snapshot` (deferred) | backend-engineer | P2 | P1-INFRA-05 | M |
 | [x] | P1-TEST-01 | Session-scoped pg18 container fixture | qa-engineer | P0 | P0-CI-02 | M |
-| [ ] | P1-TEST-02 | Inspector integration tests | qa-engineer | P0 | P1-INFRA-05 | L |
+| [x] | P1-TEST-02 | Inspector integration tests | qa-engineer | P0 | P1-INFRA-05 | L |
 | [ ] | P1-CLI-01 | `pgsd inspect <conn-url>` | backend-engineer | P1 | P1-INFRA-05 | M |
 
 ## Phase 2 — Diff Engine
