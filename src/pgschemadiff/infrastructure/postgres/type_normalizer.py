@@ -175,9 +175,12 @@ def normalize_type(raw: str) -> str:
     # When format_type encounters an array type it may return "_typename" for
     # the element type (the underscore prefix is the pg_catalog convention for
     # array types of that element type).  Normalise to "typename[]".
+    # Guard: only strip the leading underscore when there is no trailing "[]"
+    # already present, to avoid emitting "typename[][]" for "_typename[]".
     leading_underscore = raw.startswith("_") and not raw.startswith("__")
     if leading_underscore:
-        raw = raw[1:] + "[]"
+        inner = raw[1:]
+        raw = inner + "[]" if not inner.endswith("[]") else inner
 
     # ── 2. Strip leading/trailing whitespace ──────────────────────────────────
     raw = raw.strip()
@@ -202,4 +205,14 @@ def normalize_type(raw: str) -> str:
     canonical_bare = _ALIAS_MAP.get(bare_lower, bare)
 
     # ── 6. Re-assemble ────────────────────────────────────────────────────────
+    # For types whose canonical name ends with a time-zone clause
+    # ("… with time zone" / "… without time zone"), the precision modifier
+    # must be inserted *before* the "with"/"without" keyword, not appended at
+    # the end.  E.g. "timestamptz(6)" → "timestamp(6) with time zone",
+    # not "timestamp with time zone(6)" (invalid SQL).
+    if modifier:
+        for tz_suffix in (" with time zone", " without time zone"):
+            if canonical_bare.endswith(tz_suffix):
+                base = canonical_bare[: -len(tz_suffix)]
+                return base + modifier + tz_suffix + array_suffix
     return canonical_bare + modifier + array_suffix

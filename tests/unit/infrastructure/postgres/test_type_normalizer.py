@@ -254,6 +254,60 @@ def test_case_insensitive_lookup(raw: str, expected: str) -> None:
 # ===========================================================================
 
 
+# ===========================================================================
+# Timezone alias modifier placement (review-fix I1)
+# ===========================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        # Short timezone aliases with precision modifier must insert the modifier
+        # *before* "with time zone", not after — "timestamp with time zone(6)"
+        # is invalid SQL; "timestamp(6) with time zone" is the correct form.
+        ("timestamptz(6)", "timestamp(6) with time zone"),
+        ("timestamptz(0)", "timestamp(0) with time zone"),
+        ("timetz(3)", "time(3) with time zone"),
+        ("timetz(0)", "time(0) with time zone"),
+        # Already-canonical forms with modifiers must also be placed correctly.
+        ("timestamp(3) with time zone", "timestamp(3) with time zone"),
+        ("time(6) with time zone", "time(6) with time zone"),
+        ("timestamp(6) without time zone", "timestamp(6) without time zone"),
+        ("time(3) without time zone", "time(3) without time zone"),
+        # Without modifier, no change to position is needed.
+        ("timestamptz", "timestamp with time zone"),
+        ("timetz", "time with time zone"),
+    ],
+)
+def test_tz_alias_modifier_placement(raw: str, expected: str) -> None:
+    """Precision modifier for tz aliases must be placed before 'with time zone'."""
+    assert normalize_type(raw) == expected
+
+
+# ===========================================================================
+# Leading-underscore array guard — must not double the [] (review-fix I2)
+# ===========================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        # Leading underscore without trailing [] → single []
+        ("_int4", "integer[]"),
+        ("_text", "text[]"),
+        # Leading underscore WITH trailing [] → must NOT double the brackets
+        ("_int4[]", "integer[]"),
+        ("_text[]", "text[]"),
+        ("_bool[]", "boolean[]"),
+    ],
+)
+def test_leading_underscore_no_double_bracket(raw: str, expected: str) -> None:
+    """_typename[] must not produce typename[][] (review-fix I2)."""
+    assert normalize_type(raw) == expected
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize(
     ("raw", "expected"),
