@@ -23,7 +23,7 @@ Phase 0 ✅. Phase 1 domain ✅. Phase 1 infra ✅ MERGED (P1-INFRA-01..06, P1-T
 
 ## CI / PR Status
 - **main**: green at `f602f60` (workflow `success`, 2026-06-22T04:21Z). Includes merged PR #2 (M1).
-- **PR #4** `claude/clever-cray-0zzng4` → main — **P2-DOM-01a** (`domain/delta/` foundation), head `4349983`. CI on `eb331e2`+`ef12aa3` went **green 12/12** (incl. Integration PG18). `code-reviewer` then returned **CHANGES-REQUESTED** (2 verified merge-blockers); **review-fix RF-A applied** (`4349983`) — full gate re-run green locally (613 tests). **CI re-running on `4349983`.** Per §7, RF-A is reviewed-once (not re-looped). Session subscribed to PR #4 activity.
+- **PR #4** `claude/clever-cray-0zzng4` → main — **P2-DOM-01a** (`domain/delta/` foundation), head `2afa836`. `code-reviewer` returned CHANGES-REQUESTED (2 verified blockers) → **review-fix RF-A** (`4349983`) fixed both (reviewed-once, §7). **CI GREEN 12/12 on the RF-A head** (incl. Integration PG18; runs 28047566934 + 28047561911), `mergeable_state: clean`. **READY TO MERGE — human gate.** Session subscribed to PR #4 activity.
 - **PR #2** `clever-cray-9tgfsf` → main: **MERGED** 2026-06-22 (M1).
 - **PR #3** `claude/p1-test-02-integration` → main: **CLOSED, not merged** by human 2026-06-22.
 - Stale remote branches (housekeeping, non-blocking): `claude/clever-cray-9tgfsf` (merged PR #2 head), `claude/clever-cray-192p05` + `claude/clever-cray-vqtao5` (prior orchestrator state branches, now superseded by this branch).
@@ -31,7 +31,7 @@ Phase 0 ✅. Phase 1 domain ✅. Phase 1 infra ✅ MERGED (P1-INFRA-01..06, P1-T
 ---
 
 ## Execution Queue
-1. **(awaiting CI re-run on `4349983`)** PR #4 — on green → mark Ready To Merge + non-blocking human-merge note. If red → `ci-recovery` (devops-engineer) on this branch.
+1. **(DONE this run — awaiting human merge)** PR #4 — CI green + reviewed + RF-A landed → **Ready To Merge** (human gate, §7). Watching for the merge transition (self check-in armed; webhooks don't deliver merges).
 2. **(blocked on P2-DOM-01a merge)** **P2-DOM-01b..f** — category delta modules (table/column/index/constraint/schema+extension). Independent of each other, **distinct file scopes** → parallelizable (worktree per writer, §6). Each ≤3 files + 1 done-condition.
 3. **(blocked on P2-DOM-01a merge)** **P2-DIFF-08** — `topo_sort.py` (Kahn + cycle detection). Deps only P2-DOM-01a.
 4. **P0-CI-03** — Coverage gate (85%/80%) in CI. `ready`, low priority. ⚠️ risk: a hard gate could turn CI red; validate headroom before enabling. Held.
@@ -43,7 +43,7 @@ Phase 0 ✅. Phase 1 domain ✅. Phase 1 infra ✅ MERGED (P1-INFRA-01..06, P1-T
 - After PR #4 merges: dispatch P2-DOM-01b..f (parallel, isolated worktrees — distinct files) + P2-DIFF-08.
 
 ## Ready To Merge
-- **PR #4** — pending CI re-run on `4349983`. All §7 conditions met **except** the final CI confirmation: reviewer's 2 merge-blockers resolved by RF-A (reviewed-once, §7) + 0 open review-fix. On CI green → flip to Ready To Merge + non-blocking human-merge note. Self check-in armed to confirm.
+- **PR #4** `claude/clever-cray-0zzng4` (head `2afa836`) — **READY.** All §7 conditions met: CI green 12/12 (incl. Integration PG18) + reviewer's 2 blockers resolved by RF-A (reviewed-once) + 0 open review-fix. Squash/rebase merge only (linear history, §7.1). Reaches Phase 2 foundation; unblocks P2-DOM-01b..f + P2-DIFF-08.
 
 ## Review Follow-ups (PR #4 — RF-A, all addressed in `4349983`)
 - BLOCKER fixed: `sort_key` now folds parent identity → total/collision-free for sub-objects (P2-DIFF-08 determinism).
@@ -51,6 +51,7 @@ Phase 0 ✅. Phase 1 domain ✅. Phase 1 infra ✅ MERGED (P1-INFRA-01..06, P1-T
 - `from_iterable` now `Iterable[DeltaBase]`; `by_op`/`by_target` both use `==`; `DeltaOp.NO_CHANGE` removed (no production consumer).
 
 ## Needs Human
+- [ ] PR-4-merge | **PR #4** (P2-DOM-01a, Phase 2 foundation) is READY: CI green 12/12, reviewed (RF-A resolved 2 blockers), 0 open review-fix. Orchestrator never merges (§7). | options: squash (preferred) / rebase merge — linear history | since: 2026-06-23-1  *(non-blocking)*
 - [ ] P1-TEST-02 | Inspector integration-tests PR (#3) was closed without merge by the human. | root cause: human declined the CI-only-validated integration tests (no local Docker to validate pre-merge). | options: (A) re-approach P1-TEST-02 differently and retry / (B) defer integration tests, proceed Phase 2 (currently in progress) / (C) leave M1 exit gate intentionally unmet. **Will NOT recreate without your call.** | since: 2026-06-22-1
 - [ ] repo-branch-protection | GitHub branch protection not confirmed: disallow merge commits, require linear history (§7.1, one-time human action). | since: 2026-06-20-1  *(non-blocking)*
 - [ ] stale-branches | Housekeeping: delete superseded remote branches `claude/clever-cray-9tgfsf`, `claude/clever-cray-192p05`, `claude/clever-cray-vqtao5`. | since: 2026-06-22-1  *(non-blocking)*
