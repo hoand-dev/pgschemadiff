@@ -196,8 +196,14 @@ NEEDS_HUMAN (open): 3 — (1) **P1-TEST-02**: PR #3 human-closed → direction n
 - `claude/clever-cray-0zzng4` `eb331e2` "feat(domain): P2-DOM-01a — domain/delta package" | **PR #4** open → main, CI pending.
 - (this state commit) `claude/clever-cray-0zzng4` chore(state): RUN 2026-06-23-1 — consolidates fragmented state onto the working branch (will land on main via PR #4).
 
+### Update (same run) — PR #4 CI green → review → RF-A
+- PR #4 CI on `eb331e2`/`ef12aa3` completed **green 12/12** (incl. Integration PG18).
+- Dispatched `code-reviewer` (read-only) → **CHANGES-REQUESTED**, 2 verified merge-blockers: (1) `sort_key` collided for sub-objects on different parents (non-deterministic ordering for P2-DIFF-08); (2) `DeltaSet.deltas: tuple[DeltaBase,...]` lossy on subclass round-trip. Plus minor findings (Iterable annotation, is/== consistency, NO_CHANGE dead, test gaps).
+- Dispatched `backend-engineer` → **review-fix RF-A** (`4349983`): parent-aware total `sort_key`; explicit `TODO(P2-DOM-01f)` + 2 round-trip tests pinning the intentional pre-union lossiness; `from_iterable: Iterable[DeltaBase]`; `==` in both filters; removed `DeltaOp.NO_CHANGE`. Gate green (613 tests, +8). Orchestrator independently re-ran gate → green. Pushed; CI re-running. Per §7 RF-A is reviewed-once (not re-looped).
+- Recorded the deferred union retype as an explicit requirement on **P2-DOM-01f** in TASK_INDEX.
+
 ### Next run targets
-1. PR #4 CI: green → Ready To Merge + human-merge note; red → `ci-recovery`.
+1. Confirm PR #4 CI green on `4349983` (self check-in armed) → mark Ready To Merge + non-blocking human-merge note. Red → `ci-recovery`.
 2. After PR #4 merges: dispatch P2-DOM-01b..f (parallel, isolated worktrees, distinct files) + P2-DIFF-08.
 3. Act on any human reply re P1-TEST-02 / Phase 2 direction.
 
