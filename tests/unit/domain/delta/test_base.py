@@ -4,10 +4,13 @@ Covers:
 - DeltaOp StrEnum membership and value round-trip
 - DeltaBase frozen behaviour and extra-field rejection
 - DeltaBase construction with ObjectRef / QualifiedName target
-- DeltaBase.sort_key stable ordering contract
+- DeltaBase.sort_key stable ordering contract (top-level and sub-objects)
+- DeltaBase.sort_key collision-freedom for sub-objects on different parents
 - DeltaSet construction, iteration, len, containment
-- DeltaSet.from_iterable alternative constructor
+- DeltaSet.from_iterable alternative constructor (accepts any Iterable)
 - DeltaSet lookup helpers: by_op, by_target, is_empty
+- DeltaSet JSON round-trip (base-level fields preserved; lossy limitation documented)
+- DeltaSet model_dump shape
 - Package-level re-export via ``from pgschemadiff.domain.delta import ...``
 """
 
@@ -22,7 +25,7 @@ from pgschemadiff.domain.delta import DeltaBase, DeltaOp, DeltaSet
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 
 # ---------------------------------------------------------------------------
-# Concrete test subclass (DeltaBase is abstract — needs narrowed Literal op)
+# Concrete test subclasses (DeltaBase is abstract — needs narrowed Literal op)
 # ---------------------------------------------------------------------------
 
 
@@ -103,13 +106,18 @@ def test_delta_op_is_str_enum() -> None:
     assert DeltaOp.ALTER.value == "alter"
     assert DeltaOp.RENAME.value == "rename"
     assert DeltaOp.REPLACE.value == "replace"
-    assert DeltaOp.NO_CHANGE.value == "no_change"
 
 
 @pytest.mark.unit
 def test_delta_op_exact_members() -> None:
-    """DeltaOp has exactly the six expected members — no accidental additions."""
-    expected = {"create", "drop", "alter", "rename", "replace", "no_change"}
+    """DeltaOp has exactly the five expected members — no accidental additions.
+
+    NO_CHANGE was removed from the production enum (RF-A finding 6): no
+    concrete comparator subclass carries it and there is no production
+    consumer.  Tests that need a sentinel op should define a fixture-local
+    value or use one of the real five ops.
+    """
+    expected = {"create", "drop", "alter", "rename", "replace"}
     actual = {m.value for m in DeltaOp}
     assert actual == expected
 
@@ -193,13 +201,13 @@ def test_delta_base_rejects_extra_fields(table_ref: ObjectRef) -> None:
 
 
 # ===========================================================================
-# DeltaBase — sort_key
+# DeltaBase — sort_key (top-level objects)
 # ===========================================================================
 
 
 @pytest.mark.unit
-def test_delta_base_sort_key_structure(create_delta: _CreateDelta) -> None:
-    """sort_key is a 3-tuple (namespace, object_name, op_value)."""
+def test_delta_base_sort_key_structure_top_level(create_delta: _CreateDelta) -> None:
+    """sort_key for a top-level object is a 3-tuple (namespace, object_name, op_value)."""
     key = create_delta.sort_key
     assert len(key) == 3
     assert key == ("public", "users", "create")
@@ -236,7 +244,7 @@ def test_delta_base_sort_key_ordering() -> None:
     deltas = [delta_a, delta_b, delta_c]
     sorted_deltas = sorted(deltas, key=lambda d: d.sort_key)
 
-    # c: (a_schema, a_table, create → drop)
+    # c: (a_schema, a_table, drop)
     # a: (a_schema, z_table, create)
     # b: (b_schema, a_table, create)
     assert sorted_deltas[0] is delta_c
@@ -256,6 +264,105 @@ def test_delta_base_sort_key_differentiates_ops() -> None:
     assert create.sort_key != drop.sort_key
     assert create.sort_key[2] == "create"
     assert drop.sort_key[2] == "drop"
+
+
+# ===========================================================================
+# DeltaBase — sort_key (sub-objects, MERGE-BLOCKER 1 regression tests)
+# ===========================================================================
+
+
+@pytest.mark.unit
+def test_delta_base_sort_key_sub_object_shape() -> None:
+    """sort_key for a sub-object is a 4-tuple (parent_ns, parent_name, local_name, op)."""
+    parent_ref = ObjectRef(
+        kind=ObjectKind.TABLE,
+        qname=QualifiedName(namespace="public", name="users"),
+    )
+    col_ref = ObjectRef(
+        kind=ObjectKind.COLUMN,
+        qname=QualifiedName(namespace="public", name="id"),
+        parent=parent_ref,
+    )
+    delta = _AlterDelta(target=col_ref)
+    key = delta.sort_key
+    assert len(key) == 4
+    assert key == ("public", "users", "id", "alter")
+
+
+@pytest.mark.unit
+def test_delta_base_sort_key_sub_objects_different_parents_are_unique() -> None:
+    """Two sub-objects with the same local name on different parents must not collide.
+
+    Regression test for MERGE-BLOCKER 1: before the fix, both
+    public.users.id and public.orders.id produced ('public', 'id', 'alter'),
+    making them indistinguishable to the topo-sort tie-breaker.
+    """
+    users_ref = ObjectRef(
+        kind=ObjectKind.TABLE,
+        qname=QualifiedName(namespace="public", name="users"),
+    )
+    orders_ref = ObjectRef(
+        kind=ObjectKind.TABLE,
+        qname=QualifiedName(namespace="public", name="orders"),
+    )
+    col_users_id = ObjectRef(
+        kind=ObjectKind.COLUMN,
+        qname=QualifiedName(namespace="public", name="id"),
+        parent=users_ref,
+    )
+    col_orders_id = ObjectRef(
+        kind=ObjectKind.COLUMN,
+        qname=QualifiedName(namespace="public", name="id"),
+        parent=orders_ref,
+    )
+    delta_users = _AlterDelta(target=col_users_id)
+    delta_orders = _AlterDelta(target=col_orders_id)
+
+    assert delta_users.sort_key != delta_orders.sort_key
+    assert delta_users.sort_key == ("public", "users", "id", "alter")
+    assert delta_orders.sort_key == ("public", "orders", "id", "alter")
+
+
+@pytest.mark.unit
+def test_delta_base_sort_key_sub_objects_sort_stably() -> None:
+    """Sub-object deltas sort deterministically and group by parent."""
+    users_ref = ObjectRef(
+        kind=ObjectKind.TABLE,
+        qname=QualifiedName(namespace="public", name="users"),
+    )
+    orders_ref = ObjectRef(
+        kind=ObjectKind.TABLE,
+        qname=QualifiedName(namespace="public", name="orders"),
+    )
+    # Two columns on users, one on orders — all named differently
+    users_id = ObjectRef(
+        kind=ObjectKind.COLUMN,
+        qname=QualifiedName(namespace="public", name="id"),
+        parent=users_ref,
+    )
+    users_name = ObjectRef(
+        kind=ObjectKind.COLUMN,
+        qname=QualifiedName(namespace="public", name="name"),
+        parent=users_ref,
+    )
+    orders_id = ObjectRef(
+        kind=ObjectKind.COLUMN,
+        qname=QualifiedName(namespace="public", name="id"),
+        parent=orders_ref,
+    )
+    d_users_id = _AlterDelta(target=users_id)
+    d_users_name = _AlterDelta(target=users_name)
+    d_orders_id = _AlterDelta(target=orders_id)
+
+    sorted_deltas = sorted(
+        [d_users_id, d_users_name, d_orders_id],
+        key=lambda d: d.sort_key,
+    )
+    # orders.id ("public","orders","id","alter") < users.id ("public","users","id","alter")
+    # < users.name ("public","users","name","alter")
+    assert sorted_deltas[0] is d_orders_id
+    assert sorted_deltas[1] is d_users_id
+    assert sorted_deltas[2] is d_users_name
 
 
 # ===========================================================================
@@ -328,6 +435,24 @@ def test_delta_set_from_iterable(
 def test_delta_set_from_empty_iterable() -> None:
     ds = DeltaSet.from_iterable([])
     assert ds.is_empty()
+
+
+@pytest.mark.unit
+def test_delta_set_from_iterable_accepts_tuple(
+    create_delta: _CreateDelta,
+    drop_delta: _DropDelta,
+) -> None:
+    """from_iterable must accept tuples (and any Iterable), not just lists."""
+    ds = DeltaSet.from_iterable((create_delta, drop_delta))
+    assert len(ds) == 2
+
+
+@pytest.mark.unit
+def test_delta_set_from_iterable_accepts_generator(table_ref: ObjectRef) -> None:
+    """from_iterable must accept generator expressions."""
+    refs = [table_ref, table_ref]
+    ds = DeltaSet.from_iterable(_CreateDelta(target=r) for r in refs)
+    assert len(ds) == 2
 
 
 # ===========================================================================
@@ -471,6 +596,86 @@ def test_delta_set_inequality_different_order(
     ds_a = DeltaSet(deltas=(create_delta, drop_delta))
     ds_b = DeltaSet(deltas=(drop_delta, create_delta))
     assert ds_a != ds_b
+
+
+# ===========================================================================
+# DeltaSet — JSON round-trip (MERGE-BLOCKER 2 explicit documentation)
+# ===========================================================================
+
+
+@pytest.mark.unit
+def test_delta_set_json_round_trip_base_level() -> None:
+    """DeltaSet JSON round-trip preserves base-level fields for DeltaBase items.
+
+    Until P2-DOM-01f lands the discriminated Delta union, DeltaSet holds plain
+    DeltaBase instances.  A model_dump_json() -> model_validate_json() round-
+    trip preserves op and target (the only fields DeltaBase carries).
+    """
+    ref = ObjectRef(
+        kind=ObjectKind.TABLE,
+        qname=QualifiedName(namespace="public", name="users"),
+    )
+    # Build a DeltaSet using base-level items (what -01a actually supports).
+    ds = DeltaSet(
+        deltas=(
+            DeltaBase(op=DeltaOp.CREATE, target=ref),
+            DeltaBase(op=DeltaOp.DROP, target=ref),
+        )
+    )
+    payload = ds.model_dump_json()
+    restored = DeltaSet.model_validate_json(payload)
+
+    restored_list = list(restored)
+    assert len(restored_list) == 2
+    assert restored_list[0].op == DeltaOp.CREATE
+    assert restored_list[1].op == DeltaOp.DROP
+    assert restored_list[0].target == ref
+    assert restored_list[1].target == ref
+
+
+@pytest.mark.unit
+def test_delta_set_json_round_trip_subclass_is_lossy() -> None:
+    """Subclass payload is NOT preserved through DeltaSet JSON round-trip.
+
+    This is the documented limitation described in the TODO(P2-DOM-01f) comment
+    on DeltaSet.deltas.  A concrete subclass (_CreateDelta) stored in a
+    DeltaSet is deserialized as plain DeltaBase (the declared field type),
+    dropping any subclass-specific payload.  This test pins the current
+    behavior so any change is intentional and visible.
+    """
+    ref = ObjectRef(
+        kind=ObjectKind.TABLE,
+        qname=QualifiedName(namespace="public", name="orders"),
+    )
+    original = _CreateDelta(target=ref)
+    ds = DeltaSet(deltas=(original,))
+
+    payload = ds.model_dump_json()
+    restored = DeltaSet.model_validate_json(payload)
+
+    # The op and target round-trip fine.
+    restored_delta = next(iter(restored))
+    assert restored_delta.op == DeltaOp.CREATE
+    assert restored_delta.target == ref
+    # The subclass type is lost: restored as DeltaBase, not _CreateDelta.
+    # (This is expected and intentional until P2-DOM-01f.)
+    assert type(restored_delta) is DeltaBase
+
+
+@pytest.mark.unit
+def test_delta_set_model_dump_shape(create_delta: _CreateDelta) -> None:
+    """model_dump() emits the expected {'deltas': (...)} structure.
+
+    Pydantic v2 preserves the Python tuple type in model_dump() (not converted
+    to a list).  model_dump_json() serialises it as a JSON array.
+    """
+    ds = DeltaSet(deltas=(create_delta,))
+    dumped = ds.model_dump()
+    assert "deltas" in dumped
+    # Pydantic v2 preserves tuple type in model_dump(); JSON serialisation
+    # uses a JSON array (verified separately via model_dump_json).
+    assert isinstance(dumped["deltas"], tuple)
+    assert len(dumped["deltas"]) == 1
 
 
 # ===========================================================================

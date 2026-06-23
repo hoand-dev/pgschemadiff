@@ -21,10 +21,10 @@ Design notes
   combined with a ``kind`` field on the subclass narrows the type further —
   avoiding ``DeltaOp`` enum explosion while keeping the discriminated-union
   story clean.
-* The sortable key ``sort_key`` is a ``(namespace, object_name, op_value)``
-  tuple exposed as a ``@property``.  Downstream topo-sort uses it as a stable
-  tie-breaker after dependency ordering; deterministic output ordering also
-  relies on it.
+* The sortable key ``sort_key`` is a collision-free tuple exposed as a
+  ``@property``.  Downstream topo-sort uses it as a stable tie-breaker after
+  dependency ordering; deterministic output ordering also relies on it.
+  See :attr:`DeltaBase.sort_key` for the exact shape.
 * ``DeltaSet`` stores items in a plain ``tuple[DeltaBase, ...]`` so it stays
   frozen and value-equal.  Helper methods mirror the style established in
   :class:`~pgschemadiff.domain.database.Database`.
@@ -34,7 +34,7 @@ All models are pure domain: no IO, no async, no external drivers.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -49,7 +49,7 @@ from pgschemadiff.domain.identity import ObjectRef
 class DeltaOp(StrEnum):
     """Discriminator values for the delta operation kind.
 
-    These six values cover every operation the MVP-A diff engine produces.
+    These five values cover every operation the MVP-A diff engine produces.
     Subclass payload fields (e.g. ``new_type``, ``new_name``) carry the
     operation-specific details; the ``op`` field tells consumers *which kind
     of change* they are looking at without inspecting those payload fields.
@@ -73,9 +73,6 @@ class DeltaOp(StrEnum):
     |               | classifier can assign ``DESTRUCTIVE`` / ``BLOCKED``      |
     |               | atomically.                                              |
     +---------------+----------------------------------------------------------+
-    | ``NO_CHANGE`` | Sentinel used in tests and as a safe default for         |
-    |               | subclasses that represent a detected-but-skipped diff.   |
-    +---------------+----------------------------------------------------------+
     """
 
     CREATE = "create"
@@ -83,7 +80,6 @@ class DeltaOp(StrEnum):
     ALTER = "alter"
     RENAME = "rename"
     REPLACE = "replace"
-    NO_CHANGE = "no_change"
 
 
 # ---------------------------------------------------------------------------
@@ -110,11 +106,24 @@ class DeltaBase(BaseModel):
 
     Sortable key
     ------------
-    :attr:`sort_key` is a ``(namespace, object_name, op_value)`` triple used
-    as a stable secondary sort key after topological dependency ordering.
-    This matches the existing convention in the domain: objects are primarily
-    identified by their :class:`~pgschemadiff.domain.identity.QualifiedName`
-    (namespace, name) and secondarily by the operation kind string.
+    :attr:`sort_key` is a collision-free, lexicographically comparable tuple of
+    strings.  Its exact shape depends on whether the target is a top-level
+    object or a sub-object (column, constraint, trigger, policy):
+
+    * Top-level object::
+
+        (namespace, object_name, op_value)
+
+    * Sub-object (``target.parent`` is set)::
+
+        (parent_namespace, parent_name, local_name, op_value)
+
+    Folding the parent identity into the key ensures that two sub-object deltas
+    on different parents — e.g. column ``public.users.id`` vs column
+    ``public.orders.id`` — never collide (both would be ``("public", "id",
+    "alter")`` without the parent components).  Downstream topo-sort tie-
+    breaking (P2-DIFF-08) depends on this being a *total*, collision-free
+    ordering key.
 
     Usage example::
 
@@ -145,13 +154,27 @@ class DeltaBase(BaseModel):
     """The object being changed."""
 
     @property
-    def sort_key(self) -> tuple[str, str, str]:
-        """Stable sort key: ``(namespace, object_name, op_value)``.
+    def sort_key(self) -> tuple[str, ...]:
+        """Stable, collision-free sort key for topo-sort tie-breaking.
 
-        Downstream topo-sort and deterministic output ordering use this as a
-        secondary key after dependency resolution.  The triple matches the
-        natural human reading of a delta: "in schema X, on object Y, do Z".
+        Shape:
+        * Top-level object: ``(namespace, object_name, op_value)``
+        * Sub-object (target.parent is set):
+          ``(parent_namespace, parent_name, local_name, op_value)``
+
+        The parent components are placed *before* the local name so that
+        sub-objects of the same parent sort together, and so that two
+        sub-objects with identical local names on different parents (e.g.
+        ``public.users.id`` vs ``public.orders.id``) produce distinct keys.
         """
+        if self.target.parent is not None:
+            # Sub-object: fold parent identity in before the local name.
+            return (
+                self.target.parent.qname.namespace,
+                self.target.parent.qname.name,
+                self.target.qname.name,
+                self.op.value,
+            )
         return (
             self.target.qname.namespace,
             self.target.qname.name,
@@ -185,10 +208,27 @@ class DeltaSet(BaseModel):
 
     Helpers mirror the style established in
     :class:`~pgschemadiff.domain.database.Database`.
+
+    Round-trip note
+    ---------------
+    .. TODO(P2-DOM-01f): Once the concrete delta subclasses (P2-DOM-01b..e)
+       and the discriminated ``Delta`` union (P2-DOM-01f) land, ``deltas``
+       will be retyped to ``tuple[Delta, ...]`` where ``Delta`` is an
+       ``Annotated`` discriminated union alias keyed on ``op`` (and/or a
+       secondary ``kind`` discriminator on subclasses).  Until then, a
+       ``model_dump_json()`` → ``model_validate_json()`` round-trip only
+       preserves the *base-level* fields (``op`` + ``target``); any
+       subclass-specific payload fields are **not** preserved because Pydantic
+       cannot know which concrete subclass to instantiate without the
+       discriminator.  This limitation is intentional and documented by the
+       round-trip unit tests in ``tests/unit/domain/delta/test_base.py``.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    # TODO(P2-DOM-01f): retype to tuple[Delta, ...] once the discriminated
+    # Delta union is defined.  Until then DeltaSet round-trips items as
+    # DeltaBase (subclass payload not preserved through JSON serialisation).
     deltas: tuple[DeltaBase, ...] = Field(default=())
     """The ordered sequence of deltas in this set."""
 
@@ -197,7 +237,7 @@ class DeltaSet(BaseModel):
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_iterable(cls, deltas: Iterator[DeltaBase] | list[DeltaBase]) -> DeltaSet:
+    def from_iterable(cls, deltas: Iterable[DeltaBase]) -> DeltaSet:
         """Construct a :class:`DeltaSet` from any iterable of deltas."""
         return cls(deltas=tuple(deltas))
 
@@ -223,7 +263,7 @@ class DeltaSet(BaseModel):
 
     def by_op(self, op: DeltaOp) -> tuple[DeltaBase, ...]:
         """Return all deltas whose ``op`` matches *op*."""
-        return tuple(d for d in self.deltas if d.op is op)
+        return tuple(d for d in self.deltas if d.op == op)
 
     def by_target(self, ref: ObjectRef) -> tuple[DeltaBase, ...]:
         """Return all deltas whose ``target`` matches *ref*."""
