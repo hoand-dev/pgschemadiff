@@ -1,5 +1,5 @@
 # TASK_INDEX.md
-_Last updated: 2026-06-19_
+_Last updated: 2026-06-22_
 _Canonical task list lives in `docs/TASKS.md` — this file mirrors the execution queue._
 
 ---
@@ -61,14 +61,14 @@ _Canonical task list lives in `docs/TASKS.md` — this file mirrors the executio
 [x] P1-TEST-01   session-scoped pg18 container fixture
 ```
 
-### Batch C — EXECUTION QUEUE
+### Batch C — DONE ✅ (PR #2 MERGED 2026-06-22)
 
 ```
-[R] P1-INFRA-06  Type normalizer            ← review (PR #2, 394c177)  attempts:1
-[R] P1-CLI-01    pgsd inspect <conn-url>     ← review (PR #2, eaadf3e) — M1 gate  attempts:1
-[ ] P1-TEST-02   Inspector integration tests ← ready (next; CI-only, no local Docker)  attempts:0
+[x] P1-INFRA-06  Type normalizer            ← MERGED to main via PR #2  attempts:1
+[x] P1-CLI-01    pgsd inspect <conn-url>     ← MERGED to main via PR #2 — M1 feature  attempts:1
+[H] P1-TEST-02   Inspector integration tests ← NEEDS-HUMAN: PR #3 closed without merge by human (2026-06-22); do NOT recreate  attempts:1
 ```
-Status key: [R] review (branch pushed + PR open, awaiting CI + human merge).
+Status key: [x] done (merged to main) · [H] needs-human.
 
 ### Optional (deferred)
 ```
@@ -78,15 +78,44 @@ Status key: [R] review (branch pushed + PR open, awaiting CI + human merge).
 
 ---
 
-## Phase 2 — Diff Engine (blocked on P1-INFRA-05)
+## Phase 2 — Diff Engine (EXECUTION QUEUE)
 
+Decomposed from docs/TASKS.md P2-* (M2 gate). Each unit ≤ ~3 files + one testable
+done-condition. Clean Architecture per ADR-0005: deltas live in `domain/`, the
+engine + comparators + topo-sort + rename/ignore loaders live in `application/diff/`,
+the CLI command in `presentation/cli/`. Discriminated-union deltas per ADR-0003;
+per-type comparators per ADR-0006; explicit-annotation renames per ADR-0007.
+
+> **P2-DOM-01 split rationale:** docs/TASKS.md ships `domain/delta.py` as "40+ Delta
+> subclasses" (Cx L) — too large for one ≤3-file unit. Splitting by object category
+> yields clean 2-file units (module + its unit test) AND lets the independent
+> comparators (table/index/constraint) start as soon as their matching delta module
+> lands, instead of blocking on a single mega-module. The shared base + discriminated-
+> union alias + `DeltaSet` container lands first (P2-DOM-01a); category modules
+> (P2-DOM-01b..f) re-export through `domain/delta/__init__.py`. Net public import
+> surface is unchanged (`from pgschemadiff.domain.delta import ...`).
+
+| id | title | status | deps | files | attempts | priority |
+|---|---|---|---|---|---|---|
+| P2-DOM-01a | `domain/delta/` package: shared `DeltaBase`, `DeltaOp`/discriminator, `DeltaSet` container | review | P1-DOM-07, P1-INFRA-05 | src/pgschemadiff/domain/delta/__init__.py, src/pgschemadiff/domain/delta/base.py, tests/unit/domain/delta/test_base.py | 1 | high | PR #4, eb331e2, local gate green (605 tests), CI pending |
+| P2-DOM-01b | Table-level deltas (Create/Drop/RenameTable, partition/owner attrs) | blocked | P2-DOM-01a | src/pgschemadiff/domain/delta/table.py, tests/unit/domain/delta/test_table.py | 0 | high |
+| P2-DOM-01c | Column deltas (Add/Drop/AlterType/SetDefault/Nullability/RenameColumn) | blocked | P2-DOM-01a | src/pgschemadiff/domain/delta/column.py, tests/unit/domain/delta/test_column.py | 0 | high |
+| P2-DOM-01d | Index deltas (Create/Drop/Replace, method/predicate/include changes) | blocked | P2-DOM-01a | src/pgschemadiff/domain/delta/index.py, tests/unit/domain/delta/test_index.py | 0 | high |
+| P2-DOM-01e | Constraint deltas incl. FK (Add/Drop PK/Unique/Check/FK/Exclusion) | blocked | P2-DOM-01a | src/pgschemadiff/domain/delta/constraint.py, tests/unit/domain/delta/test_constraint.py | 0 | high |
+| P2-DOM-01f | Schema + extension deltas (Create/Drop schema, Create/Drop/Alter extension) | blocked | P2-DOM-01a | src/pgschemadiff/domain/delta/schema.py, tests/unit/domain/delta/test_schema.py | 0 | high |
+| P2-DIFF-01 | `application/diff/engine.py` — visitor dispatcher over `ObjectRef.kind` → comparators | blocked | P2-DOM-01b, P2-DOM-01c, P2-DOM-01d, P2-DOM-01e, P2-DOM-01f | src/pgschemadiff/application/diff/engine.py, src/pgschemadiff/application/diff/__init__.py, tests/unit/application/diff/test_engine.py | 0 | high |
+| P2-DIFF-02 | `comparators/table.py` — table-level diff (create/drop/rename/attrs), delegates cols/idx/constraints | blocked | P2-DIFF-01 | src/pgschemadiff/application/diff/comparators/table.py, tests/unit/application/diff/comparators/test_table.py | 0 | high |
+| P2-DIFF-03 | `comparators/column.py` — per-column diff (add/drop/type/default/nullability) | blocked | P2-DIFF-02 | src/pgschemadiff/application/diff/comparators/column.py, tests/unit/application/diff/comparators/test_column.py | 0 | high |
+| P2-DIFF-04 | `comparators/index.py` — index diff (create/drop/replace on method/predicate/include) | blocked | P2-DIFF-01 | src/pgschemadiff/application/diff/comparators/index.py, tests/unit/application/diff/comparators/test_index.py | 0 | high |
+| P2-DIFF-05 | `comparators/constraint.py` — constraint diff incl. FK (add/drop) | blocked | P2-DIFF-01 | src/pgschemadiff/application/diff/comparators/constraint.py, tests/unit/application/diff/comparators/test_constraint.py | 0 | high |
+| P2-DIFF-06 | Rename annotation loader (YAML/TOML) feeding the engine (ADR-0007) | blocked | P2-DIFF-03 | src/pgschemadiff/application/diff/renames.py, tests/unit/application/diff/test_renames.py | 0 | med |
+| P2-DIFF-07 | Ignore-rules system (object/attr exclusion filter on DeltaSet) | blocked | P2-DIFF-01 | src/pgschemadiff/application/diff/ignore.py, tests/unit/application/diff/test_ignore.py | 0 | med |
+| P2-DIFF-08 | `topo_sort.py` — Kahn ordering + cycle detection → `CyclicDependencyError` | blocked | P2-DOM-01a | src/pgschemadiff/application/diff/topo_sort.py, tests/unit/application/diff/test_topo_sort.py | 0 | high |
+| P2-TEST-01 | Per-comparator unit tests (edge cases beyond per-task tests) | blocked | P2-DIFF-02, P2-DIFF-03, P2-DIFF-04, P2-DIFF-05 | tests/unit/application/diff/comparators/test_comparators_edge.py | 0 | high |
+| P2-TEST-02 | Hypothesis idempotent-diff + ordering property tests (max_examples=500) | blocked | P2-DIFF-01, P2-DIFF-02, P2-DIFF-03, P2-DIFF-04, P2-DIFF-05, P2-DIFF-08 | tests/unit/application/diff/test_diff_properties.py | 0 | high |
+| P2-CLI-01 | `pgsd diff <src> <tgt>` — emit ordered DeltaSet JSON (M2 gate) | blocked | P2-DIFF-01, P2-DIFF-02, P2-DIFF-03, P2-DIFF-04, P2-DIFF-05, P2-DIFF-06, P2-DIFF-07, P2-DIFF-08 | src/pgschemadiff/application/diff/compare_schemas.py, src/pgschemadiff/presentation/cli/commands/diff.py, tests/unit/presentation/cli/test_diff.py | 0 | med |
 ```
-[ ] P2-DOM-01    domain/delta.py — 40+ Delta subclasses
-[ ] P2-DIFF-01   application/diff/engine.py — visitor
-[ ] P2-DIFF-02..07  comparators (table, column, index, constraint, rename, ignore)
-[ ] P2-DIFF-08   topo_sort.py
-[ ] P2-TEST-01..02  unit + hypothesis tests
-[ ] P2-CLI-01    pgsd diff
+[ ] All Phase 2 rows above — none dispatched yet.
 ```
 
 ## Phase 3 — Migration Generator (blocked on Phase 2)
@@ -112,7 +141,7 @@ P4-TUI-02..08: blocked on domain + infrastructure work.
 
 | Gate | Condition | Status |
 |---|---|---|
-| M0 | CI green; layered arch enforced | ✅ (CI green on `claude/brave-gauss-f3he8w` run 27811581234) |
-| M1 | `pgsd inspect` dumps schema JSON | 🟡 P1-CLI-01 done (eaadf3e) in PR #2 — awaiting CI green + merge |
-| M2 | `pgsd diff` emits typed DeltaSet | ❌ |
+| M0 | CI green; layered arch enforced | ✅ (CI green on `main`) |
+| M1 | `pgsd inspect` dumps schema JSON | ✅ feature MERGED to main via PR #2 (2026-06-22). ⚠️ full ROADMAP M1 exit gate (integration test suite green vs pg18 + 1000-obj <2s benchmark) NOT met — P1-TEST-02 PR #3 closed by human (needs-human). |
+| M2 | `pgsd diff` emits typed DeltaSet | 🟡 Phase 2 STARTED — P2-DOM-01a (`domain/delta/` foundation) in PR #4 (review); P2-DOM-01b..f + P2-DIFF-08 unblock on its merge |
 | M3 | round-trip integration test green | ❌ |

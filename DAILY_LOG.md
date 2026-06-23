@@ -112,6 +112,38 @@ NEEDS_HUMAN (open): 2 (both non-blocking) — (1) merge PR #2 [M1]; (2) confirm 
 
 ---
 
+## RUN 2026-06-22-1 — Phase 1 merged (M1) + PR #3 human-closed + Phase 2 decomposed
+NEEDS_HUMAN (open): 4 — (1) **P1-TEST-02**: PR #3 closed without merge by human → direction needed (will NOT recreate); (2) phase2-go-ahead (non-blocking, default proceed); (3) repo branch-protection (non-blocking); (4) stale-branch housekeeping (non-blocking).
+
+### Assessment (ground truth from GitHub MCP, not memory)
+- `main` green at `f602f60` (run completed `success` 2026-06-22T04:21Z). My branch `claude/clever-cray-192p05` == origin/main, clean.
+- **PR #2 MERGED** by human 2026-06-22T04:20Z → P1-INFRA-06 (type normalizer) + P1-CLI-01 (`pgsd inspect`) on main. **M1 feature reached.** Merge was linear (main head == PR #2 head sha).
+- **PR #3 (P1-TEST-02 integration tests) CLOSED, NOT merged** by human 2026-06-22T04:22Z. Head `claude/p1-test-02-integration`.
+- Discovered a parallel orchestrator branch `claude/clever-cray-vqtao5` (diverged, never merged) whose state recorded "PR #3 closed by human — needs-human, will not recreate." Honored that decision.
+- State files were stale (described PR #2 as awaiting merge; unaware of PR #3). Reconciled all three to live state.
+
+### Dispatched
+- `architect` (planner) -> decompose Phase 2 -> **done**. Rewrote TASK_INDEX.md Phase 2 section into 17 executable units (≤3 files + 1 done-condition each): P2-DOM-01a..f (delta package split), P2-DIFF-01..08 (engine/comparators/topo-sort/loaders), P2-TEST-01/02, P2-CLI-01. Entry task **P2-DOM-01a = ready** (deps done); rest blocked on it. Planning only, no code, left uncommitted; orchestrator committed.
+
+### Decisions
+- **Did NOT recreate P1-TEST-02** — human closed PR #3; ambiguous intent → §5 escalate, never guess.
+- **Did NOT auto-start Phase 2 implementation** nor P0-CI-03 coverage gate this run. Human is actively triaging at the phase boundary (merged #2, closed #3 within 2 min) → confirm direction before launching a new phase / before a hard coverage gate that could turn CI red. Stability beats new features (§4).
+- Dispatched planner (zero CI risk, approved-plan work) so the Phase 2 backlog is execution-ready regardless of the human's P1-TEST-02 call.
+- No sub-agent ran concurrently with orchestrator writes; planner finished before state reconciliation (single-writer, §6).
+
+### Blockers
+- P1-TEST-02: human closed its PR → `needs-human`; ROADMAP M1 exit gate (integration suite + 1000-obj <2s benchmark) stays unmet until resolved.
+
+### Commits/PRs
+- `claude/clever-cray-192p05`: state reconciliation + Phase 2 decomposition (this run). No PR opened (orchestrator bookkeeping). No merge to main.
+
+### Next run targets
+1. Act on human reply to P1-TEST-02 + phase2-go-ahead.
+2. If proceeding: dispatch `backend-engineer` -> **P2-DOM-01a** (highest-priority ready). On done → PR → reviewer.
+3. Consider P0-CI-03 only after confirming coverage headroom.
+
+---
+
 ## 2026-06-19 — Rebase + CI check + P1-INFRA-06 dispatch (third run)
 
 ### Summary
@@ -134,6 +166,40 @@ NEEDS_HUMAN (open): 2 (both non-blocking) — (1) merge PR #2 [M1]; (2) confirm 
 2. Dispatch P1-TEST-02 (inspector integration tests — QA agent)
 3. Dispatch P1-CLI-01 (`pgsd inspect` CLI)
 4. After CLI: verify M1 milestone gate
+
+---
+
+## RUN 2026-06-23-1 — Phase 2 STARTED: P2-DOM-01a → PR #4 + state consolidation
+NEEDS_HUMAN (open): 3 — (1) **P1-TEST-02**: PR #3 human-closed → direction needed (will NOT recreate); (2) repo branch-protection (non-blocking); (3) stale-branch housekeeping (non-blocking). Plus: phase2-go-ahead RESOLVED this run (acted on default-A).
+
+### Assessment (ground truth from GitHub MCP + git fetch, not memory)
+- Assigned working branch `claude/clever-cray-0zzng4` started == stale `main` content with **2026-06-21 state files**. Reconciled against live GitHub:
+  - **PR #2 MERGED** 2026-06-22 (rebase) → `main` now `f602f60`, CI `success`. M1 feature on main.
+  - **PR #3 (P1-TEST-02) CLOSED without merge** by human 2026-06-22 → `needs-human`, do NOT recreate.
+  - Authoritative latest state (RUN 2026-06-22-1: reconciliation + Phase 2 decomposition) was committed only to side-branch `claude/clever-cray-192p05`, never merged → **state fragmentation**. Adopted those state files onto this branch.
+  - main CI confirmed green via Actions API (run head f602f60 `success`).
+
+### Dispatched
+- `backend-engineer` -> **P2-DOM-01a** (`domain/delta/` foundation) -> **done**, commit `eb331e2`. New `domain/delta/{__init__,base}.py` (`DeltaOp`, `DeltaBase` frozen Pydantic v2, `DeltaSet`) + 36 unit tests; also recorded the P2-DOM-01 split in docs/TASKS.md + docs/PROJECT_CONTEXT.md. Full local gate green (ruff/format/mypy strict/import-linter 4-0/605 tests). Orchestrator independently re-ran the full gate — green. Pushed branch, opened **PR #4** → main; set P2-DOM-01a `review`.
+
+### Decisions
+- **Proceeded with P2-DOM-01a (default-A).** §3 dispatch logic: green CI + a `ready` task → dispatch developer. The prior run's `phase2-go-ahead` was non-blocking with documented default-A ("proceed next run unless told otherwise"); this is that next run, no contrary human signal, Phase 2 is an approved plan, and P2-DOM-01a is pure additive frozen-domain code behind the human merge gate (§7). Low risk; real progress (avoids stall).
+- **Did NOT recreate P1-TEST-02** — human closed PR #3 deliberately (§5: respect human action, never guess).
+- **Did NOT auto-merge** (§7). PR #4 awaits CI + human squash/rebase merge.
+- Single writer: held all state-file edits until the developer committed (avoids the concurrent-shared-tree races that bit prior runs). Independently re-ran the gate before pushing.
+
+### Blockers
+- P1-TEST-02 stays `needs-human` (ROADMAP M1 exit gate unmet until resolved).
+- PR #4 CI pending at persist time → subscribed + self check-in armed (~1h) since webhooks don't deliver CI-success/merge.
+
+### Commits/PRs
+- `claude/clever-cray-0zzng4` `eb331e2` "feat(domain): P2-DOM-01a — domain/delta package" | **PR #4** open → main, CI pending.
+- (this state commit) `claude/clever-cray-0zzng4` chore(state): RUN 2026-06-23-1 — consolidates fragmented state onto the working branch (will land on main via PR #4).
+
+### Next run targets
+1. PR #4 CI: green → Ready To Merge + human-merge note; red → `ci-recovery`.
+2. After PR #4 merges: dispatch P2-DOM-01b..f (parallel, isolated worktrees, distinct files) + P2-DIFF-08.
+3. Act on any human reply re P1-TEST-02 / Phase 2 direction.
 
 ---
 
