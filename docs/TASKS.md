@@ -63,7 +63,12 @@
 
 | Status | ID | Title | Owner | Pri | Deps | Cx |
 |---|---|---|---|---|---|---|
-| [ ] | P2-DOM-01 | `domain/delta.py` — 40+ Delta subclasses with discriminator | backend-engineer | P0 | P1-DOM-07 | L |
+| [x] | P2-DOM-01a | `domain/delta/` package foundation — DeltaOp, DeltaBase, DeltaSet | backend-engineer | P0 | P1-DOM-07 | S |
+| [ ] | P2-DOM-01b | Concrete delta subclasses — table/schema/extension deltas | backend-engineer | P0 | P2-DOM-01a | M |
+| [ ] | P2-DOM-01c | Concrete delta subclasses — column deltas | backend-engineer | P0 | P2-DOM-01a | M |
+| [ ] | P2-DOM-01d | Concrete delta subclasses — index deltas | backend-engineer | P0 | P2-DOM-01a | M |
+| [ ] | P2-DOM-01e | Concrete delta subclasses — constraint deltas | backend-engineer | P0 | P2-DOM-01a | M |
+| [ ] | P2-DOM-01f | Discriminated Delta union + `domain/delta/__init__.py` full re-export | backend-engineer | P0 | P2-DOM-01b..e | S |
 | [ ] | P2-DIFF-01 | `application/diff/engine.py` — visitor dispatcher | backend-engineer | P0 | P2-DOM-01 | M |
 | [ ] | P2-DIFF-02 | `comparators/table.py` | backend-engineer | P0 | P2-DIFF-01 | L |
 | [ ] | P2-DIFF-03 | `comparators/column.py` | backend-engineer | P0 | P2-DIFF-02 | L |
