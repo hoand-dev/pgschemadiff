@@ -218,5 +218,16 @@ NEEDS_HUMAN (open): 3 — (1) **P1-TEST-02**: PR #3 human-closed → direction n
 2. After b..f merge: P2-DIFF-01 (engine) unblocks.
 3. Act on any human reply re P1-TEST-02.
 
+### Update (same run) — P2-DOM-01b → PR #5 → review → RF-B
+- `backend-engineer` → P2-DOM-01b (table deltas, `9f0a04f`): CreateTable/DropTable/RenameTable/AlterTableAttrs + `TableDelta` union, 49 tests. Gate green. Pushed, **PR #5** opened.
+- `code-reviewer` → **CHANGES-REQUESTED**, 1 blocker: docstring falsely claimed `op`-discriminated `TableDelta` composes into the global `Delta` union — but `op` is shared across object kinds → global union would `TypeError`. Plus recommended validators (RenameTable target/old_name consistency; AlterTableAttrs non-empty; Create/Drop target==table.ref).
+- `backend-engineer` → **RF-B** (`df2b128`): established the **`kind` discriminator convention** (globally-unique `kind` per concrete delta; all unions discriminate on `kind` not `op`) with a regression test proving `op` would collide; added all three validators + tests; corrected docstring. Gate green (675 tests). Reviewed-once (§7). **Recorded the convention in AI_STATE Key Decisions — P2-DOM-01c/d/e/f MUST follow it.**
+- PR #5 CI re-running on `df2b128`; self check-in armed → on green, Ready To Merge (human gate).
+
+### Next run targets
+1. PR #5 CI green → Ready To Merge + human-merge note; merged → P2-DOM-01b done.
+2. Then P2-DOM-01c (column deltas, `kind` convention), then d/e/f (f composes global `Delta` union on `kind` + retypes `DeltaSet.deltas`). P2-DIFF-08 independent.
+3. Act on any human reply re P1-TEST-02.
+
 ---
 
