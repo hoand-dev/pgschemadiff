@@ -253,3 +253,31 @@ NEEDS_HUMAN (open): 2 — (1) P1-TEST-02 (direction); (2) repo branch-protection
 3. Act on any human reply re P1-TEST-02.
 
 ---
+
+
+## RUN 2026-06-24-2 — P2-DOM-01c (column deltas) implemented → PR #6 reviewed APPROVED → READY TO MERGE
+NEEDS_HUMAN (open): 3 — (1) PR #6 ready to merge (non-blocking); (2) P1-TEST-02 direction; (3) repo branch-protection (non-blocking).
+
+### Assessment (live GitHub + git)
+- New designated working branch this session: **`claude/clever-cray-6b2yqf`** (branched from `origin/main` @ `f76cd26`, clean). main CI green at `f76cd26`; 0 open PRs at start.
+- **Reconciliation:** the 2026-06-24-1 run *dispatched* P2-DOM-01c on the old branch `0zzng4` but that session ended before any code landed — no `column.py`, no commit, no PR (verified: file absent, both `0zzng4` and `main` sat at the `f76cd26` state commit). So P2-DOM-01c was effectively un-started. Re-executed it this run on `clever-cray-6b2yqf`. The old `0zzng4` branch holds no unmerged work.
+
+### Dispatched
+- `backend-engineer` → **P2-DOM-01c** (column deltas). Implemented 6 frozen delta classes (AddColumn/DropColumn/AlterColumnType/SetColumnDefault/SetColumnNullability/RenameColumn) + `ColumnDelta` union in `domain/delta/column.py`, re-exported via `__init__.py`, 91 new unit tests. Gate green: ruff ✅, ruff format ✅, mypy strict ✅ (89 files), lint-imports ✅ (4 contracts), pytest ✅ **784 passed**. Commit `035ab72`, pushed to `origin/clever-cray-6b2yqf`. Orchestrator opened **PR #6** (via GitHub MCP — no `gh` in this env).
+- `code-reviewer` (read-only) → **APPROVED**, 0 merge-blockers. Confirmed `kind` convention (10 globally-unique kinds across table+column, union discriminates on `kind`) + scope discipline (no global `Delta` union, `DeltaSet.deltas` unchanged — deferred to P2-DOM-01f). 5 non-blocking nits logged to AI_STATE Tech-Debt Backlog. Posted review summary to PR #6.
+
+### Decisions
+- Continued Phase 2 (human merged #4 and #5 → go-ahead repeatedly confirmed). P2-DOM-01c was the highest-priority `ready` task.
+- Non-blocking review nits → recorded as tech-debt, NOT separate PRs / review-fix tasks (avoid churn; §7 — only blocking findings become review-fix).
+- Did NOT dispatch P2-DIFF-08 in parallel: §6 forbids two concurrent writers on one branch and this session is constrained to the single designated branch.
+- Environment note: ORCHESTRATOR.md assumes `gh` CLI; this env has none → used GitHub MCP for PR/CI/comment ops throughout. Sub-agents commit+push only; orchestrator opens PRs.
+
+### CI / PR
+- `clever-cray-6b2yqf` `035ab72` "feat(domain): P2-DOM-01c — column-level deltas …" | PR #6 OPEN — CI run #101 **success**, `mergeable_state: clean`, reviewer APPROVED → **Ready To Merge (human gate)**.
+
+### Next run targets
+1. **Re-check PR #6 state** (webhooks don't deliver CI-success/merge). If merged → P2-DOM-01c done → dispatch **P2-DOM-01d** (index deltas), then e, f. If changes requested → triage.
+2. P2-DIFF-08 (topo-sort) can follow independently.
+3. Act on any human reply re P1-TEST-02.
+
+---

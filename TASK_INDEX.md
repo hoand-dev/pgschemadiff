@@ -1,5 +1,5 @@
 # TASK_INDEX.md
-_Last updated: 2026-06-22_
+_Last updated: 2026-06-24 (run 2026-06-24-2)_
 _Canonical task list lives in `docs/TASKS.md` — this file mirrors the execution queue._
 
 ---
@@ -99,7 +99,7 @@ per-type comparators per ADR-0006; explicit-annotation renames per ADR-0007.
 |---|---|---|---|---|---|---|
 | P2-DOM-01a | `domain/delta/` package: shared `DeltaBase`, `DeltaOp`/discriminator, `DeltaSet` container | done | P1-DOM-07, P1-INFRA-05 | src/pgschemadiff/domain/delta/__init__.py, src/pgschemadiff/domain/delta/base.py, tests/unit/domain/delta/test_base.py | 1 | high | **MERGED to main via PR #4** (rebase, 2026-06-23); reviewed + RF-A |
 | P2-DOM-01b | Table-level deltas (Create/Drop/RenameTable, partition/owner attrs) | done | P2-DOM-01a | src/pgschemadiff/domain/delta/table.py, tests/unit/domain/delta/test_table.py | 0 | high |
-| P2-DOM-01c | Column deltas (Add/Drop/AlterType/SetDefault/Nullability/RenameColumn) | ready | P2-DOM-01a | src/pgschemadiff/domain/delta/column.py, tests/unit/domain/delta/test_column.py | 0 | high |
+| P2-DOM-01c | Column deltas (Add/Drop/AlterType/SetDefault/Nullability/RenameColumn) | review | P2-DOM-01a | src/pgschemadiff/domain/delta/column.py, tests/unit/domain/delta/test_column.py | 1 | high | **PR #6** (`035ab72`) CI green + reviewer APPROVED (0 blockers) → READY TO MERGE (human gate). `kind` convention satisfied. |
 | P2-DOM-01d | Index deltas (Create/Drop/Replace, method/predicate/include changes) | ready | P2-DOM-01a | src/pgschemadiff/domain/delta/index.py, tests/unit/domain/delta/test_index.py | 0 | high |
 | P2-DOM-01e | Constraint deltas incl. FK (Add/Drop PK/Unique/Check/FK/Exclusion) | ready | P2-DOM-01a | src/pgschemadiff/domain/delta/constraint.py, tests/unit/domain/delta/test_constraint.py | 0 | high |
 | P2-DOM-01f | Schema + extension deltas (Create/Drop schema, Create/Drop/Alter extension) **+ retype `DeltaSet.deltas` to the concrete `Delta` discriminated-union alias** (RF-A `TODO(P2-DOM-01f)` in delta/base.py — closes the lossy-round-trip gap) | ready | P2-DOM-01a | src/pgschemadiff/domain/delta/schema.py, src/pgschemadiff/domain/delta/base.py, tests/unit/domain/delta/test_schema.py | 0 | high |
