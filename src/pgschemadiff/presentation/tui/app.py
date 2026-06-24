@@ -10,9 +10,16 @@ from typing import TYPE_CHECKING
 
 from textual.app import App
 from textual.binding import Binding
-from textual.widgets import ContentSwitcher
+from textual.widgets import ContentSwitcher, Input
 
-from pgschemadiff.presentation.tui.screens import HelpScreen, MainScreen
+from pgschemadiff.presentation.tui._mock import ai_for
+from pgschemadiff.presentation.tui.screens import AiModal, HelpScreen, MainScreen
+from pgschemadiff.presentation.tui.views import DiffView
+from pgschemadiff.presentation.tui.views._common import (
+    AiRequested,
+    ApplyRequested,
+    DiffRequested,
+)
 from pgschemadiff.presentation.tui.widgets import (
     Cmdbar,
     HeaderBar,
@@ -24,7 +31,6 @@ from pgschemadiff.shared.logging import get_logger
 
 if TYPE_CHECKING:
     from textual.events import Key
-    from textual.widgets import Input
 
 _VIEW_CHORDS: dict[str, str] = {
     "c": "connection",
@@ -45,10 +51,16 @@ class PgsdApp(App[None]):
     TITLE = "pgschemadiff"
     SUB_TITLE = "schema diff & migration"
 
+    # Start in vim "normal" mode: nothing grabs the keyboard, so chord keys
+    # (g…, Z…, space…) reach ``on_key``.  Focus is taken explicitly — ``:`` for
+    # the command bar, ``/`` for the sidebar search.
+    AUTO_FOCUS = None
+
     BINDINGS = [  # noqa: RUF012 — base class types this as a mutable list
         Binding("escape", "leave_mode", "leave mode"),
         Binding("question_mark", "open_help", "help"),
         Binding("colon", "enter_command", "command"),
+        Binding("ctrl+b", "toggle_sidebar", "toggle sidebar"),
     ]
 
     CSS = """
@@ -109,6 +121,8 @@ class PgsdApp(App[None]):
         self._chord = None
         if self._mode != "normal":
             self._set_mode("normal")
+        if isinstance(self.focused, Input):
+            self.set_focus(None)
         self._set_hint("press ? for help")
 
     def action_open_help(self) -> None:
@@ -118,11 +132,34 @@ class PgsdApp(App[None]):
         self._set_mode("command")
         self._set_hint("")
 
+    def action_toggle_sidebar(self) -> None:
+        try:
+            sidebar = self.query_one("#sidebar")
+        except Exception:
+            return
+        sidebar.toggle_class("hidden")
+
     # ------------------------------------------------------------------ vim chord dispatch
 
     def on_key(self, event: Key) -> None:
         if self._mode == "command":
             return  # Input widget owns the keystrokes
+        if isinstance(self.focused, Input):
+            return  # the sidebar search owns the keystrokes
+        if event.key == "slash":
+            self._focus_search()
+            event.stop()
+            return
+        if self._chord == "space":
+            self._chord = None
+            self._resolve_space_chord(event.character or event.key)
+            event.stop()
+            return
+        if event.key == "space" and self._chord is None:
+            self._chord = "space"
+            self._set_hint("␣…")
+            event.stop()
+            return
         if event.key == "g" and self._chord is None:
             self._chord = "g"
             self._set_hint("g…")
@@ -225,6 +262,45 @@ class PgsdApp(App[None]):
             self._set_hint("rollback queued — see history")
             return
         self._set_hint(f"E492: not an editor command: {cmd}")
+
+    # ------------------------------------------------------------------ space chord + search
+
+    def _focus_search(self) -> None:
+        try:
+            self.query_one("#sidebar-search", Input).focus()
+        except Exception:
+            return
+
+    def _resolve_space_chord(self, key: str) -> None:
+        if self._active_view != "diff":
+            self._set_hint("(space leader — open Diff first)")
+            return
+        diff = self.query_one("#diff", DiffView)
+        if key == "i":
+            self.push_screen(AiModal(ai_for(diff.object_key)))
+        elif key == "a":
+            self._set_hint(f"␣a — accepted {diff.object_key}")
+        elif key == "s":
+            self._set_hint(f"␣s — skipped {diff.object_key}")
+        else:
+            self._set_hint("(chord cancelled)")
+
+    # ------------------------------------------------------------------ navigation messages
+
+    def on_diff_requested(self, message: DiffRequested) -> None:
+        self.query_one("#diff", DiffView).object_key = message.object_key
+        self.switch_view("diff")
+        self._set_hint(f"diff → {message.object_key}")
+        message.stop()
+
+    def on_ai_requested(self, message: AiRequested) -> None:
+        self.push_screen(AiModal(ai_for(message.target)))
+        message.stop()
+
+    def on_apply_requested(self, message: ApplyRequested) -> None:
+        self.switch_view("apply")
+        self._set_hint(":apply — opened")
+        message.stop()
 
 
 def run() -> None:

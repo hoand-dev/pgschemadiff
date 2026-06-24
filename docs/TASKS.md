@@ -127,6 +127,14 @@
 | [ ] | P4-TUI-07 | HistoryView reading the migration manifest store | tui-engineer | P1 | P3-OUT-01 | M |
 | [ ] | P4-TUI-08 | SettingsView with live config.toml preview | tui-engineer | P2 | P4-TUI-01 | M |
 
+> **Note (P4-TUI-02…08):** all seven views are now **implemented and fully
+> interactive against `presentation/tui/_mock.py`** (see `docs/ui-design.md` §10)
+> — they render the complete design and respond to clicks/chords. These boxes
+> stay unchecked because the task scope is *wiring to real `application/` use
+> cases*, which is still blocked on the Phase 1-3 data each row depends on. The
+> remaining work per view is the single mock→use-case import swap described in
+> `docs/ui-design.md` §8.
+
 ## Phase 5 — Production readiness
 
 | Status | ID | Title | Owner | Pri | Deps | Cx |

@@ -6,9 +6,9 @@ from typing import TYPE_CHECKING
 
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
-from textual.widgets import ContentSwitcher, Static, Tree
+from textual.widgets import ContentSwitcher, Input, Static, Tree
 
-from pgschemadiff.presentation.tui._mock import CHANGE_SUMMARY
+from pgschemadiff.presentation.tui._mock import CHANGE_SUMMARY, DIFFS, TREE, TreeNode
 from pgschemadiff.presentation.tui.views import (
     ApplyView,
     ConnectionView,
@@ -18,6 +18,7 @@ from pgschemadiff.presentation.tui.views import (
     OverviewView,
     SettingsView,
 )
+from pgschemadiff.presentation.tui.views._common import DiffRequested
 from pgschemadiff.presentation.tui.widgets import (
     Cmdbar,
     HeaderBar,
@@ -39,28 +40,42 @@ TAB_SPECS: tuple[TabSpec, ...] = (
     TabSpec("settings", "Settings", "gs"),
 )
 
+_GLYPH = {"add": "+", "mod": "~", "del": "-", "conflict": "!"}
+_KIND_ICON = {
+    "schema": "◈",
+    "group": "▾",
+    "table": "▦",
+    "view": "◫",
+    "func": "ƒ",
+    "index": "⌘",
+    "trigger": "↯",
+    "type": "τ",
+}
 
-def _build_demo_tree(tree: Tree[str]) -> None:
-    """Populate the sidebar with a small slice of the mock schema."""
+
+def _badge(node: TreeNode) -> str:
+    if not node.badge:
+        return ""
+    parts = [f"{_GLYPH[k]}{v}" for k, v in node.badge.items() if k in _GLYPH]
+    return f"  [{', '.join(parts)}]" if parts else ""
+
+
+def _label(node: TreeNode) -> str:
+    icon = _KIND_ICON.get(node.kind, "·")
+    suffix = f"  {_GLYPH[node.status]}" if node.status in _GLYPH else ""
+    return f"{icon} {node.name}{suffix}{_badge(node)}"
+
+
+def _build_tree(tree: Tree[str], nodes: tuple[TreeNode, ...]) -> None:
     tree.show_root = False
-    root = tree.root
-    s = CHANGE_SUMMARY
-    public = root.add(
-        f"◈ public  [+{s['add']} ~{s['mod']} -{s['del']} !{s['conflict']}]",
-        expand=True,
-    )
-    tables = public.add("▾ tables", expand=True)
-    tables.add_leaf("▦ tenants  ~")
-    tables.add_leaf("▦ users  ~")
-    tables.add_leaf("▦ task_subscriptions  +")
-    tables.add_leaf("▦ legacy_invites  -")
-    indexes = public.add("▾ indexes")
-    indexes.add_leaf("⌘ idx_tasks_due_date  +")
-    indexes.add_leaf("⌘ idx_users_email  !")
-    public.add("▸ functions")
-    public.add("▸ views")
-    root.add("◈ billing  [~2]")
-    root.add("◈ analytics  [+1]")
+    tree.guide_depth = 2
+    for schema in nodes:
+        schema_node = tree.root.add(_label(schema), expand=schema.expanded, data=schema.name)
+        for group in schema.children:
+            group_node = schema_node.add(_label(group), expand=group.expanded, data="")
+            for obj in group.children:
+                key = f"{schema.name}.{obj.name}"
+                group_node.add_leaf(_label(obj), data=key)
 
 
 class MainScreen(Screen[None]):
@@ -77,12 +92,19 @@ class MainScreen(Screen[None]):
         background: $surface;
         border-right: solid $surface-lighten-1;
     }
+    MainScreen #sidebar.hidden { display: none; }
     MainScreen #sidebar .sb-head {
         background: $surface;
         color: $text-muted;
         padding: 0 1;
         text-style: bold;
         border-bottom: solid $surface-lighten-1;
+    }
+    MainScreen #sidebar #sidebar-search {
+        border: none;
+        height: 1;
+        background: $panel;
+        margin: 0 1;
     }
     MainScreen #sidebar .sb-legend {
         dock: bottom;
@@ -91,7 +113,7 @@ class MainScreen(Screen[None]):
         padding: 0 1;
         border-top: solid $surface-lighten-1;
     }
-    MainScreen #sidebar Tree { background: $surface; }
+    MainScreen #sidebar Tree { background: $surface; height: 1fr; }
     MainScreen #main { width: 1fr; }
     MainScreen ContentSwitcher { height: 1fr; background: $background; }
     """
@@ -101,6 +123,7 @@ class MainScreen(Screen[None]):
         with Horizontal(id="body"):
             with Vertical(id="sidebar"):
                 yield Static("  SCHEMA EXPLORER", classes="sb-head")
+                yield Input(placeholder="/ filter…", id="sidebar-search")
                 yield Tree("schemas", id="schema-tree")
                 yield Static(
                     "legend: [$success]+[/] add  [$warning]~[/] mod  "
@@ -122,8 +145,13 @@ class MainScreen(Screen[None]):
 
     def on_mount(self) -> None:
         tree = self.query_one("#schema-tree", Tree)
-        _build_demo_tree(tree)
+        _build_tree(tree, TREE)
         status = self.query_one("#status", Statusbar)
         s = CHANGE_SUMMARY
         status.change_count = sum(s.values())
         status.conflicts = s["conflict"]
+
+    def on_tree_node_selected(self, event: Tree.NodeSelected[str]) -> None:
+        key = event.node.data
+        if key and key in DIFFS:
+            self.post_message(DiffRequested(key))

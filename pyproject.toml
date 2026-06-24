@@ -124,6 +124,9 @@ ignore = [
 # Domain is pure-sync by design (ASYNC); Pydantic field-type imports must stay
 # at runtime for model_rebuild() / get_type_hints() resolution (TC001-TC003).
 "src/pgschemadiff/domain/**" = ["ASYNC", "TC001", "TC002", "TC003"]
+# Mock-data module: verbatim SQL/DDL literals from the design prototype are
+# kept on one line each so they read like the generated migration output.
+"src/pgschemadiff/presentation/tui/_mock.py" = ["E501", "RUF001"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["pgschemadiff"]

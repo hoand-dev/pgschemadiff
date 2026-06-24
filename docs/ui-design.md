@@ -265,16 +265,19 @@ swap per view. **Do not** add mock data anywhere outside `_mock.py`.
 |---|---|---|
 | [x] | P4-UX-01 | Import this document & reference bundle |
 | [x] | P4-TUI-01 | App shell — chrome, theme switching, vim chord dispatcher, command palette, help modal |
-| [ ] | P4-TUI-02 | ConnectionView with real source/target profile data |
-| [ ] | P4-TUI-03 | OverviewView wired to `application/diff` use case |
-| [ ] | P4-TUI-04 | DiffView with all 3 modes (side / inline / tree) |
-| [ ] | P4-TUI-05 | MigrationView wired to `application/sql_emit` |
-| [ ] | P4-TUI-06 | ApplyView with progress worker + log stream |
-| [ ] | P4-TUI-07 | HistoryView reading the migration manifest store |
-| [ ] | P4-TUI-08 | SettingsView with live config.toml preview |
+| [x] | P4-TUI-02 | ConnectionView — source/target cards, compare options, saved profiles |
+| [x] | P4-TUI-03 | OverviewView — stat grid, clickable change table, AI review, dep graph |
+| [x] | P4-TUI-04 | DiffView with all 3 modes (side / inline / tree) + jump chips + rollback |
+| [x] | P4-TUI-05 | MigrationView — forward/rollback script, exec plan, lock estimates |
+| [x] | P4-TUI-06 | ApplyView with progress worker + live log stream |
+| [x] | P4-TUI-07 | HistoryView — run list + detail + timeline |
+| [x] | P4-TUI-08 | SettingsView with live config.toml preview |
 
-These extend `docs/TASKS.md`'s Phase 4 block. They are not P0 — Phase 4 still
-depends on Phase 1-3 data, but the shell (P4-TUI-01) can land now.
+All seven views are implemented against `presentation/tui/_mock.py` (§8).
+They render the full design and are fully interactive (clickable change rows,
+diff jump chips, mode toggles, the apply worker, etc.) but are **not yet wired
+to real `application/` use cases** — that swap lands incrementally as Phase 1-3
+data arrives. The mock import in each view is the single seam to replace.
 
 ## 11. Pitfalls / decisions worth knowing
 
