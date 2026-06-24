@@ -23,7 +23,7 @@ Phase 0 ✅. Phase 1 domain ✅. Phase 1 infra ✅ MERGED. P1-TEST-02 `needs-hum
 
 ## CI / PR Status
 - **main**: at `5b6e9c1`, includes merged PR #4 (P2-DOM-01a). Last CI on this head was green 12/12 (incl. Integration PG18).
-- **PR #5** `clever-cray-0zzng4` → main — **P2-DOM-01b** (table-level deltas), head `df2b128`. Reviewed → CHANGES-REQUESTED (1 blocker: `op` can't discriminate the global union) → **RF-B landed** (`df2b128`): established the `kind` discriminator convention + validators. Local gate green (675 tests). **CI re-running.** Reviewed-once (§7). Subscribed.
+- **PR #5** `clever-cray-0zzng4` → main — **P2-DOM-01b** (table-level deltas), head `088b3c1`. Reviewed → CHANGES-REQUESTED (1 blocker: `op` can't discriminate the global union) → **RF-B landed** (`df2b128`): established the `kind` discriminator convention + validators (reviewed-once, §7). **CI GREEN 12/12** (incl. Integration PG18; runs 28081333131 + 28081330824), `mergeable_state: clean`. **READY TO MERGE — human gate.** Subscribed.
 - **PR #4** `clever-cray-0zzng4` → main: **MERGED** 2026-06-23 (rebase). Reviewed (RF-A resolved 2 blockers), reviewed-once §7.
 - **PR #2** MERGED (M1). **PR #3** CLOSED-unmerged (P1-TEST-02, human).
 - Stale orchestrator branches (192p05/9tgfsf/vqtao5) + old `0zzng4` head: **auto-deleted on PR #4 merge** — housekeeping item resolved.
@@ -31,7 +31,7 @@ Phase 0 ✅. Phase 1 domain ✅. Phase 1 infra ✅ MERGED. P1-TEST-02 `needs-hum
 ---
 
 ## Execution Queue
-1. **(in review — PR #5)** **P2-DOM-01b** — Table-level deltas. CI re-running on RF-B; on green → Ready To Merge (human gate).
+1. **(READY TO MERGE — PR #5, human gate)** **P2-DOM-01b** — CI green + reviewed. Watching for merge.
 1b. **(next dispatch after PR #5 merges)** **P2-DOM-01c** — Column deltas. Must adopt the `kind` discriminator convention (see Key Decisions).
 2. **P2-DOM-01c/d/e/f** — column / index / constraint / schema+extension deltas. `ready` on deps, but **each edits the shared `domain/delta/__init__.py`** → run **sequentially** on the single working branch (one-writer-per-file, §6), one PR each, after the prior merges. P2-DOM-01f ALSO retypes `DeltaSet.deltas` to the concrete `Delta` union (closes RF-A's `TODO(P2-DOM-01f)`) — so it lands last (needs b..e subclasses).
 3. **P2-DIFF-08** — `topo_sort.py` (Kahn + cycle detection). `ready` (dep only P2-DOM-01a); independent files (does NOT touch `delta/__init__.py`). Can interleave.
@@ -44,9 +44,10 @@ Phase 0 ✅. Phase 1 domain ✅. Phase 1 infra ✅ MERGED. P1-TEST-02 `needs-hum
 - Single-branch sequential development (no new branches without human permission); b..f serialized on the shared `__init__.py`.
 
 ## Ready To Merge
-- **PR #5** (P2-DOM-01b) — pending CI re-run on `df2b128`. Reviewer's blocker resolved by RF-B (reviewed-once, §7), 0 open review-fix. On CI green → flip to Ready To Merge + non-blocking human-merge note (self check-in armed).
+- **PR #5** `clever-cray-0zzng4` (head `088b3c1`) — **READY.** P2-DOM-01b table deltas: CI green 12/12 (incl. Integration PG18) + reviewer blocker resolved by RF-B (reviewed-once) + 0 open review-fix. Squash/rebase only (linear, §7.1). Unblocks P2-DOM-01c.
 
 ## Needs Human
+- [ ] PR-5-merge | **PR #5** (P2-DOM-01b table deltas) is READY: CI green 12/12, reviewed (RF-B resolved the global-union-discriminator blocker), 0 open review-fix. Orchestrator never merges (§7). | options: squash (preferred) / rebase — linear history | since: 2026-06-24-run  *(non-blocking)*
 - [ ] P1-TEST-02 | Inspector integration-tests PR (#3) closed without merge by the human. | root cause: human declined CI-only-validated integration tests (no local Docker to validate pre-merge). | options: (A) re-approach & retry / (B) defer & proceed Phase 2 (in progress) / (C) leave M1 exit gate intentionally unmet. **Will NOT recreate without your call.** | since: 2026-06-22-1
 - [ ] repo-branch-protection | GitHub branch protection not confirmed: disallow merge commits, require linear history (§7.1, one-time human action). PRs #2/#4 both landed linear (rebase) — but protection not verified as enforced. | since: 2026-06-20-1  *(non-blocking)*
 
