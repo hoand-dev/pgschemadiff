@@ -324,33 +324,97 @@ function OverviewView({ onPickChange, onAi }) {
 
 }
 
-// Static box-drawing dep graph (mock)
+// SVG dependency graph
 function DepGraph() {
-  const txt = `
-  ┌───────────────────────┐   ┌──────────────────────┐   ┌─────────────────────┐
-  │ c01 CREATE plan_tier  │   │ c02 CREATE task_pri  │   │ c03 ALTER subscr_st │
-  │       ⟶ enum          │   │       ⟶ enum         │   │     +'paused'       │
-  └─────────┬─────────────┘   └──────────┬───────────┘   └──────────┬──────────┘
-            │                            │                          │
-            ▼                            ▼                          ▼
-  ┌───────────────────────┐   ┌──────────────────────┐   ┌─────────────────────┐
-  │ c04 ALTER tenants     │   │ c08 ALTER tasks      │   │ c23 ALTER subscr.   │
-  │  +plan_tier            │   │  +parent_task_id    │   │  +pause_until       │
-  │  +trial_ends_at        │   │  priority → enum    │   └─────────────────────┘
-  └────────────────────────┘   └──────────┬───────────┘
-                                         │
-                ┌────────────────────────┼─────────────────────────┐
-                ▼                        ▼                         ▼
-  ┌───────────────────────┐   ┌──────────────────────┐   ┌─────────────────────┐
-  │ c09 task_subscript.   │   │ c12 idx tasks_due    │   │ c13 idx ws_status   │
-  └───────────┬───────────┘   └──────────────────────┘   └─────────────────────┘
-              │
-              ▼
-  ┌───────────────────────┐
-  │ c21 trg_audit_users   │ ◀── depends on c05 (users)
-  └───────────────────────┘
-`;
-  return <pre className="ascii-box" style={{ margin: 0, fontSize: 11.5, color: 'var(--subtext0)' }}>{txt}</pre>;
+  const NW = 174, NH = 58, colGap = 22, rowGap = 34;
+
+  const xs = [16, 16 + NW + colGap, 16 + 2*(NW + colGap)];
+  const ys = [16, 16 + NH + rowGap, 16 + 2*(NH + rowGap), 16 + 3*(NH + rowGap)];
+
+  const svgW = xs[2] + NW + 16;
+  const svgH = ys[3] + NH + 16;
+
+  const COLORS = {
+    CREATE: { bg: 'rgba(166,227,161,0.08)', bd: 'rgba(166,227,161,0.38)', op: 'var(--green)' },
+    ALTER:  { bg: 'rgba(137,180,250,0.08)', bd: 'rgba(137,180,250,0.38)', op: 'var(--blue)' },
+    REPLACE:{ bg: 'rgba(249,226,175,0.08)', bd: 'rgba(249,226,175,0.38)', op: 'var(--yellow)' },
+  };
+
+  const nodes = [
+    { id:'c01', col:0, row:0, op:'CREATE', kind:'TYPE',    label:'plan_tier_enum',         sub:'new enum · 4 values' },
+    { id:'c02', col:1, row:0, op:'CREATE', kind:'TYPE',    label:'task_priority',           sub:'new enum · 5 values' },
+    { id:'c03', col:2, row:0, op:'ALTER',  kind:'TYPE',    label:'subscription_status',     sub:"+VALUE 'paused'" },
+    { id:'c04', col:0, row:1, op:'ALTER',  kind:'TABLE',   label:'public.tenants',          sub:'+plan_tier, +trial_ends_at' },
+    { id:'c08', col:1, row:1, op:'ALTER',  kind:'TABLE',   label:'public.tasks',            sub:'+parent_task_id, priority→enum' },
+    { id:'c23', col:2, row:1, op:'ALTER',  kind:'TABLE',   label:'billing.subscriptions',   sub:'+pause_until' },
+    { id:'c09', col:0, row:2, op:'CREATE', kind:'TABLE',   label:'task_subscriptions',      sub:'new junction table' },
+    { id:'c12', col:1, row:2, op:'CREATE', kind:'INDEX',   label:'idx_tasks_due_date',      sub:'CONCURRENTLY' },
+    { id:'c13', col:2, row:2, op:'CREATE', kind:'INDEX',   label:'idx_tasks_ws_status',     sub:'CONCURRENTLY' },
+    { id:'c21', col:0, row:3, op:'CREATE', kind:'TRIGGER', label:'trg_audit_users_changes', sub:'← also depends on c05 users' },
+  ];
+
+  const edges = [
+    ['c01','c04'], ['c02','c08'], ['c03','c23'],
+    ['c08','c09'], ['c08','c12'], ['c08','c13'],
+    ['c09','c21'],
+  ];
+
+  const nm = {};
+  for (const n of nodes) { n.x = xs[n.col]; n.y = ys[n.row]; nm[n.id] = n; }
+
+  function path(s, d) {
+    const sx = s.x + NW/2, sy = s.y + NH;
+    const dx = d.x + NW/2, dy = d.y;
+    const cy = (sy + dy) / 2;
+    return `M${sx},${sy} C${sx},${cy} ${dx},${cy} ${dx},${dy}`;
+  }
+
+  const kindIcon = { TYPE:'T', TABLE:'⊞', INDEX:'⊟', TRIGGER:'⚡', FUNCTION:'ƒ' };
+
+  return (
+    <svg width={svgW} height={svgH} style={{ display:'block', fontFamily:'inherit', overflow:'visible' }}>
+      <defs>
+        <marker id="dg-arr" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+          <path d="M1,1 L6,3.5 L1,6" fill="none" stroke="var(--overlay0)" strokeWidth="1.2" />
+        </marker>
+      </defs>
+
+      {edges.map(([s,d], i) => {
+        const sn = nm[s], dn = nm[d];
+        return (
+          <path key={i} d={path(sn, dn)}
+            fill="none" stroke="var(--surface2)" strokeWidth="1.5"
+            strokeDasharray="5 3" markerEnd="url(#dg-arr)" />
+        );
+      })}
+
+      {nodes.map(n => {
+        const c = COLORS[n.op] || COLORS.ALTER;
+        const icon = kindIcon[n.kind] || '·';
+        return (
+          <g key={n.id} transform={`translate(${n.x},${n.y})`}>
+            <rect width={NW} height={NH} rx="3"
+              fill={c.bg} stroke={c.bd} strokeWidth="1" />
+            <rect width={NW} height="1.5" rx="0" fill={c.bd} />
+            <text x="8" y="15" fontSize="9.5" fontWeight="600" letterSpacing="0.6"
+              fill={c.op} style={{ textTransform:'uppercase' }}>
+              {n.id}
+            </text>
+            <text x="22" y="15" fontSize="9.5" fontWeight="400" letterSpacing="0.3"
+              fill="var(--overlay1)">
+              {n.op} {n.kind}
+            </text>
+            <text x="8" y="33" fontSize="12" fontWeight="500" fill="var(--text)">
+              {icon} {n.label}
+            </text>
+            <text x="8" y="49" fontSize="10" fill="var(--overlay1)">
+              {n.sub}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
 }
 
 // ─── Diff Detail view ──────────────────────────────────────────────────────

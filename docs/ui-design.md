@@ -179,8 +179,10 @@ richer content — we will add it incrementally as Phase 1-3 data lands.
   `est. time`. Rows clickable → jumps to Diff view for that object.
 - **AI review panel**: card listing AI suggestions (phased migration,
   archive-before-drop, conflict resolution) — opens AI modal on click.
-- **ASCII dependency graph**: box-drawing rendering of FK / function call
-  relationships among changed objects.
+- **SVG dependency graph**: node-graph rendering (topologically laid out in
+  columns/rows, op-coloured cards + curved edges with arrowheads) of FK /
+  function call relationships among changed objects. *(Was an ASCII box-drawing
+  block in the original mock; the design now uses an SVG node graph.)*
 
 ### 6.3 Diff (`gd`)
 
