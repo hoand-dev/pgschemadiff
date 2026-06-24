@@ -10,62 +10,54 @@ STALL_COUNTER: 0
 Goal: inspect two Postgres DBs, show schema diff, generate safe migration SQL.
 
 ## Active Branch
-`claude/clever-cray-0zzng4` — pushed; **PR #4** open → `main` (P2-DOM-01a). Branched from `origin/main` at `f602f60` (clean, linear). This run also **consolidated the fragmented orchestrator state** onto this branch (see Run-History Note) — prior authoritative state lived only on side-branch `claude/clever-cray-192p05`, never merged.
+`claude/clever-cray-0zzng4` — local == `origin/main` at `5b6e9c1` after PR #4 merged (rebase, linear). Continuing Phase 2 here. (Remote `0zzng4` was auto-deleted on merge; will re-push when the next task lands.)
 
 ---
 
 ## Current Project Phase
-**Phase 2 — Diff Engine — STARTED.** Phase 1 core infra MERGED to main (M1 feature reached). Phase 2 entry task **P2-DOM-01a implemented** and in PR #4 (review). Proceeded per the prior run's documented `phase2-go-ahead` default-A pre-authorization.
+**Phase 2 — Diff Engine — in progress.** Phase 1 ✅ (M1 feature on main). **P2-DOM-01a (`domain/delta/` foundation) MERGED to main via PR #4** (2026-06-23, rebase). Now building out the category delta modules + topo-sort.
 
-Phase 0 ✅. Phase 1 domain ✅. Phase 1 infra ✅ MERGED (P1-INFRA-01..06, P1-TEST-01, P1-CLI-01). P1-TEST-02 `needs-human` (PR #3 human-closed; do NOT recreate).
+Phase 0 ✅. Phase 1 domain ✅. Phase 1 infra ✅ MERGED. P1-TEST-02 `needs-human` (PR #3 human-closed; do NOT recreate).
 
 ---
 
 ## CI / PR Status
-- **main**: green at `f602f60` (workflow `success`, 2026-06-22T04:21Z). Includes merged PR #2 (M1).
-- **PR #4** `claude/clever-cray-0zzng4` → main — **P2-DOM-01a** (`domain/delta/` foundation), head `2afa836`. `code-reviewer` returned CHANGES-REQUESTED (2 verified blockers) → **review-fix RF-A** (`4349983`) fixed both (reviewed-once, §7). **CI GREEN 12/12 on the RF-A head** (incl. Integration PG18; runs 28047566934 + 28047561911), `mergeable_state: clean`. **READY TO MERGE — human gate.** Session subscribed to PR #4 activity.
-- **PR #2** `clever-cray-9tgfsf` → main: **MERGED** 2026-06-22 (M1).
-- **PR #3** `claude/p1-test-02-integration` → main: **CLOSED, not merged** by human 2026-06-22.
-- Stale remote branches (housekeeping, non-blocking): `claude/clever-cray-9tgfsf` (merged PR #2 head), `claude/clever-cray-192p05` + `claude/clever-cray-vqtao5` (prior orchestrator state branches, now superseded by this branch).
+- **main**: at `5b6e9c1`, includes merged PR #4 (P2-DOM-01a). Last CI on this head was green 12/12 (incl. Integration PG18).
+- **Open PRs**: none (PR #4 merged).
+- **PR #4** `clever-cray-0zzng4` → main: **MERGED** 2026-06-23 (rebase). Reviewed (RF-A resolved 2 blockers), reviewed-once §7.
+- **PR #2** MERGED (M1). **PR #3** CLOSED-unmerged (P1-TEST-02, human).
+- Stale orchestrator branches (192p05/9tgfsf/vqtao5) + old `0zzng4` head: **auto-deleted on PR #4 merge** — housekeeping item resolved.
 
 ---
 
 ## Execution Queue
-1. **(DONE this run — awaiting human merge)** PR #4 — CI green + reviewed + RF-A landed → **Ready To Merge** (human gate, §7). Watching for the merge transition (self check-in armed; webhooks don't deliver merges).
-2. **(blocked on P2-DOM-01a merge)** **P2-DOM-01b..f** — category delta modules (table/column/index/constraint/schema+extension). Independent of each other, **distinct file scopes** → parallelizable (worktree per writer, §6). Each ≤3 files + 1 done-condition.
-3. **(blocked on P2-DOM-01a merge)** **P2-DIFF-08** — `topo_sort.py` (Kahn + cycle detection). Deps only P2-DOM-01a.
-4. **P0-CI-03** — Coverage gate (85%/80%) in CI. `ready`, low priority. ⚠️ risk: a hard gate could turn CI red; validate headroom before enabling. Held.
-5. **P1-INFRA-07** — Multi-conn `pg_export_snapshot`. Deferred (do not do yet unless single-conn benchmark fails).
+1. **(next dispatch)** **P2-DOM-01b** — Table-level deltas (`domain/delta/table.py` + test, re-export via `__init__.py`). `ready` (dep P2-DOM-01a done). high. Entry of the b..f sequence DIFF-01 needs.
+2. **P2-DOM-01c/d/e/f** — column / index / constraint / schema+extension deltas. `ready` on deps, but **each edits the shared `domain/delta/__init__.py`** → run **sequentially** on the single working branch (one-writer-per-file, §6), one PR each, after the prior merges. P2-DOM-01f ALSO retypes `DeltaSet.deltas` to the concrete `Delta` union (closes RF-A's `TODO(P2-DOM-01f)`) — so it lands last (needs b..e subclasses).
+3. **P2-DIFF-08** — `topo_sort.py` (Kahn + cycle detection). `ready` (dep only P2-DOM-01a); independent files (does NOT touch `delta/__init__.py`). Can interleave.
+4. **P2-DIFF-01** — diff engine visitor. `blocked` on all of P2-DOM-01b..f.
+5. **P0-CI-03** — coverage gate. low priority, held (validate headroom first).
+6. **P1-INFRA-07** — multi-conn snapshot. deferred.
 
 ## Next Actions
-- Watch PR #4 CI (subscribed). On green → Ready To Merge + non-blocking human-merge note. On red → `ci-recovery`.
-- A self check-in is armed (~1h) since webhooks don't deliver CI-success/merge transitions.
-- After PR #4 merges: dispatch P2-DOM-01b..f (parallel, isolated worktrees — distinct files) + P2-DIFF-08.
+- Dispatch `backend-engineer` → **P2-DOM-01b** on the working branch; gate → push → PR → reviewer → (RF if needed) → Ready To Merge (human gate).
+- Single-branch sequential development (no new branches without human permission); b..f serialized on the shared `__init__.py`.
 
 ## Ready To Merge
-- **PR #4** `claude/clever-cray-0zzng4` (head `2afa836`) — **READY.** All §7 conditions met: CI green 12/12 (incl. Integration PG18) + reviewer's 2 blockers resolved by RF-A (reviewed-once) + 0 open review-fix. Squash/rebase merge only (linear history, §7.1). Reaches Phase 2 foundation; unblocks P2-DOM-01b..f + P2-DIFF-08.
-
-## Review Follow-ups (PR #4 — RF-A, all addressed in `4349983`)
-- BLOCKER fixed: `sort_key` now folds parent identity → total/collision-free for sub-objects (P2-DIFF-08 determinism).
-- BLOCKER fixed: `DeltaSet` lossy-serialization made explicit — `TODO(P2-DOM-01f)` on the `deltas` field + 2 round-trip tests pinning current (pre-union) behavior. **P2-DOM-01f must retype `DeltaSet.deltas` to the concrete `Delta` discriminated-union alias.**
-- `from_iterable` now `Iterable[DeltaBase]`; `by_op`/`by_target` both use `==`; `DeltaOp.NO_CHANGE` removed (no production consumer).
+- None (PR #4 merged; no open PRs).
 
 ## Needs Human
-- [ ] PR-4-merge | **PR #4** (P2-DOM-01a, Phase 2 foundation) is READY: CI green 12/12, reviewed (RF-A resolved 2 blockers), 0 open review-fix. Orchestrator never merges (§7). | options: squash (preferred) / rebase merge — linear history | since: 2026-06-23-1  *(non-blocking)*
-- [ ] P1-TEST-02 | Inspector integration-tests PR (#3) was closed without merge by the human. | root cause: human declined the CI-only-validated integration tests (no local Docker to validate pre-merge). | options: (A) re-approach P1-TEST-02 differently and retry / (B) defer integration tests, proceed Phase 2 (currently in progress) / (C) leave M1 exit gate intentionally unmet. **Will NOT recreate without your call.** | since: 2026-06-22-1
-- [ ] repo-branch-protection | GitHub branch protection not confirmed: disallow merge commits, require linear history (§7.1, one-time human action). | since: 2026-06-20-1  *(non-blocking)*
-- [ ] stale-branches | Housekeeping: delete superseded remote branches `claude/clever-cray-9tgfsf`, `claude/clever-cray-192p05`, `claude/clever-cray-vqtao5`. | since: 2026-06-22-1  *(non-blocking)*
+- [ ] P1-TEST-02 | Inspector integration-tests PR (#3) closed without merge by the human. | root cause: human declined CI-only-validated integration tests (no local Docker to validate pre-merge). | options: (A) re-approach & retry / (B) defer & proceed Phase 2 (in progress) / (C) leave M1 exit gate intentionally unmet. **Will NOT recreate without your call.** | since: 2026-06-22-1
+- [ ] repo-branch-protection | GitHub branch protection not confirmed: disallow merge commits, require linear history (§7.1, one-time human action). PRs #2/#4 both landed linear (rebase) — but protection not verified as enforced. | since: 2026-06-20-1  *(non-blocking)*
 
-## Resolved This Run
-- **phase2-go-ahead** (was non-blocking needs-human, default-A): ACTED. Proceeded autonomously with P2-DOM-01a per the prior run's documented default-A pre-authorization (Phase 2 is an approved plan; entry task was `ready`; pure additive domain code behind the human merge gate). Redirect anytime — say the word and I'll hold further Phase 2 dispatch.
+## Resolved
+- **PR-4-merge** — DONE: human merged PR #4 (rebase, linear) 2026-06-23. P2-DOM-01a on main.
+- **phase2-go-ahead** — confirmed: human merged the first Phase 2 PR → Phase 2 proceeding (autonomous default-A validated).
+- **stale-branches** — DONE: superseded branches auto-deleted on PR #4 merge.
 
 ## Key Architectural Decisions
-- 2026-06-23 P2-DOM-01a (`domain/delta/` package): `DeltaOp` StrEnum discriminator = generic op categories (NOT per-object-kind, avoids enum explosion); concrete subclasses (b..f) narrow `op` to `Literal[DeltaOp.X]` + add payload, mirroring `domain/constraint.py`'s discriminated union. `DeltaBase.sort_key` folds parent identity for sub-objects (RF-A) → total, collision-free deterministic ordering for P2-DIFF-08 topo-sort tie-breaking + stable `pgsd diff` JSON output. `DeltaSet.__iter__` overrides Pydantic's field-iteration to yield delta items. `DeltaSet.deltas` is `tuple[DeltaBase, ...]` for now and is intentionally lossy on subclass round-trip (tested) until **P2-DOM-01f retypes it to the `Delta` discriminated-union alias**. `DeltaOp` = {CREATE, DROP, ALTER, RENAME, REPLACE} (NO_CHANGE removed in RF-A — no production consumer). No new ADR.
-- 2026-06-22 Phase 2 decomposition (planner): `domain/delta.py` (40+ subclasses) split into `domain/delta/` package (base + per-category b..f) re-exported via `__init__.py`; engine/comparators/topo-sort/loaders in `application/diff/`; `pgsd diff` CLI = M2 gate.
-- 2026-06-20 P1-CLI-01 `application/inspect/inspect_schema.py` use case — CLI delegates (ADR-0005); composition root wires Pool + PgCatalogInspector.
-- 2026-06-20 `normalize_type()` applied inside `PgCatalogInspector._map_column` so domain `data_type` is always canonical.
-- ADR-0012: single REPEATABLE READ tx per inspect() call.
+- 2026-06-23 P2-DOM-01a (`domain/delta/` package): `DeltaOp` StrEnum discriminator = generic op categories (NOT per-object-kind, avoids enum explosion); concrete subclasses (b..f) narrow `op` to `Literal[DeltaOp.X]` + add payload, mirroring `domain/constraint.py`'s discriminated union. `DeltaBase.sort_key` folds parent identity for sub-objects (RF-A) → total, collision-free deterministic ordering for P2-DIFF-08 + stable `pgsd diff` JSON. `DeltaSet.deltas` is `tuple[DeltaBase, ...]`, intentionally lossy on subclass round-trip (tested) until **P2-DOM-01f retypes it to the `Delta` discriminated-union alias**. `DeltaOp` = {CREATE, DROP, ALTER, RENAME, REPLACE} (NO_CHANGE removed in RF-A — no production consumer). No new ADR.
+- 2026-06-22 Phase 2 decomposition (planner): delta package split b..f re-exported via `__init__.py`; engine/comparators/topo-sort/loaders in `application/diff/`; `pgsd diff` CLI = M2 gate.
+- 2026-06-20 P1-CLI-01 `application/inspect/inspect_schema.py` use case — CLI delegates (ADR-0005). `normalize_type()` inside `_map_column`. ADR-0012: single REPEATABLE READ tx per inspect().
 
 ## Run-History Note
-- 2026-06-23: Found orchestrator state **fragmented across branches** — the authoritative 2026-06-22-1 run (PR #2 merged, PR #3 human-closed, Phase 2 decomposed) was committed only to `claude/clever-cray-192p05`, while `main` + the assigned working branch carried stale 2026-06-21 state. Reconciled to GitHub ground truth (live PR/CI), adopted the 192p05 state files onto the assigned branch `claude/clever-cray-0zzng4`, and will land it via PR #4 so state finally consolidates on `main`. Lesson (recurring): a single orchestrator working branch + always reconcile against live PR/CI, never just local state files.
-- 2026-06-22: a parallel orchestrator session ran on `claude/clever-cray-vqtao5` (opened PR #3). Two concurrent orchestrator branches caused the drift above.
+- 2026-06-23: Reconciled fragmented orchestrator state (authoritative 2026-06-22-1 run lived only on a side-branch; main/working-branch were stale). Consolidated onto the working branch; landed on main via PR #4. Full cycle this run: dispatch P2-DOM-01a → CI green → review (2 blockers) → RF-A → CI green → human merged. Lesson (recurring): single orchestrator working branch + always reconcile against live PR/CI.

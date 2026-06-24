@@ -207,5 +207,16 @@ NEEDS_HUMAN (open): 3 — (1) **P1-TEST-02**: PR #3 human-closed → direction n
 2. After PR #4 merges: dispatch P2-DOM-01b..f (parallel, isolated worktrees, distinct files) + P2-DIFF-08.
 3. Act on any human reply re P1-TEST-02 / Phase 2 direction.
 
+### Update (same run) — PR #4 MERGED → P2-DOM-01a done → continue Phase 2
+- **Human merged PR #4** (rebase, linear) 2026-06-23. `main` now `5b6e9c1`; `domain/delta/` foundation on main. **P2-DOM-01a → done.** Phase 2 go-ahead thereby confirmed by the human.
+- Merge **auto-deleted** the superseded branches (192p05/9tgfsf/vqtao5 + old 0zzng4 head) → stale-branch housekeeping resolved.
+- Corrected the prior "isolated worktrees, parallel" plan: P2-DOM-01b..f each edit the shared `domain/delta/__init__.py` (re-exports) → **must serialize** (one-writer-per-file, §6), one PR each. Also constrained to the single assigned branch (no new branches without human permission). P2-DIFF-08 is independent (no `__init__.py` touch).
+- **Dispatched** `backend-engineer` → **P2-DOM-01b** (table-level deltas) on `claude/clever-cray-0zzng4`.
+
+### Next run targets
+1. P2-DOM-01b → gate → PR → reviewer → merge (human gate). Then P2-DOM-01c, d, e, then f (f also retypes `DeltaSet.deltas` → `Delta` union). P2-DIFF-08 anytime.
+2. After b..f merge: P2-DIFF-01 (engine) unblocks.
+3. Act on any human reply re P1-TEST-02.
+
 ---
 
