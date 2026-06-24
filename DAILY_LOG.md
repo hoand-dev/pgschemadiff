@@ -231,3 +231,25 @@ NEEDS_HUMAN (open): 3 — (1) **P1-TEST-02**: PR #3 human-closed → direction n
 
 ---
 
+
+## RUN 2026-06-24-1 — PR #5 merged (P2-DOM-01b) + reconcile external TUI landing → P2-DOM-01c
+NEEDS_HUMAN (open): 2 — (1) P1-TEST-02 (direction); (2) repo branch-protection (non-blocking).
+
+### Assessment (live GitHub + git)
+- **PR #5 MERGED** (rebase) 2026-06-24 → P2-DOM-01b table deltas on main. **P2-DOM-01b done.**
+- **External landing:** `e4f0367 feat(tui): P4-TUI-02..08` (all 7 TUI views) appeared on main from OUTSIDE this session; empty branch `claude/wizardly-cerf-rqmjal` also appeared. The TUI commit did NOT touch orchestrator state files → no state conflict. Marked P4-TUI-02..08 done (mock-backed; real-use-case wiring deferred). Flagged possible parallel session — watch for drift.
+- main CI green at `e4f0367` (success). Reset working branch to origin/main; `uv sync` (TUI added a dep); local baseline gate green (693 tests).
+
+### Dispatched
+- `backend-engineer` → **P2-DOM-01c** (column deltas) — adopting the `kind` discriminator convention from RF-B.
+
+### Decisions
+- Continued Phase 2 (human merged #4 and #5 → go-ahead repeatedly confirmed).
+- Single working branch, sequential c→d→e→f (shared `domain/delta/__init__.py`); P2-DOM-01f lands the global `Delta` union + `DeltaSet` retype last.
+
+### Next run targets
+1. P2-DOM-01c → gate → PR → reviewer → human merge. Then d, e, f. P2-DIFF-08 anytime.
+2. Then P2-DIFF-01 (engine) unblocks.
+3. Act on any human reply re P1-TEST-02.
+
+---

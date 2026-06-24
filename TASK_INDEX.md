@@ -98,7 +98,7 @@ per-type comparators per ADR-0006; explicit-annotation renames per ADR-0007.
 | id | title | status | deps | files | attempts | priority |
 |---|---|---|---|---|---|---|
 | P2-DOM-01a | `domain/delta/` package: shared `DeltaBase`, `DeltaOp`/discriminator, `DeltaSet` container | done | P1-DOM-07, P1-INFRA-05 | src/pgschemadiff/domain/delta/__init__.py, src/pgschemadiff/domain/delta/base.py, tests/unit/domain/delta/test_base.py | 1 | high | **MERGED to main via PR #4** (rebase, 2026-06-23); reviewed + RF-A |
-| P2-DOM-01b | Table-level deltas (Create/Drop/RenameTable, partition/owner attrs) | review | P2-DOM-01a | src/pgschemadiff/domain/delta/table.py, tests/unit/domain/delta/test_table.py | 0 | high |
+| P2-DOM-01b | Table-level deltas (Create/Drop/RenameTable, partition/owner attrs) | done | P2-DOM-01a | src/pgschemadiff/domain/delta/table.py, tests/unit/domain/delta/test_table.py | 0 | high |
 | P2-DOM-01c | Column deltas (Add/Drop/AlterType/SetDefault/Nullability/RenameColumn) | ready | P2-DOM-01a | src/pgschemadiff/domain/delta/column.py, tests/unit/domain/delta/test_column.py | 0 | high |
 | P2-DOM-01d | Index deltas (Create/Drop/Replace, method/predicate/include changes) | ready | P2-DOM-01a | src/pgschemadiff/domain/delta/index.py, tests/unit/domain/delta/test_index.py | 0 | high |
 | P2-DOM-01e | Constraint deltas incl. FK (Add/Drop PK/Unique/Check/FK/Exclusion) | ready | P2-DOM-01a | src/pgschemadiff/domain/delta/constraint.py, tests/unit/domain/delta/test_constraint.py | 0 | high |
@@ -131,9 +131,8 @@ per-type comparators per ADR-0006; explicit-annotation renames per ADR-0007.
 [ ] P3-TEST-02      emitter snapshot tests
 ```
 
-## Phase 4 — TUI (blocked on P2-DIFF-01 + P1-INFRA-05)
-P4-UX-01 and P4-TUI-01 are DONE (TUI shell exists in presentation/tui/).
-P4-TUI-02..08: blocked on domain + infrastructure work.
+## Phase 4 — TUI
+P4-UX-01 and P4-TUI-01 DONE (TUI shell). **P4-TUI-02..08 DONE** — all 7 views landed on main via `e4f0367` (2026-06-24), implemented OUTSIDE this orchestrator session (external session/human). Currently mock-data-backed (`_mock.py`); wiring to real `application/` use cases tracked with Phase 2/3 progress.
 
 ---
 

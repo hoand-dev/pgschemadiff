@@ -1,7 +1,7 @@
 # AI_STATE.md
-_Last updated: 2026-06-23_
+_Last updated: 2026-06-24_
 
-RUN_ID: 2026-06-23-1
+RUN_ID: 2026-06-24-1
 STATE: ACTIVE
 STALL_COUNTER: 0
 
@@ -10,7 +10,8 @@ STALL_COUNTER: 0
 Goal: inspect two Postgres DBs, show schema diff, generate safe migration SQL.
 
 ## Active Branch
-`claude/clever-cray-0zzng4` — local == `origin/main` at `5b6e9c1` after PR #4 merged (rebase, linear). Continuing Phase 2 here. (Remote `0zzng4` was auto-deleted on merge; will re-push when the next task lands.)
+`claude/clever-cray-0zzng4` — reset to `origin/main` at `e4f0367` (clean) after **PR #5 merged**. Continuing Phase 2 here.
+⚠️ **Possible concurrent actor:** a `feat(tui)` commit (`e4f0367`, P4-TUI-02..08) landed on main from OUTSIDE this session, and an empty branch `claude/wizardly-cerf-rqmjal` appeared. The TUI commit did NOT touch orchestrator state files (no conflict). Watch for a parallel orchestrator session; reconcile against live main/PRs each step (single-writer lesson).
 
 ---
 
@@ -22,36 +23,35 @@ Phase 0 ✅. Phase 1 domain ✅. Phase 1 infra ✅ MERGED. P1-TEST-02 `needs-hum
 ---
 
 ## CI / PR Status
-- **main**: at `5b6e9c1`, includes merged PR #4 (P2-DOM-01a). Last CI on this head was green 12/12 (incl. Integration PG18).
-- **PR #5** `clever-cray-0zzng4` → main — **P2-DOM-01b** (table-level deltas), head `088b3c1`. Reviewed → CHANGES-REQUESTED (1 blocker: `op` can't discriminate the global union) → **RF-B landed** (`df2b128`): established the `kind` discriminator convention + validators (reviewed-once, §7). **CI GREEN 12/12** (incl. Integration PG18; runs 28081333131 + 28081330824), `mergeable_state: clean`. **READY TO MERGE — human gate.** Subscribed.
-- **PR #4** `clever-cray-0zzng4` → main: **MERGED** 2026-06-23 (rebase). Reviewed (RF-A resolved 2 blockers), reviewed-once §7.
-- **PR #2** MERGED (M1). **PR #3** CLOSED-unmerged (P1-TEST-02, human).
-- Stale orchestrator branches (192p05/9tgfsf/vqtao5) + old `0zzng4` head: **auto-deleted on PR #4 merge** — housekeeping item resolved.
+- **main**: at `e4f0367`, CI **green** (success, 2026-06-24T08:17Z). Includes P2-DOM-01a+01b (delta foundation + table deltas) and the externally-landed TUI views (P4-TUI-02..08). Local baseline gate green (693 tests).
+- **Open PRs**: none.
+- **PR #5** `clever-cray-0zzng4` → main — **P2-DOM-01b** (table deltas): **MERGED** 2026-06-24 (rebase). Reviewed + RF-B (`kind` convention), reviewed-once §7.
+- **PR #4** (P2-DOM-01a): MERGED. **PR #2** (M1): MERGED. **PR #3** (P1-TEST-02): CLOSED-unmerged (human).
+- **P4-TUI-02..08**: landed on main via `e4f0367` (NOT orchestrator-dispatched — external session/human).
 
 ---
 
 ## Execution Queue
-1. **(READY TO MERGE — PR #5, human gate)** **P2-DOM-01b** — CI green + reviewed. Watching for merge.
-1b. **(next dispatch after PR #5 merges)** **P2-DOM-01c** — Column deltas. Must adopt the `kind` discriminator convention (see Key Decisions).
-2. **P2-DOM-01c/d/e/f** — column / index / constraint / schema+extension deltas. `ready` on deps, but **each edits the shared `domain/delta/__init__.py`** → run **sequentially** on the single working branch (one-writer-per-file, §6), one PR each, after the prior merges. P2-DOM-01f ALSO retypes `DeltaSet.deltas` to the concrete `Delta` union (closes RF-A's `TODO(P2-DOM-01f)`) — so it lands last (needs b..e subclasses).
-3. **P2-DIFF-08** — `topo_sort.py` (Kahn + cycle detection). `ready` (dep only P2-DOM-01a); independent files (does NOT touch `delta/__init__.py`). Can interleave.
+1. **(in progress — dispatched)** **P2-DOM-01c** — Column deltas (`domain/delta/column.py` + test, re-export via `__init__.py`). MUST adopt the `kind` discriminator convention (Key Decisions). → PR → reviewer → human merge.
+2. **P2-DOM-01d/e/f** — index / constraint / schema+extension deltas. `ready`, but **each edits the shared `domain/delta/__init__.py`** → run **sequentially** on the single working branch (one-writer-per-file, §6), one PR each, after the prior merges. **P2-DOM-01f** lands LAST: composes the global `Delta` union (discriminated on `kind`) from all category aliases AND retypes `DeltaSet.deltas` to that union (closes RF-A's `TODO(P2-DOM-01f)`).
+3. **P2-DIFF-08** — `topo_sort.py` (Kahn + cycle detection). `ready` (dep only P2-DOM-01a); independent files. Can interleave.
 4. **P2-DIFF-01** — diff engine visitor. `blocked` on all of P2-DOM-01b..f.
 5. **P0-CI-03** — coverage gate. low priority, held (validate headroom first).
 6. **P1-INFRA-07** — multi-conn snapshot. deferred.
 
 ## Next Actions
-- Dispatch `backend-engineer` → **P2-DOM-01b** on the working branch; gate → push → PR → reviewer → (RF if needed) → Ready To Merge (human gate).
-- Single-branch sequential development (no new branches without human permission); b..f serialized on the shared `__init__.py`.
+- P2-DOM-01c dispatched → on completion: gate → push → PR → reviewer → (RF if needed) → Ready To Merge (human gate).
+- Single-branch sequential development (no new branches without human permission); c..f serialized on the shared `__init__.py`.
 
 ## Ready To Merge
-- **PR #5** `clever-cray-0zzng4` (head `088b3c1`) — **READY.** P2-DOM-01b table deltas: CI green 12/12 (incl. Integration PG18) + reviewer blocker resolved by RF-B (reviewed-once) + 0 open review-fix. Squash/rebase only (linear, §7.1). Unblocks P2-DOM-01c.
+- None (PR #5 merged; no open PRs).
 
 ## Needs Human
-- [ ] PR-5-merge | **PR #5** (P2-DOM-01b table deltas) is READY: CI green 12/12, reviewed (RF-B resolved the global-union-discriminator blocker), 0 open review-fix. Orchestrator never merges (§7). | options: squash (preferred) / rebase — linear history | since: 2026-06-24-run  *(non-blocking)*
 - [ ] P1-TEST-02 | Inspector integration-tests PR (#3) closed without merge by the human. | root cause: human declined CI-only-validated integration tests (no local Docker to validate pre-merge). | options: (A) re-approach & retry / (B) defer & proceed Phase 2 (in progress) / (C) leave M1 exit gate intentionally unmet. **Will NOT recreate without your call.** | since: 2026-06-22-1
 - [ ] repo-branch-protection | GitHub branch protection not confirmed: disallow merge commits, require linear history (§7.1, one-time human action). PRs #2/#4 both landed linear (rebase) — but protection not verified as enforced. | since: 2026-06-20-1  *(non-blocking)*
 
 ## Resolved
+- **PR-5-merge** — DONE: human merged PR #5 (rebase) 2026-06-24. P2-DOM-01b table deltas on main.
 - **PR-4-merge** — DONE: human merged PR #4 (rebase, linear) 2026-06-23. P2-DOM-01a on main.
 - **phase2-go-ahead** — confirmed: human merged the first Phase 2 PR → Phase 2 proceeding (autonomous default-A validated).
 - **stale-branches** — DONE: superseded branches auto-deleted on PR #4 merge.
