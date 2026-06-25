@@ -40,7 +40,7 @@ def _key(x: str) -> str:
 @pytest.mark.unit
 def test_empty_input_returns_empty_list() -> None:
     """An empty nodes iterable must yield an empty list."""
-    result = topological_sort([], {}, key=_key)
+    result: list[str] = topological_sort([], {}, key=_key)
     assert result == []
 
 
