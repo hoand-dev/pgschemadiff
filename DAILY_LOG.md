@@ -253,3 +253,39 @@ NEEDS_HUMAN (open): 2 — (1) P1-TEST-02 (direction); (2) repo branch-protection
 3. Act on any human reply re P1-TEST-02.
 
 ---
+
+
+## RUN 2026-06-25-1 — P2-DIFF-08 shipped (PR #7, CI green) + reconcile external PR #6
+NEEDS_HUMAN (open): 5 — (1) **PR #7 ready to merge** (P2-DIFF-08); (2) **PR #6 ready to merge** (P2-DOM-01c, external-built; merging unblocks d/e/f); (3) concurrent-orchestrators (a 2nd session is active on this repo); (4) P1-TEST-02 (direction); (5) repo branch-protection (non-blocking).
+
+### Assessment (live GitHub + git)
+- main green at `f76cd26`. Working branch `claude/clever-cray-9np03s` branched clean from main tip.
+- **Stale-state reconciliation:** prior run marked P2-DOM-01c "dispatched/in-progress" on this lineage, but NO `column.py` exists here. Live PRs show **PR #6** (P2-DOM-01c) was built by the **external session** (branch `clever-cray-6b2yqf`, session `017jMeWPQi...`) — CI green 12/12, reviewed + APPROVED, `mergeable_state: clean`. → ready to merge. Confirms a concurrent orchestrator.
+- d/e/f are gated on PR #6's merge (shared `domain/delta/__init__.py`, §6). P2-DIFF-08 was the only non-colliding `ready` task → dispatched.
+
+### Dispatched
+- `backend-engineer` (sonnet) → **P2-DIFF-08** (Kahn topo-sort + cycle detection): gate green, pushed `9d1079f`, PR #7 opened. → review.
+- `code-reviewer` (opus) → **PR #7**: VERDICT CHANGES-REQUESTED, single blocker **B1** = `mypy --strict` fails on test empty-input call (`Need type annotation for "result"`); algorithm correct/deterministic/clean. N1–N5 logged as non-blocking tech-debt (TD-TOPO-01).
+- `devops-engineer` (sonnet, ci-recovery) → **PR #7**: fixed B1 root cause (`result: list[str] = ...`), pushed `f410486` (commit 1/3 of cap). → CI green 12/12.
+
+### Decisions
+- Root cause of CI-red (mypy) = developer ran `mypy src` but CI runs `mypy src/ tests/`; empty `[]`/`{}` literals gave PEP 695 `T` no inference. Fix is test-side type annotation only — production code untouched, no guardrail bent.
+- PR #7 reviewed-once (B1 resolved, 0 open review-fix) → READY TO MERGE; not re-reviewing (§7 closes the loop).
+- **No further developer dispatch:** only non-colliding ready work (P2-DIFF-08) is done; d/e/f wait on PR #6 merge. Loop pauses at the human merge gate. STALL_COUNTER stays 0 (real progress: a new green PR).
+- Orchestrator does not auto-merge (§7); both PRs escalated as non-blocking ready-to-merge.
+
+### Blockers
+- P2-DOM-01d/e/f: blocked on PR #6 merge (shared `__init__.py`) → action: merge PR #6, then dispatch developer on d (rebase onto new main first).
+
+### Commits/PRs
+- `clever-cray-9np03s` `9d1079f` "feat(diff): P2-DIFF-08 — Kahn topological sort + cycle detection" | PR #7 OPEN
+- `clever-cray-9np03s` `f410486` "fix(diff): P2-DIFF-08 ci-recovery — annotate empty-input call for mypy strict (tests/)" | PR #7 OPEN, CI green 12/12 → ready to merge
+- (external) `clever-cray-6b2yqf` → PR #6 OPEN, CI green, approved → ready to merge
+
+### Next run targets
+1. If PR #6 merged → dispatch developer on P2-DOM-01d (rebase onto new main, §7.1); then 01e, 01f.
+2. If PR #7 merged → P2-DIFF-08 done.
+3. TD-TOPO-01 (topo_sort O(n+m) refactor + test hardening) via maintainer when idle, or fold into P2-DIFF-01.
+4. Act on any human reply re P1-TEST-02 / concurrent-orchestrators.
+
+---
