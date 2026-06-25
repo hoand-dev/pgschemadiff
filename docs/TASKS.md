@@ -76,7 +76,7 @@
 | [ ] | P2-DIFF-05 | `comparators/constraint.py` (incl. FK) | backend-engineer | P0 | P2-DIFF-01 | M |
 | [ ] | P2-DIFF-06 | Rename annotation loader (YAML/TOML) | backend-engineer | P1 | P2-DIFF-03 | M |
 | [ ] | P2-DIFF-07 | Ignore-rules system | backend-engineer | P1 | P2-DIFF-01 | M |
-| [ ] | P2-DIFF-08 | `topo_sort.py` — Kahn + cycle detect | backend-engineer | P0 | P2-DOM-01 | M |
+| [x] | P2-DIFF-08 | `topo_sort.py` — Kahn + cycle detect | backend-engineer | P0 | P2-DOM-01 | M |
 | [ ] | P2-TEST-01 | Per-comparator unit tests | qa-engineer | P0 | P2-DIFF-02..05 | L |
 | [ ] | P2-TEST-02 | Hypothesis property tests | qa-engineer | P0 | P2-DIFF-01..05 | L |
 | [ ] | P2-CLI-01 | `pgsd diff` command | backend-engineer | P1 | P2-DIFF-01..08 | S |

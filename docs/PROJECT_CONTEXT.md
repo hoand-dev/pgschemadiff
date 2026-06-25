@@ -24,6 +24,7 @@ Last updated: **2026-06-21** — Review-fixes RF-1 (C1/C2), RF-2 (I1/I2), I3 app
 ## Active task
 
 Backend track: `P2-DOM-01b` (concrete delta subclasses — table/schema). P2-DOM-01a is now complete.
+P2-DIFF-08 (`topo_sort.py`) is now complete — next is P2-DIFF-01 (diff engine visitor dispatcher).
 The `PgCatalogInspector` maps pg_catalog rows to domain objects using a single
 REPEATABLE READ transaction per ADR-0012 MVP.
 
@@ -31,6 +32,8 @@ TUI track unblocked at the shell level by `P4-TUI-01`. Remaining
 `P4-TUI-02..08` are blocked on the Phase 1-3 data they each consume.
 
 ## Done in current session
+
+- **P2-DIFF-08** — `application/diff/topo_sort.py`: generic `topological_sort[T]` using Kahn's algorithm (BFS over in-degrees); deterministic tie-breaking via caller-supplied `key` callable; `CyclicDependencyError` on cycles (message names all cycle members); `ValueError` for unknown prerequisites; duplicate-edge idempotency. 26 new unit tests; 719 total pass. Import-linter 4/4 contracts KEPT. mypy strict clean.
 
 - **P2-DOM-01a** — `domain/delta/` package foundation: `DeltaOp` (StrEnum with CREATE/DROP/ALTER/RENAME/REPLACE/NO_CHANGE), `DeltaBase` (frozen Pydantic v2 model with `op` + `target: ObjectRef` + `sort_key` property returning `(namespace, name, op_value)`), `DeltaSet` (frozen ordered container with `from_iterable`, `__iter__`, `__len__`, `__contains__`, `by_op`, `by_target`, `is_empty`). 36 new unit tests; 605 total pass. Import-linter all 4 contracts KEPT. mypy strict clean.
 
