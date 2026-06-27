@@ -199,7 +199,15 @@ module = ["testcontainers.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
+module = ["hypothesis.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
 module = ["tests.integration.*"]
+disallow_any_unimported = false
+
+[[tool.mypy.overrides]]
+module = ["tests.unit.application.diff.test_topo_sort"]
 disallow_any_unimported = false
 
 # ---------------------------------------------------------------------------
