@@ -9,15 +9,19 @@ Covers:
 - Self-cycle raises CyclicDependencyError
 - Multi-node cycle raises CyclicDependencyError
 - CyclicDependencyError message names cycle members
+- CyclicDependencyError message does NOT name non-cycle nodes (N2)
 - Unknown prerequisite raises ValueError
 - Duplicate edges in dependencies (idempotent)
 - Node with dependency not listed in dependencies mapping
 - All nodes with no explicit dependencies → sorted by key
+- Hypothesis property: output is a valid topological order of any random DAG (N3)
 """
 
 from __future__ import annotations
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from pgschemadiff.application.diff.topo_sort import topological_sort
 from pgschemadiff.shared.errors import CyclicDependencyError
@@ -196,10 +200,15 @@ def test_self_cycle_error_message_names_node() -> None:
 
 
 @pytest.mark.unit
-def test_partial_cycle_non_cycle_nodes_not_mentioned_in_cycle_error() -> None:
-    """Nodes outside the cycle are NOT expected in the error (cycle members only)."""
-    # Graph: A (root) → B → C → B (cycle is B and C only; A is not in the cycle)
-    # B depends on C AND on A; C depends on B → B↔C form a cycle
+def test_partial_cycle_non_cycle_nodes_excluded_from_error() -> None:
+    """Nodes outside the cycle are NOT included in the cycle-error message (N2).
+
+    Graph: A (root) → B → C → B (cycle is B and C only; A is not in the cycle).
+    A has in-degree 0 and is emitted before the cycle is detected, so A must
+    NOT appear in the CyclicDependencyError message.
+    """
+    # B depends on A (so A must precede B) AND on C (creating the B↔C cycle).
+    # A is successfully emitted; only B and C remain with non-zero in-degree.
     with pytest.raises(CyclicDependencyError) as exc_info:
         topological_sort(
             ["A", "B", "C"],
@@ -207,8 +216,11 @@ def test_partial_cycle_non_cycle_nodes_not_mentioned_in_cycle_error() -> None:
             key=_key,
         )
     msg = str(exc_info.value)
-    # The cycle participants (B and C) must be mentioned
-    assert "B" in msg or "C" in msg
+    # Both cycle participants must appear in the message
+    assert "B" in msg
+    assert "C" in msg
+    # The non-cycle node A must NOT appear in the message
+    assert "'A'" not in msg
 
 
 # ---------------------------------------------------------------------------
@@ -314,3 +326,85 @@ def test_negative_integer_key() -> None:
     nodes = [-3, -1, -2]
     result = topological_sort(nodes, {}, key=lambda x: x)
     assert result == [-3, -2, -1]
+
+
+# ---------------------------------------------------------------------------
+# Hypothesis property test — valid topological order on random DAGs (N3)
+# ---------------------------------------------------------------------------
+
+# Strategy: generate a DAG as an adjacency list over integer node indices.
+# To guarantee acyclicity, we only allow edges i → j where i < j (lower index
+# is a prerequisite of higher index), then shuffle the node labels so the
+# presentation order is unpredictable.
+
+_node_labels = st.lists(
+    st.integers(min_value=0, max_value=999),
+    min_size=0,
+    max_size=20,
+    unique=True,
+)
+
+
+@st.composite
+def _dag_strategy(
+    draw: st.DrawFn,
+) -> tuple[list[int], dict[int, list[int]]]:
+    """Draw a random DAG: unique integer nodes + acyclic edge set."""
+    nodes: list[int] = draw(_node_labels)
+    if len(nodes) < 2:
+        return nodes, {}
+
+    # Assign each node a rank; only allow edges from lower-rank to higher-rank
+    # node to guarantee acyclicity.
+    ranked = list(enumerate(nodes))  # (rank, label)
+    label_to_rank = {label: rank for rank, label in ranked}
+
+    deps: dict[int, list[int]] = {}
+    for rank, label in ranked[1:]:
+        # Draw a subset of lower-ranked nodes as prerequisites
+        possible_prereqs = [lbl for r, lbl in ranked if r < rank]
+        prereq_count = draw(st.integers(min_value=0, max_value=len(possible_prereqs)))
+        if prereq_count > 0:
+            prereqs = draw(
+                st.lists(
+                    st.sampled_from(possible_prereqs),
+                    min_size=prereq_count,
+                    max_size=prereq_count,
+                    unique=True,
+                )
+            )
+            if prereqs:
+                deps[label] = prereqs
+
+    _ = label_to_rank  # used above; silence unused-var linters
+    return nodes, deps
+
+
+@pytest.mark.unit
+@given(_dag_strategy())
+@settings(max_examples=200)
+def test_hypothesis_dag_valid_topo_order(
+    dag: tuple[list[int], dict[int, list[int]]],
+) -> None:
+    """For any random DAG, the output must be a valid topological order.
+
+    Two invariants checked for every generated DAG:
+    1. The result is a permutation of the input nodes (same elements, all present).
+    2. Every node appears in the result AFTER all of its prerequisites.
+    """
+    nodes, deps = dag
+    result = topological_sort(nodes, deps, key=lambda x: x)
+
+    # Invariant 1: result is a permutation of nodes
+    assert sorted(result) == sorted(nodes), (
+        f"result {result!r} is not a permutation of nodes {nodes!r}"
+    )
+
+    # Invariant 2: valid topological order — every prereq comes before its dependent
+    position = {node: idx for idx, node in enumerate(result)}
+    for node, prereqs in deps.items():
+        for prereq in prereqs:
+            assert position[prereq] < position[node], (
+                f"Prerequisite {prereq!r} (pos {position[prereq]}) appears "
+                f"after dependent {node!r} (pos {position[node]}) in {result!r}"
+            )

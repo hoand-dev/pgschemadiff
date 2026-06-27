@@ -27,6 +27,10 @@ Design notes
 * **Input validation** — every prerequisite referenced in *dependencies* must
   appear in *nodes*.  Unknown prerequisites raise :exc:`ValueError` immediately
   so callers get a clear error instead of a silently incomplete graph.
+* **Complexity** — O(n + m) time and space where *n* is the number of nodes and
+  *m* is the total number of edges.  Nodes are used directly as dict keys
+  (requires ``T`` to be hashable), eliminating the O(n·m) ``id()``-resolution
+  loop of the previous implementation.
 
 Examples
 --------
@@ -75,7 +79,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 
-def topological_sort[T](
+def topological_sort[T: object](
     nodes: Iterable[T],
     dependencies: Mapping[T, Iterable[T]],
     *,
@@ -92,7 +96,8 @@ def topological_sort[T](
     nodes:
         All nodes that must appear in the output.  Every node referenced as a
         prerequisite in *dependencies* must also appear here; if a prerequisite
-        is missing a :exc:`ValueError` is raised immediately.
+        is missing a :exc:`ValueError` is raised immediately.  Nodes must be
+        hashable so they can serve as dict keys.
     dependencies:
         A mapping from each node to an iterable of its *prerequisites* — the
         nodes that must appear **before** it in the final ordering.  Nodes that
@@ -123,19 +128,17 @@ def topological_sort[T](
         self-loops).  The error message names every node that participates
         in a cycle.
     """
-    # Materialise the node set so we can do O(1) membership checks and build
-    # a stable sorted list of all nodes later.
+    # Materialise the node list and build an O(1) membership set.
+    # Nodes must be hashable — used directly as dict keys (O(n+m) overall).
     node_list: list[T] = list(nodes)
-    # Map node id → node object for O(1) reverse lookup
-    id_to_node: dict[int, T] = {id(n): n for n in node_list}
-    node_ids: set[int] = set(id_to_node)
+    node_set: set[T] = set(node_list)
 
     # ------------------------------------------------------------------
     # Validate: every prerequisite must be a known node
     # ------------------------------------------------------------------
     for node, prereqs in dependencies.items():
         for prereq in prereqs:
-            if id(prereq) not in node_ids and not any(prereq == n for n in node_list):
+            if prereq not in node_set:
                 msg = (
                     f"Prerequisite {prereq!r} (required by {node!r}) "
                     "is not in the nodes iterable.  All prerequisites must "
@@ -146,51 +149,48 @@ def topological_sort[T](
     # ------------------------------------------------------------------
     # Build adjacency list and in-degree table (Kahn's algorithm setup)
     # ------------------------------------------------------------------
-    # adjacency[node_id] = list of node_ids that DEPEND ON node
+    # adjacency[node] = list of nodes that DEPEND ON node
     #   (i.e. node is a prerequisite for them — the forward edge in the
     #    "comes before" graph)
-    adjacency: dict[int, list[int]] = {id(n): [] for n in node_list}
-    in_degree: dict[int, int] = {id(n): 0 for n in node_list}
+    adjacency: dict[T, list[T]] = {n: [] for n in node_list}
+    in_degree: dict[T, int] = dict.fromkeys(node_list, 0)
 
     for node, prereqs in dependencies.items():
-        seen_prereqs: set[int] = set()
+        seen_prereqs: set[T] = set()
         for prereq in prereqs:
-            # Resolve prereq to its canonical id (the one in node_list)
-            prereq_id = _resolve_id(prereq, node_list)
-            if prereq_id in seen_prereqs:
+            if prereq in seen_prereqs:
                 # Duplicate edge — skip to avoid inflating in-degree
                 continue
-            seen_prereqs.add(prereq_id)
-            node_id = _resolve_id(node, node_list)
-            adjacency[prereq_id].append(node_id)
-            in_degree[node_id] += 1
+            seen_prereqs.add(prereq)
+            adjacency[prereq].append(node)
+            in_degree[node] += 1
 
     # ------------------------------------------------------------------
     # Kahn's BFS
     # ------------------------------------------------------------------
     # Initial queue: all nodes with in-degree 0, sorted by key for determinism
-    queue: deque[int] = deque(
+    queue: deque[T] = deque(
         sorted(
-            (nid for nid, deg in in_degree.items() if deg == 0),
-            key=lambda nid: key(id_to_node[nid]),
+            (n for n, deg in in_degree.items() if deg == 0),
+            key=key,
         )
     )
 
     result: list[T] = []
 
     while queue:
-        nid = queue.popleft()
-        result.append(id_to_node[nid])
+        node = queue.popleft()
+        result.append(node)
 
         # Collect newly-ready successors (in-degree drops to 0) then sort them
         # by key before adding to the deque so the overall ordering is stable.
-        newly_ready: list[int] = []
-        for successor_id in adjacency[nid]:
-            in_degree[successor_id] -= 1
-            if in_degree[successor_id] == 0:
-                newly_ready.append(successor_id)
+        newly_ready: list[T] = []
+        for successor in adjacency[node]:
+            in_degree[successor] -= 1
+            if in_degree[successor] == 0:
+                newly_ready.append(successor)
 
-        newly_ready.sort(key=lambda nid: key(id_to_node[nid]))
+        newly_ready.sort(key=key)
         queue.extend(newly_ready)
 
     # ------------------------------------------------------------------
@@ -198,7 +198,7 @@ def topological_sort[T](
     # ------------------------------------------------------------------
     if len(result) != len(node_list):
         cycle_members = sorted(
-            (id_to_node[nid] for nid, deg in in_degree.items() if deg > 0),
+            (n for n, deg in in_degree.items() if deg > 0),
             key=key,
         )
         members_repr = ", ".join(repr(m) for m in cycle_members)
@@ -210,42 +210,3 @@ def topological_sort[T](
         raise CyclicDependencyError(msg)
 
     return result
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
-def _resolve_id[T](node: T, node_list: list[T]) -> int:
-    """Return the ``id()`` of the canonical instance of *node* in *node_list*.
-
-    Because caller code may pass prerequisite objects that are *equal* to but
-    not *identical* to (different ``id()``) the objects in *node_list*, we
-    resolve by identity first, then fall back to equality.
-
-    Parameters
-    ----------
-    node:
-        The node whose canonical ``id()`` we need.
-    node_list:
-        The authoritative list of all nodes, built from the *nodes* argument
-        passed to :func:`topological_sort`.
-
-    Returns
-    -------
-    int
-        The ``id()`` of the matching object in *node_list*.
-    """
-    # Fast path: exact same object
-    node_id = id(node)
-    for n in node_list:
-        if id(n) == node_id:
-            return node_id
-    # Slow path: equal but different object (e.g. two equal string literals)
-    for n in node_list:
-        if n == node:
-            return id(n)
-    # Should not reach here after validation — but be safe
-    msg = f"Node {node!r} not found in node_list (internal error)."
-    raise ValueError(msg)
