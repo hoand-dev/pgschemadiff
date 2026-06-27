@@ -357,7 +357,6 @@ def _dag_strategy(
     # Assign each node a rank; only allow edges from lower-rank to higher-rank
     # node to guarantee acyclicity.
     ranked = list(enumerate(nodes))  # (rank, label)
-    label_to_rank = {label: rank for rank, label in ranked}
 
     deps: dict[int, list[int]] = {}
     for rank, label in ranked[1:]:
@@ -376,7 +375,6 @@ def _dag_strategy(
             if prereqs:
                 deps[label] = prereqs
 
-    _ = label_to_rank  # used above; silence unused-var linters
     return nodes, deps
 
 
@@ -386,11 +384,12 @@ def _dag_strategy(
 def test_hypothesis_dag_valid_topo_order(
     dag: tuple[list[int], dict[int, list[int]]],
 ) -> None:
-    """For any random DAG, the output must be a valid topological order.
+    """Property: topological_sort produces a valid order on randomly generated acyclic graphs.
 
-    Two invariants checked for every generated DAG:
+    The strategy only generates DAGs (no cycles), so CyclicDependencyError is never
+    expected here.  Two invariants are checked for each example:
     1. The result is a permutation of the input nodes (same elements, all present).
-    2. Every node appears in the result AFTER all of its prerequisites.
+    2. Every node appears in the result after all of its prerequisites.
     """
     nodes, deps = dag
     result = topological_sort(nodes, deps, key=lambda x: x)
