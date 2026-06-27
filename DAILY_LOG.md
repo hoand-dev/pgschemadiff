@@ -289,3 +289,38 @@ NEEDS_HUMAN (open): 5 — (1) **PR #7 ready to merge** (P2-DIFF-08); (2) **PR #6
 4. Act on any human reply re P1-TEST-02 / concurrent-orchestrators.
 
 ---
+
+
+## RUN 2026-06-27-1 — P2-DIFF-08 confirmed merged (done); PR #6 now CONFLICTED; TD-TOPO-01 shipped+approved
+NEEDS_HUMAN (open): 4 — (1) **PR #6 (P2-DOM-01c) CONFLICTED** (`dirty`) → needs rebase; blocks d/e/f; (2) **concurrent-orchestrators** worsening (≥3 branches, a duplicate RUN 2026-06-25-2 observed); (3) P1-TEST-02 (direction); (4) repo branch-protection (non-blocking).
+
+### Assessment (live GitHub + git — reconciled against stale main-state 27f63d7)
+- **PR #7 (P2-DIFF-08) MERGED** (rebase, human, 2026-06-26) → main `f76cd26`→`27f63d7`, CI **green** (Actions API). P2-DIFF-08 → **done**.
+- **PR #6 (P2-DOM-01c, external `clever-cray-6b2yqf`) now `mergeable_state: dirty`** — base is old main tip; its doc edits collide with PR #7's. Was ready-to-merge last run; now needs REBASE. Externally owned → NOT force-pushed by this session (§5/§7.1). Still blocks P2-DOM-01d/e/f (shared `domain/delta/__init__.py`).
+- **Concurrent-orchestrator fragmentation worsening:** found state commit `0950695` (RUN 2026-06-25-2) on `clever-cray-9np03s` (NOT on main) that independently duplicated this run's PR#7/PR#6 assessment. ≥3 orchestrator branches now live.
+- Only non-colliding `ready` task = **TD-TOPO-01** (topo_sort tech-debt; touches files no other session is editing).
+
+### Dispatched
+- `backend-engineer` (sonnet, maintainer) → **TD-TOPO-01**: committed `2fd9871` (N1 O(n+m) refactor + N2/N3 test hardening + N4 doc fix + scoped pyproject mypy overrides), pushed to `keen-bardeen-m2qquj`. → review.
+- `verify` (gate runner) → **GREEN**: `uv run mypy src/ tests/` clean (90 files), ruff clean, import-linter 4/4, pytest 720 passed, coverage 87.2%.
+- `code-reviewer` (opus) → **APPROVED**: behavior-equivalent refactor verified, Clean Architecture intact (no domain/IO/async coupling), 0 critical/important; 4 optional nitpicks. → dispatched maintainer follow-up for nitpick #1 (dead test var + wrong comment) + #2 (docstring accuracy).
+
+### Decisions
+- **Caught a false-RED:** maintainer's first report claimed mypy 555 errors (exit 1); root cause = it ran bare `mypy` not `uv run mypy`. Real CI invocation (`uv run mypy src/ tests/`, confirmed by both verify + reviewer) is clean. No guardrail bent; pyproject overrides are narrowly scoped (1 test module + hypothesis import), mirror existing `testcontainers.*`/`tests.integration.*` patterns.
+- PR #6 removed from Ready-To-Merge (now dirty); escalated as PR-6-rebase with 3 options (human merge / external-session rebase / authorize this session to rebase the external branch).
+- STALL_COUNTER stays 0 — real progress (new green+approved commit; P2-DIFF-08 confirmed done).
+- Orchestrator does not auto-merge (§7); does not force-push an external branch (§5).
+
+### Blockers
+- P2-DOM-01d/e/f: blocked on PR #6 merge (shared `__init__.py`). PR #6 itself blocked on a rebase of an externally-owned branch → human gate.
+
+### Commits/PRs
+- `keen-bardeen-m2qquj` `2fd9871` "refactor(diff): TD-TOPO-01 — topo_sort O(n+m) ..." + `08879cb` "TD-TOPO-01 review-fix — drop dead test var + correct N3 docstring" | **PR #8 OPEN** → main; verify+review GREEN/APPROVED; CI pending → ready-to-merge. Subscribed to PR #8 activity.
+
+### Next run targets
+1. Merge/rebase PR #6 → then dispatch developer on P2-DOM-01d (rebase onto new main, §7.1), then 01e, 01f.
+2. Merge TD-TOPO-01 PR once human-gated.
+3. Resolve concurrent-orchestrator coordination (recommend designating ONE authoritative session).
+4. Act on any human reply re P1-TEST-02.
+
+---
