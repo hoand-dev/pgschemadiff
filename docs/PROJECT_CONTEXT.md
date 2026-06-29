@@ -4,7 +4,7 @@
 > changes the phase status, finishes a milestone, or adds an ADR. Read me at
 > the start of every chat session.
 
-Last updated: **2026-06-29** — P2-DOM-01f complete: schema/extension deltas + global `Delta` union + `DeltaSet.deltas` retyped; 995 unit tests pass, all 4 import-linter contracts KEPT, mypy strict clean.
+Last updated: **2026-06-29** — P2-DIFF-01 complete: `Comparator` Protocol + `DiffEngine` visitor dispatcher; 990 unit tests pass, all 4 import-linter contracts KEPT, mypy strict clean.
 
 ---
 
@@ -23,15 +23,16 @@ Last updated: **2026-06-29** — P2-DOM-01f complete: schema/extension deltas + 
 
 ## Active task
 
-Backend track: `P2-DIFF-01` (diff engine visitor dispatcher). All P2-DOM-01a..f are now complete.
-P2-DIFF-08 (`topo_sort.py`, refactored to O(n+m) under TD-TOPO-01) is now complete.
-The `PgCatalogInspector` maps pg_catalog rows to domain objects using a single
-REPEATABLE READ transaction per ADR-0012 MVP.
+Backend track: `P2-DIFF-02..05` (concrete comparators — table, column, index, constraint).
+P2-DIFF-01 (`application/diff/engine.py` — `Comparator` Protocol + `DiffEngine`) is now complete.
+All P2-DOM-01a..f and P2-DIFF-08 are also complete.
 
 TUI track unblocked at the shell level by `P4-TUI-01`. Remaining
 `P4-TUI-02..08` are blocked on the Phase 1-3 data they each consume.
 
 ## Done in current session
+
+- **P2-DIFF-01** — `application/diff/engine.py`: `Comparator` Protocol (`@runtime_checkable`, `kind: ObjectKind` + `compare(source, target) -> Iterable[DeltaBase]`), `DiffEngine` visitor dispatcher (constructed from an `Iterable[Comparator]` registry indexed by kind; duplicate-kind registration raises `DiffError`; `diff(source, target) -> DeltaSet` enumerates objects by kind, pairs by `QualifiedName`, sorts for determinism, dispatches, aggregates). `_fetch_objects_for_kind` covers SCHEMA/EXTENSION/TABLE/INDEX; unknown kinds return `{}` (no error, no deltas). `application/diff/__init__.py` updated to export `Comparator`, `DiffEngine`, `topological_sort`. 40 new unit tests in `test_engine.py`; 990 total pass. All 4 import-linter contracts KEPT. mypy strict clean. P2-DIFF-02..05 now UNBLOCKED.
 
 - **P2-DOM-01f** — `domain/delta/schema.py`: five concrete schema/extension delta subclasses (`CreateSchema`, `DropSchema`, `CreateExtension`, `DropExtension`, `AlterExtension`), each frozen Pydantic v2 with globally-unique `kind` discriminator. `SchemaDelta` and `ExtensionDelta` discriminated union aliases. Global `Delta` union (spanning all 6 object categories) placed at bottom of `base.py` via circular-import-safe bottom-of-file imports; `DeltaSet.deltas` retyped to `tuple[Delta, ...]` + `model_rebuild()` called. Full re-export from `domain/delta/__init__.py`. `pg_schema` field naming (not `schema`) avoids Pydantic `BaseModel.schema()` shadowing. 69 new unit tests in `test_schema.py`; 995 total pass. All 4 import-linter contracts KEPT. mypy strict clean. Note: P2-DOM-01b (table deltas) was already implemented; marked complete.
 

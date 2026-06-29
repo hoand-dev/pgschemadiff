@@ -69,7 +69,7 @@
 | [x] | P2-DOM-01d | Concrete delta subclasses — index deltas | backend-engineer | P0 | P2-DOM-01a | M |
 | [x] | P2-DOM-01e | Concrete delta subclasses — constraint deltas | backend-engineer | P0 | P2-DOM-01a | M |
 | [x] | P2-DOM-01f | Discriminated Delta union + `domain/delta/__init__.py` full re-export | backend-engineer | P0 | P2-DOM-01b..e | S |
-| [ ] | P2-DIFF-01 | `application/diff/engine.py` — visitor dispatcher | backend-engineer | P0 | P2-DOM-01 | M |
+| [x] | P2-DIFF-01 | `application/diff/engine.py` — visitor dispatcher | backend-engineer | P0 | P2-DOM-01 | M |
 | [ ] | P2-DIFF-02 | `comparators/table.py` | backend-engineer | P0 | P2-DIFF-01 | L |
 | [ ] | P2-DIFF-03 | `comparators/column.py` | backend-engineer | P0 | P2-DIFF-02 | L |
 | [ ] | P2-DIFF-04 | `comparators/index.py` | backend-engineer | P0 | P2-DIFF-01 | M |
