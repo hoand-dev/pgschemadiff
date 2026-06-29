@@ -3,6 +3,38 @@ _Append-only. Each orchestrator run adds an entry._
 
 ---
 
+## RUN 2026-06-28-1 — 2026-06-28 (reconcile + review-only)
+NEEDS_HUMAN (open): 5 —
+- **PR-6-CONFLICT** (BLOCKING d/e/f): P2-DOM-01c (PR #6) `mergeable_state: dirty` — needs rebase before merge.
+- PR-8-merge (non-blocking): TD-TOPO-01 (PR #8) green + approved, ready to merge.
+- concurrent-orchestrators (escalating): state fragmented across unmerged branches.
+- P1-TEST-02 (open): integration-test PR #3 human-closed; awaiting direction.
+- repo-branch-protection (non-blocking): linear-history settings unconfirmed.
+
+### Assessment (live ground truth)
+- main advanced to `27f63d7` since RUN 2026-06-25-1 → **PR #7 (P2-DIFF-08) merged** (`9d1079f` + `f410486` now on main). P2-DIFF-08 = done.
+- **PR #8** (TD-TOPO-01, `keen-bardeen-m2qquj`, `d534129`) is NEW, external session — CI green 12/12, mergeable clean, base = current main. Unreviewed by this lineage.
+- **PR #6** (P2-DOM-01c, `clever-cray-6b2yqf`) still open; `get` reports **`mergeable_state: dirty` = CONFLICTED** vs `27f63d7`.
+- `git ls-remote`: origin has `clever-cray-6b2yqf`, `clever-cray-9np03s`, `keen-bardeen-m2qquj`, `main` — **assigned branch `keen-bardeen-37hwd8` absent from origin** (stale remote-tracking ref at start). Newest state (RUN 2026-06-27-1) is committed only inside the unmerged PR #8 branch → state fragmentation.
+
+### Dispatched
+- `code-reviewer` (opus) -> PR #8 (TD-TOPO-01) -> **APPROVE, 0 merge-blockers**. Empirically verified behavior-equivalence (old vs new impl across all 9 spec cases + the equal-but-distinct-`id()` prerequisite edge case → identical output/exception/message), O(n+m) confirmed (linear at n=1k/4k/16k), Hypothesis DAG property test correct + non-flaky. 2 non-blocking should-fix items: two unnecessary `pyproject.toml` mypy overrides (mypy passes without them) + `[T: object]` no-op bound nit. Posted concise review comment to PR #8 (#4826797314). → PR #8 ready-to-merge; should-fix items recorded as TD-TOPO-02 (blocked on PR #8 merge).
+- No `developer` dispatch: d/e/f gated on the CONFLICTED PR #6; TD-TOPO-02 gated on PR #8 merge; no other non-colliding `ready` task (§3 → loop pauses at human merge gates).
+
+### Decisions
+- P2-DIFF-08 → done (PR #7 on main). TD-TOPO-01 → review (PR #8, approved, ready-to-merge). Added TD-TOPO-02 (blocked). Escalated PR-6-CONFLICT with 3 resolution options (human rebase+merge / authorize dev rebase of external branch / re-author on fresh branch).
+- Did NOT push to PR #6's or PR #8's external branches (concurrent-orchestrator + one-writer §6 risk). Reviewer's checkout of PR #8 transiently detached HEAD in the shared tree; restored to assigned branch before committing.
+
+### Blockers
+- P2-DOM-01c PR #6 CONFLICTED → blocks P2-DOM-01d/e/f. Root cause: main advanced with edits overlapping PR #6 (`docs/*`, delta `__init__.py`). Action: escalated to human (PR-6-CONFLICT).
+- State fragmentation across concurrent-orchestrator branches → escalated (concurrent-orchestrators).
+
+### Commits/PRs
+- `claude/keen-bardeen-37hwd8` <this state commit> "chore(state): RUN 2026-06-28-1" | pushed (-u, branch was absent from origin).
+- No new feature PRs this run.
+
+---
+
 ## 2026-06-19 — Orchestrator run
 
 ### Assessment
@@ -287,5 +319,74 @@ NEEDS_HUMAN (open): 5 — (1) **PR #7 ready to merge** (P2-DIFF-08); (2) **PR #6
 2. If PR #7 merged → P2-DIFF-08 done.
 3. TD-TOPO-01 (topo_sort O(n+m) refactor + test hardening) via maintainer when idle, or fold into P2-DIFF-01.
 4. Act on any human reply re P1-TEST-02 / concurrent-orchestrators.
+
+---
+
+
+## RUN 2026-06-27-1 — P2-DIFF-08 confirmed merged (done); PR #6 now CONFLICTED; TD-TOPO-01 shipped+approved
+NEEDS_HUMAN (open): 4 — (1) **PR #6 (P2-DOM-01c) CONFLICTED** (`dirty`) → needs rebase; blocks d/e/f; (2) **concurrent-orchestrators** worsening (≥3 branches, a duplicate RUN 2026-06-25-2 observed); (3) P1-TEST-02 (direction); (4) repo branch-protection (non-blocking).
+
+### Assessment (live GitHub + git — reconciled against stale main-state 27f63d7)
+- **PR #7 (P2-DIFF-08) MERGED** (rebase, human, 2026-06-26) → main `f76cd26`→`27f63d7`, CI **green** (Actions API). P2-DIFF-08 → **done**.
+- **PR #6 (P2-DOM-01c, external `clever-cray-6b2yqf`) now `mergeable_state: dirty`** — base is old main tip; its doc edits collide with PR #7's. Was ready-to-merge last run; now needs REBASE. Externally owned → NOT force-pushed by this session (§5/§7.1). Still blocks P2-DOM-01d/e/f (shared `domain/delta/__init__.py`).
+- **Concurrent-orchestrator fragmentation worsening:** found state commit `0950695` (RUN 2026-06-25-2) on `clever-cray-9np03s` (NOT on main) that independently duplicated this run's PR#7/PR#6 assessment. ≥3 orchestrator branches now live.
+- Only non-colliding `ready` task = **TD-TOPO-01** (topo_sort tech-debt; touches files no other session is editing).
+
+### Dispatched
+- `backend-engineer` (sonnet, maintainer) → **TD-TOPO-01**: committed `2fd9871` (N1 O(n+m) refactor + N2/N3 test hardening + N4 doc fix + scoped pyproject mypy overrides), pushed to `keen-bardeen-m2qquj`. → review.
+- `verify` (gate runner) → **GREEN**: `uv run mypy src/ tests/` clean (90 files), ruff clean, import-linter 4/4, pytest 720 passed, coverage 87.2%.
+- `code-reviewer` (opus) → **APPROVED**: behavior-equivalent refactor verified, Clean Architecture intact (no domain/IO/async coupling), 0 critical/important; 4 optional nitpicks. → dispatched maintainer follow-up for nitpick #1 (dead test var + wrong comment) + #2 (docstring accuracy).
+
+### Decisions
+- **Caught a false-RED:** maintainer's first report claimed mypy 555 errors (exit 1); root cause = it ran bare `mypy` not `uv run mypy`. Real CI invocation (`uv run mypy src/ tests/`, confirmed by both verify + reviewer) is clean. No guardrail bent; pyproject overrides are narrowly scoped (1 test module + hypothesis import), mirror existing `testcontainers.*`/`tests.integration.*` patterns.
+- PR #6 removed from Ready-To-Merge (now dirty); escalated as PR-6-rebase with 3 options (human merge / external-session rebase / authorize this session to rebase the external branch).
+- STALL_COUNTER stays 0 — real progress (new green+approved commit; P2-DIFF-08 confirmed done).
+- Orchestrator does not auto-merge (§7); does not force-push an external branch (§5).
+
+### Blockers
+- P2-DOM-01d/e/f: blocked on PR #6 merge (shared `__init__.py`). PR #6 itself blocked on a rebase of an externally-owned branch → human gate.
+
+### Commits/PRs
+- `keen-bardeen-m2qquj` `2fd9871` "refactor(diff): TD-TOPO-01 — topo_sort O(n+m) ..." + `08879cb` "TD-TOPO-01 review-fix — drop dead test var + correct N3 docstring" | **PR #8 OPEN** → main; verify+review GREEN/APPROVED; CI pending → ready-to-merge. Subscribed to PR #8 activity.
+
+### Next run targets
+1. Merge/rebase PR #6 → then dispatch developer on P2-DOM-01d (rebase onto new main, §7.1), then 01e, 01f.
+2. Merge TD-TOPO-01 PR once human-gated.
+3. Resolve concurrent-orchestrator coordination (recommend designating ONE authoritative session).
+4. Act on any human reply re P1-TEST-02.
+
+---
+
+## 2026-06-29 — RUN 2026-06-29-1 (integration / de-fragmentation)
+
+### Summary
+Integrated ALL outstanding branches into a single main-bound branch
+`claude/rebase-merge-main-u55dvs` (branched from `main` @ `27f63d7`).
+
+### Merges (in order)
+1. **PR #8** `keen-bardeen-m2qquj` (TD-TOPO-01, topo_sort O(n+m) + test hardening) — clean merge.
+2. **PR #6** `clever-cray-6b2yqf` (P2-DOM-01c column deltas) — previously `dirty`/CONFLICTED.
+   Resolved via 3-way merge: only the bookkeeping/doc files conflicted
+   (`AI_STATE.md`, `DAILY_LOG.md`, `TASK_INDEX.md`, `docs/PROJECT_CONTEXT.md`);
+   all `domain/delta/column.py` + test code applied cleanly, and the topo_sort
+   files from PR #7/#8 were preserved (the diff "deletions" were base-age
+   artifacts from PR #6's old base `f76cd26`, not real removals).
+3. **`keen-bardeen-37hwd8`** (RUN 2026-06-28-1 bookkeeping) — doc conflicts resolved.
+4. **`clever-cray-9np03s`** (RUN 2026-06-25-2 bookkeeping) — doc conflicts resolved.
+
+### Conflict resolution
+- `docs/PROJECT_CONTEXT.md`: hand-merged — active task → P2-DOM-01d; kept the N4
+  fix (no stale `DeltaOp.NO_CHANGE`); recorded both P2-DOM-01c and P2-DIFF-08/TD-TOPO-01 as done.
+- `AI_STATE.md` / `DAILY_LOG.md` / `TASK_INDEX.md`: reconciled to a single
+  coherent post-integration state (this run); fragmented session journals collapsed.
+
+### Verification (real `uv run` after `uv sync --extra dev`)
+- `ruff check .` ✅ · `ruff format --check .` ✅ (91 files)
+- `mypy src/ tests/` ✅ (no issues, 92 files) · `lint-imports` ✅ (4/4 contracts KEPT)
+- `pytest tests/unit` ✅ (766 passed, 6 snapshots). Integration tests need Docker → not run locally.
+
+### Next run targets
+1. Land this integration branch on `main`; close PRs #6/#8 as superseded.
+2. Dispatch P2-DOM-01d (then 01e, 01f) — now unblocked.
 
 ---

@@ -65,7 +65,7 @@
 |---|---|---|---|---|---|---|
 | [x] | P2-DOM-01a | `domain/delta/` package foundation — DeltaOp, DeltaBase, DeltaSet | backend-engineer | P0 | P1-DOM-07 | S |
 | [ ] | P2-DOM-01b | Concrete delta subclasses — table/schema/extension deltas | backend-engineer | P0 | P2-DOM-01a | M |
-| [ ] | P2-DOM-01c | Concrete delta subclasses — column deltas | backend-engineer | P0 | P2-DOM-01a | M |
+| [x] | P2-DOM-01c | Concrete delta subclasses — column deltas | backend-engineer | P0 | P2-DOM-01a | M |
 | [ ] | P2-DOM-01d | Concrete delta subclasses — index deltas | backend-engineer | P0 | P2-DOM-01a | M |
 | [ ] | P2-DOM-01e | Concrete delta subclasses — constraint deltas | backend-engineer | P0 | P2-DOM-01a | M |
 | [ ] | P2-DOM-01f | Discriminated Delta union + `domain/delta/__init__.py` full re-export | backend-engineer | P0 | P2-DOM-01b..e | S |
