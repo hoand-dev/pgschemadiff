@@ -14,6 +14,8 @@ Public surface (the only names callers should import from this package)::
         RenameColumn,
     )
     from pgschemadiff.domain.delta import ColumnDelta
+    from pgschemadiff.domain.delta import CreateIndex, DropIndex, ReplaceIndex
+    from pgschemadiff.domain.delta import IndexDelta
 
 Concrete delta subclasses land progressively across tasks P2-DOM-01b..f;
 each new module is re-exported here so callers always import from the package
@@ -32,6 +34,12 @@ from pgschemadiff.domain.delta.column import (
     SetColumnDefault,
     SetColumnNullability,
 )
+from pgschemadiff.domain.delta.index import (
+    CreateIndex,
+    DropIndex,
+    IndexDelta,
+    ReplaceIndex,
+)
 from pgschemadiff.domain.delta.table import (
     AlterTableAttrs,
     CreateTable,
@@ -45,14 +53,18 @@ __all__ = [
     "AlterColumnType",
     "AlterTableAttrs",
     "ColumnDelta",
+    "CreateIndex",
     "CreateTable",
     "DeltaBase",
     "DeltaOp",
     "DeltaSet",
     "DropColumn",
+    "DropIndex",
     "DropTable",
+    "IndexDelta",
     "RenameColumn",
     "RenameTable",
+    "ReplaceIndex",
     "SetColumnDefault",
     "SetColumnNullability",
     "TableDelta",

@@ -23,7 +23,7 @@ Last updated: **2026-06-21** — Review-fixes RF-1 (C1/C2), RF-2 (I1/I2), I3 app
 
 ## Active task
 
-Backend track: `P2-DOM-01d` (concrete delta subclasses — index deltas). P2-DOM-01a/b/c are now complete.
+Backend track: `P2-DOM-01e` (concrete delta subclasses — constraint deltas). P2-DOM-01a/b/c/d are now complete.
 P2-DIFF-08 (`topo_sort.py`, refactored to O(n+m) under TD-TOPO-01) is now complete — next is P2-DIFF-01 (diff engine visitor dispatcher).
 The `PgCatalogInspector` maps pg_catalog rows to domain objects using a single
 REPEATABLE READ transaction per ADR-0012 MVP.
@@ -32,6 +32,8 @@ TUI track unblocked at the shell level by `P4-TUI-01`. Remaining
 `P4-TUI-02..08` are blocked on the Phase 1-3 data they each consume.
 
 ## Done in current session
+
+- **P2-DOM-01d** — `domain/delta/index.py`: three concrete index-level delta subclasses (`CreateIndex`, `DropIndex`, `ReplaceIndex`), each frozen Pydantic v2 with globally-unique `kind` discriminator. `IndexDelta` discriminated union alias. Re-exported from `domain/delta/__init__.py`. Rationale for `ReplaceIndex` (vs `AlterIndex*`) documented in module docstring: PostgreSQL indexes are immutable — any structural change requires DROP+CREATE. 56 new unit tests; 822 total pass. All 4 import-linter contracts KEPT. mypy strict clean.
 
 - **P2-DIFF-08** — `application/diff/topo_sort.py`: generic `topological_sort[T]` using Kahn's algorithm (BFS over in-degrees); deterministic tie-breaking via caller-supplied `key` callable; `CyclicDependencyError` on cycles (message names all cycle members); `ValueError` for unknown prerequisites; duplicate-edge idempotency. Refactored under TD-TOPO-01 to O(n+m) hashable-node dicts. 26 new unit tests; 719 total pass. Import-linter 4/4 contracts KEPT. mypy strict clean.
 
