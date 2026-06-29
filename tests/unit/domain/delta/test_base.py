@@ -1,4 +1,4 @@
-"""Unit tests for ``pgschemadiff.domain.delta.base`` (task P2-DOM-01a).
+"""Unit tests for ``pgschemadiff.domain.delta.base`` (tasks P2-DOM-01a, P2-DOM-01f).
 
 Covers:
 - DeltaOp StrEnum membership and value round-trip
@@ -9,9 +9,16 @@ Covers:
 - DeltaSet construction, iteration, len, containment
 - DeltaSet.from_iterable alternative constructor (accepts any Iterable)
 - DeltaSet lookup helpers: by_op, by_target, is_empty
-- DeltaSet JSON round-trip (base-level fields preserved; lossy limitation documented)
+- DeltaSet JSON round-trip (lossless: concrete subclass and payload preserved
+  via the kind-discriminated Delta union introduced in P2-DOM-01f)
 - DeltaSet model_dump shape
 - Package-level re-export via ``from pgschemadiff.domain.delta import ...``
+
+Note: DeltaSet.deltas is typed as tuple[Delta, ...] (the global discriminated
+union) since P2-DOM-01f.  Tests that exercise DeltaSet must use REAL concrete
+delta subclasses — the private _CreateDelta/_DropDelta/_AlterDelta test stubs
+are still used for DeltaBase-only tests (sort_key, equality, immutability) but
+are NOT stored in DeltaSet instances.
 """
 
 from __future__ import annotations
@@ -22,29 +29,68 @@ import pytest
 from pydantic import ValidationError
 
 from pgschemadiff.domain.delta import DeltaBase, DeltaOp, DeltaSet
+from pgschemadiff.domain.delta.schema import AlterExtension, CreateSchema, DropSchema
+from pgschemadiff.domain.delta.table import AlterTableAttrs
+from pgschemadiff.domain.extension import Extension
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
+from pgschemadiff.domain.schema import Schema
 
 # ---------------------------------------------------------------------------
-# Concrete test subclasses (DeltaBase is abstract — needs narrowed Literal op)
+# Concrete test subclasses for DeltaBase-only tests (NOT stored in DeltaSet)
+# These are used exclusively for sort_key, equality, immutability tests where
+# we want minimal delta objects without constructing full domain aggregates.
 # ---------------------------------------------------------------------------
 
 
 class _CreateDelta(DeltaBase):
-    """Minimal concrete subclass for CREATE operations used in tests."""
+    """Minimal concrete subclass for CREATE operations used in DeltaBase tests."""
 
     op: Literal[DeltaOp.CREATE] = DeltaOp.CREATE
 
 
 class _DropDelta(DeltaBase):
-    """Minimal concrete subclass for DROP operations used in tests."""
+    """Minimal concrete subclass for DROP operations used in DeltaBase tests."""
 
     op: Literal[DeltaOp.DROP] = DeltaOp.DROP
 
 
 class _AlterDelta(DeltaBase):
-    """Minimal concrete subclass for ALTER operations used in tests."""
+    """Minimal concrete subclass for ALTER operations used in DeltaBase tests."""
 
     op: Literal[DeltaOp.ALTER] = DeltaOp.ALTER
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers — produce real domain aggregates
+# ---------------------------------------------------------------------------
+
+
+def _schema_ref(namespace: str = "public", name: str = "public") -> ObjectRef:
+    return ObjectRef(
+        kind=ObjectKind.SCHEMA,
+        qname=QualifiedName(namespace=namespace, name=name),
+    )
+
+
+def _schema(namespace: str = "public", name: str = "public", owner: str = "postgres") -> Schema:
+    ref = _schema_ref(namespace, name)
+    return Schema(ref=ref, owner=owner)
+
+
+def _extension_ref(name: str = "pgcrypto", namespace: str = "public") -> ObjectRef:
+    return ObjectRef(
+        kind=ObjectKind.EXTENSION,
+        qname=QualifiedName(namespace=namespace, name=name),
+    )
+
+
+def _extension(
+    name: str = "pgcrypto",
+    version: str = "1.3",
+    namespace: str = "public",
+) -> Extension:
+    ref = _extension_ref(name, namespace)
+    return Extension(ref=ref, version=version)
 
 
 # ---------------------------------------------------------------------------
@@ -62,10 +108,12 @@ def table_ref() -> ObjectRef:
 
 @pytest.fixture
 def schema_ref() -> ObjectRef:
-    return ObjectRef(
-        kind=ObjectKind.SCHEMA,
-        qname=QualifiedName(namespace="public", name="public"),
-    )
+    return _schema_ref()
+
+
+@pytest.fixture
+def ext_ref() -> ObjectRef:
+    return _extension_ref()
 
 
 @pytest.fixture
@@ -76,19 +124,49 @@ def index_ref() -> ObjectRef:
     )
 
 
+# Real concrete deltas for DeltaBase-only tests (sort_key, equality etc.)
 @pytest.fixture
-def create_delta(table_ref: ObjectRef) -> _CreateDelta:
+def create_delta_base(table_ref: ObjectRef) -> _CreateDelta:
     return _CreateDelta(target=table_ref)
 
 
 @pytest.fixture
-def drop_delta(table_ref: ObjectRef) -> _DropDelta:
+def drop_delta_base(table_ref: ObjectRef) -> _DropDelta:
     return _DropDelta(target=table_ref)
 
 
 @pytest.fixture
-def alter_delta(index_ref: ObjectRef) -> _AlterDelta:
+def alter_delta_base(index_ref: ObjectRef) -> _AlterDelta:
     return _AlterDelta(target=index_ref)
+
+
+# Real concrete deltas for DeltaSet tests (must be in the Delta union)
+
+
+@pytest.fixture
+def create_delta(schema_ref: ObjectRef) -> CreateSchema:
+    """CREATE op delta on a schema ref (op=CREATE, kind="create_schema")."""
+    s = Schema(ref=schema_ref, owner="postgres")
+    return CreateSchema(target=schema_ref, pg_schema=s)
+
+
+@pytest.fixture
+def drop_delta(schema_ref: ObjectRef) -> DropSchema:
+    """DROP op delta on a schema ref (op=DROP, kind="drop_schema")."""
+    s = Schema(ref=schema_ref, owner="postgres")
+    return DropSchema(target=schema_ref, pg_schema=s)
+
+
+@pytest.fixture
+def alter_delta(ext_ref: ObjectRef) -> AlterExtension:
+    """ALTER op delta on an extension ref (op=ALTER, kind="alter_extension")."""
+    return AlterExtension(target=ext_ref, new_version="2.0")
+
+
+@pytest.fixture
+def alter_table_delta(table_ref: ObjectRef) -> AlterTableAttrs:
+    """ALTER op delta on a table ref, used for by_target tests."""
+    return AlterTableAttrs(target=table_ref, new_owner="alice")
 
 
 # ===========================================================================
@@ -172,20 +250,20 @@ def test_delta_base_alter_op(index_ref: ObjectRef) -> None:
 
 
 @pytest.mark.unit
-def test_delta_base_is_frozen(create_delta: _CreateDelta, table_ref: ObjectRef) -> None:
+def test_delta_base_is_frozen(create_delta_base: _CreateDelta, table_ref: ObjectRef) -> None:
     """Mutation of any field on a frozen delta must raise ValidationError."""
     other_ref = ObjectRef(
         kind=ObjectKind.TABLE,
         qname=QualifiedName(namespace="other", name="orders"),
     )
     with pytest.raises(ValidationError):
-        create_delta.target = other_ref  # type: ignore[misc]
+        create_delta_base.target = other_ref  # type: ignore[misc]
 
 
 @pytest.mark.unit
-def test_delta_base_op_is_frozen(create_delta: _CreateDelta) -> None:
+def test_delta_base_op_is_frozen(create_delta_base: _CreateDelta) -> None:
     with pytest.raises(ValidationError):
-        create_delta.op = DeltaOp.CREATE  # type: ignore[misc]
+        create_delta_base.op = DeltaOp.CREATE  # type: ignore[misc]
 
 
 # ===========================================================================
@@ -206,9 +284,9 @@ def test_delta_base_rejects_extra_fields(table_ref: ObjectRef) -> None:
 
 
 @pytest.mark.unit
-def test_delta_base_sort_key_structure_top_level(create_delta: _CreateDelta) -> None:
+def test_delta_base_sort_key_structure_top_level(create_delta_base: _CreateDelta) -> None:
     """sort_key for a top-level object is a 3-tuple (namespace, object_name, op_value)."""
-    key = create_delta.sort_key
+    key = create_delta_base.sort_key
     assert len(key) == 3
     assert key == ("public", "users", "create")
 
@@ -401,7 +479,7 @@ def test_delta_base_json_round_trip(table_ref: ObjectRef) -> None:
 
 
 # ===========================================================================
-# DeltaSet construction
+# DeltaSet construction  (uses real concrete deltas from the Delta union)
 # ===========================================================================
 
 
@@ -414,8 +492,8 @@ def test_delta_set_empty_by_default() -> None:
 
 @pytest.mark.unit
 def test_delta_set_with_deltas(
-    create_delta: _CreateDelta,
-    drop_delta: _DropDelta,
+    create_delta: CreateSchema,
+    drop_delta: DropSchema,
 ) -> None:
     ds = DeltaSet(deltas=(create_delta, drop_delta))
     assert len(ds) == 2
@@ -424,8 +502,8 @@ def test_delta_set_with_deltas(
 
 @pytest.mark.unit
 def test_delta_set_from_iterable(
-    create_delta: _CreateDelta,
-    drop_delta: _DropDelta,
+    create_delta: CreateSchema,
+    drop_delta: DropSchema,
 ) -> None:
     ds = DeltaSet.from_iterable([create_delta, drop_delta])
     assert len(ds) == 2
@@ -439,8 +517,8 @@ def test_delta_set_from_empty_iterable() -> None:
 
 @pytest.mark.unit
 def test_delta_set_from_iterable_accepts_tuple(
-    create_delta: _CreateDelta,
-    drop_delta: _DropDelta,
+    create_delta: CreateSchema,
+    drop_delta: DropSchema,
 ) -> None:
     """from_iterable must accept tuples (and any Iterable), not just lists."""
     ds = DeltaSet.from_iterable((create_delta, drop_delta))
@@ -448,10 +526,11 @@ def test_delta_set_from_iterable_accepts_tuple(
 
 
 @pytest.mark.unit
-def test_delta_set_from_iterable_accepts_generator(table_ref: ObjectRef) -> None:
+def test_delta_set_from_iterable_accepts_generator() -> None:
     """from_iterable must accept generator expressions."""
-    refs = [table_ref, table_ref]
-    ds = DeltaSet.from_iterable(_CreateDelta(target=r) for r in refs)
+    schema_ref = _schema_ref("public", "public")
+    s = Schema(ref=schema_ref, owner="postgres")
+    ds = DeltaSet.from_iterable(CreateSchema(target=schema_ref, pg_schema=s) for _ in range(2))
     assert len(ds) == 2
 
 
@@ -462,8 +541,8 @@ def test_delta_set_from_iterable_accepts_generator(table_ref: ObjectRef) -> None
 
 @pytest.mark.unit
 def test_delta_set_iteration(
-    create_delta: _CreateDelta,
-    drop_delta: _DropDelta,
+    create_delta: CreateSchema,
+    drop_delta: DropSchema,
 ) -> None:
     ds = DeltaSet(deltas=(create_delta, drop_delta))
     collected = list(ds)
@@ -471,13 +550,14 @@ def test_delta_set_iteration(
 
 
 @pytest.mark.unit
-def test_delta_set_preserves_order(table_ref: ObjectRef, index_ref: ObjectRef) -> None:
+def test_delta_set_preserves_order(
+    create_delta: CreateSchema,
+    alter_delta: AlterExtension,
+    drop_delta: DropSchema,
+) -> None:
     """DeltaSet must preserve insertion order."""
-    d1 = _CreateDelta(target=table_ref)
-    d2 = _AlterDelta(target=index_ref)
-    d3 = _DropDelta(target=table_ref)
-    ds = DeltaSet(deltas=(d1, d2, d3))
-    assert list(ds) == [d1, d2, d3]
+    ds = DeltaSet(deltas=(create_delta, alter_delta, drop_delta))
+    assert list(ds) == [create_delta, alter_delta, drop_delta]
 
 
 # ===========================================================================
@@ -487,8 +567,8 @@ def test_delta_set_preserves_order(table_ref: ObjectRef, index_ref: ObjectRef) -
 
 @pytest.mark.unit
 def test_delta_set_containment(
-    create_delta: _CreateDelta,
-    drop_delta: _DropDelta,
+    create_delta: CreateSchema,
+    drop_delta: DropSchema,
 ) -> None:
     ds = DeltaSet(deltas=(create_delta,))
     assert create_delta in ds
@@ -501,14 +581,14 @@ def test_delta_set_containment(
 
 
 @pytest.mark.unit
-def test_delta_set_is_frozen(create_delta: _CreateDelta) -> None:
+def test_delta_set_is_frozen(create_delta: CreateSchema) -> None:
     ds = DeltaSet(deltas=(create_delta,))
     with pytest.raises(ValidationError):
         ds.deltas = ()  # type: ignore[misc]
 
 
 @pytest.mark.unit
-def test_delta_set_rejects_extra_fields(create_delta: _CreateDelta) -> None:
+def test_delta_set_rejects_extra_fields(create_delta: CreateSchema) -> None:
     with pytest.raises(ValidationError):
         DeltaSet(deltas=(create_delta,), extra_field="oops")  # type: ignore[call-arg]
 
@@ -520,9 +600,9 @@ def test_delta_set_rejects_extra_fields(create_delta: _CreateDelta) -> None:
 
 @pytest.mark.unit
 def test_delta_set_by_op_filters_correctly(
-    create_delta: _CreateDelta,
-    drop_delta: _DropDelta,
-    alter_delta: _AlterDelta,
+    create_delta: CreateSchema,
+    drop_delta: DropSchema,
+    alter_delta: AlterExtension,
 ) -> None:
     ds = DeltaSet(deltas=(create_delta, drop_delta, alter_delta))
     creates = ds.by_op(DeltaOp.CREATE)
@@ -535,7 +615,7 @@ def test_delta_set_by_op_filters_correctly(
 
 @pytest.mark.unit
 def test_delta_set_by_op_returns_empty_tuple_when_none_match(
-    create_delta: _CreateDelta,
+    create_delta: CreateSchema,
 ) -> None:
     ds = DeltaSet(deltas=(create_delta,))
     assert ds.by_op(DeltaOp.DROP) == ()
@@ -543,26 +623,26 @@ def test_delta_set_by_op_returns_empty_tuple_when_none_match(
 
 @pytest.mark.unit
 def test_delta_set_by_target_filters_correctly(
-    table_ref: ObjectRef,
-    index_ref: ObjectRef,
-    create_delta: _CreateDelta,  # targets table_ref
-    drop_delta: _DropDelta,  # targets table_ref
-    alter_delta: _AlterDelta,  # targets index_ref
+    schema_ref: ObjectRef,
+    ext_ref: ObjectRef,
+    create_delta: CreateSchema,  # targets schema_ref (CREATE)
+    drop_delta: DropSchema,  # targets schema_ref (DROP)
+    alter_delta: AlterExtension,  # targets ext_ref (ALTER)
 ) -> None:
     ds = DeltaSet(deltas=(create_delta, drop_delta, alter_delta))
-    table_deltas = ds.by_target(table_ref)
-    index_deltas = ds.by_target(index_ref)
-    assert create_delta in table_deltas
-    assert drop_delta in table_deltas
-    assert alter_delta not in table_deltas
-    assert alter_delta in index_deltas
-    assert len(table_deltas) == 2
-    assert len(index_deltas) == 1
+    schema_deltas = ds.by_target(schema_ref)
+    ext_deltas = ds.by_target(ext_ref)
+    assert create_delta in schema_deltas
+    assert drop_delta in schema_deltas
+    assert alter_delta not in schema_deltas
+    assert alter_delta in ext_deltas
+    assert len(schema_deltas) == 2
+    assert len(ext_deltas) == 1
 
 
 @pytest.mark.unit
 def test_delta_set_by_target_returns_empty_when_no_match(
-    create_delta: _CreateDelta,
+    create_delta: CreateSchema,
 ) -> None:
     ds = DeltaSet(deltas=(create_delta,))
     missing_ref = ObjectRef(
@@ -579,8 +659,8 @@ def test_delta_set_by_target_returns_empty_when_no_match(
 
 @pytest.mark.unit
 def test_delta_set_equality(
-    create_delta: _CreateDelta,
-    drop_delta: _DropDelta,
+    create_delta: CreateSchema,
+    drop_delta: DropSchema,
 ) -> None:
     ds_a = DeltaSet(deltas=(create_delta, drop_delta))
     ds_b = DeltaSet(deltas=(create_delta, drop_delta))
@@ -590,8 +670,8 @@ def test_delta_set_equality(
 
 @pytest.mark.unit
 def test_delta_set_inequality_different_order(
-    create_delta: _CreateDelta,
-    drop_delta: _DropDelta,
+    create_delta: CreateSchema,
+    drop_delta: DropSchema,
 ) -> None:
     ds_a = DeltaSet(deltas=(create_delta, drop_delta))
     ds_b = DeltaSet(deltas=(drop_delta, create_delta))
@@ -599,71 +679,63 @@ def test_delta_set_inequality_different_order(
 
 
 # ===========================================================================
-# DeltaSet — JSON round-trip (MERGE-BLOCKER 2 explicit documentation)
+# DeltaSet — JSON round-trip (lossless since P2-DOM-01f)
 # ===========================================================================
 
 
 @pytest.mark.unit
-def test_delta_set_json_round_trip_base_level() -> None:
-    """DeltaSet JSON round-trip preserves base-level fields for DeltaBase items.
+def test_delta_set_json_round_trip_preserves_subclass() -> None:
+    """DeltaSet JSON round-trip preserves the concrete subclass type and payload.
 
-    Until P2-DOM-01f lands the discriminated Delta union, DeltaSet holds plain
-    DeltaBase instances.  A model_dump_json() -> model_validate_json() round-
-    trip preserves op and target (the only fields DeltaBase carries).
+    Since P2-DOM-01f, DeltaSet.deltas is typed as tuple[Delta, ...] where
+    Delta is the kind-discriminated global union.  A model_dump_json() ->
+    model_validate_json() round-trip is now LOSSLESS: the concrete subclass
+    (e.g. AlterTableAttrs) AND its payload (new_owner) survive serialisation.
     """
-    ref = ObjectRef(
-        kind=ObjectKind.TABLE,
-        qname=QualifiedName(namespace="public", name="users"),
-    )
-    # Build a DeltaSet using base-level items (what -01a actually supports).
-    ds = DeltaSet(
-        deltas=(
-            DeltaBase(op=DeltaOp.CREATE, target=ref),
-            DeltaBase(op=DeltaOp.DROP, target=ref),
-        )
-    )
-    payload = ds.model_dump_json()
-    restored = DeltaSet.model_validate_json(payload)
-
-    restored_list = list(restored)
-    assert len(restored_list) == 2
-    assert restored_list[0].op == DeltaOp.CREATE
-    assert restored_list[1].op == DeltaOp.DROP
-    assert restored_list[0].target == ref
-    assert restored_list[1].target == ref
-
-
-@pytest.mark.unit
-def test_delta_set_json_round_trip_subclass_is_lossy() -> None:
-    """Subclass payload is NOT preserved through DeltaSet JSON round-trip.
-
-    This is the documented limitation described in the TODO(P2-DOM-01f) comment
-    on DeltaSet.deltas.  A concrete subclass (_CreateDelta) stored in a
-    DeltaSet is deserialized as plain DeltaBase (the declared field type),
-    dropping any subclass-specific payload.  This test pins the current
-    behavior so any change is intentional and visible.
-    """
-    ref = ObjectRef(
+    table_ref = ObjectRef(
         kind=ObjectKind.TABLE,
         qname=QualifiedName(namespace="public", name="orders"),
     )
-    original = _CreateDelta(target=ref)
+    original = AlterTableAttrs(target=table_ref, new_owner="alice")
     ds = DeltaSet(deltas=(original,))
 
     payload = ds.model_dump_json()
     restored = DeltaSet.model_validate_json(payload)
 
-    # The op and target round-trip fine.
     restored_delta = next(iter(restored))
-    assert restored_delta.op == DeltaOp.CREATE
-    assert restored_delta.target == ref
-    # The subclass type is lost: restored as DeltaBase, not _CreateDelta.
-    # (This is expected and intentional until P2-DOM-01f.)
-    assert type(restored_delta) is DeltaBase
+    # The concrete subclass type is preserved (was lossy before P2-DOM-01f).
+    assert type(restored_delta) is AlterTableAttrs
+    assert restored_delta.op == DeltaOp.ALTER
+    assert restored_delta.target == table_ref
+    # Payload field is preserved.
+    assert isinstance(restored_delta, AlterTableAttrs)
+    assert restored_delta.new_owner == "alice"
 
 
 @pytest.mark.unit
-def test_delta_set_model_dump_shape(create_delta: _CreateDelta) -> None:
+def test_delta_set_json_round_trip_multiple_kinds() -> None:
+    """DeltaSet JSON round-trip with mixed concrete delta kinds is lossless."""
+    schema_ref = _schema_ref("myns", "myns")
+    s = Schema(ref=schema_ref, owner="alice")
+    ext_ref = _extension_ref("postgis", "myns")
+
+    create = CreateSchema(target=schema_ref, pg_schema=s)
+    drop_ext = AlterExtension(target=ext_ref, new_version="3.5")
+
+    ds = DeltaSet(deltas=(create, drop_ext))
+    restored = DeltaSet.model_validate_json(ds.model_dump_json())
+
+    restored_list = list(restored)
+    assert type(restored_list[0]) is CreateSchema
+    assert type(restored_list[1]) is AlterExtension
+    assert isinstance(restored_list[0], CreateSchema)
+    assert restored_list[0].pg_schema.owner == "alice"
+    assert isinstance(restored_list[1], AlterExtension)
+    assert restored_list[1].new_version == "3.5"
+
+
+@pytest.mark.unit
+def test_delta_set_model_dump_shape(create_delta: CreateSchema) -> None:
     """model_dump() emits the expected {'deltas': (...)} structure.
 
     Pydantic v2 preserves the Python tuple type in model_dump() (not converted
@@ -676,6 +748,23 @@ def test_delta_set_model_dump_shape(create_delta: _CreateDelta) -> None:
     # uses a JSON array (verified separately via model_dump_json).
     assert isinstance(dumped["deltas"], tuple)
     assert len(dumped["deltas"]) == 1
+
+
+# ===========================================================================
+# DeltaSet — rejects non-Delta objects
+# ===========================================================================
+
+
+@pytest.mark.unit
+def test_delta_set_rejects_bare_delta_base() -> None:
+    """DeltaSet.deltas = tuple[Delta, ...] rejects bare DeltaBase (no 'kind' field)."""
+    ref = ObjectRef(
+        kind=ObjectKind.TABLE,
+        qname=QualifiedName(namespace="public", name="users"),
+    )
+    bare = DeltaBase(op=DeltaOp.CREATE, target=ref)
+    with pytest.raises(ValidationError):
+        DeltaSet(deltas=(bare,))  # type: ignore[arg-type]
 
 
 # ===========================================================================

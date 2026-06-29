@@ -4,7 +4,7 @@
 > changes the phase status, finishes a milestone, or adds an ADR. Read me at
 > the start of every chat session.
 
-Last updated: **2026-06-21** — Review-fixes RF-1 (C1/C2), RF-2 (I1/I2), I3 applied to PR #2; pushed to `claude/clever-cray-9tgfsf`. Awaiting CI green + human merge.
+Last updated: **2026-06-29** — P2-DOM-01f complete: schema/extension deltas + global `Delta` union + `DeltaSet.deltas` retyped; 995 unit tests pass, all 4 import-linter contracts KEPT, mypy strict clean.
 
 ---
 
@@ -23,8 +23,8 @@ Last updated: **2026-06-21** — Review-fixes RF-1 (C1/C2), RF-2 (I1/I2), I3 app
 
 ## Active task
 
-Backend track: `P2-DOM-01f` (discriminated Delta union + full `domain/delta/__init__.py` re-export). P2-DOM-01a/b/c/d/e are now complete.
-P2-DIFF-08 (`topo_sort.py`, refactored to O(n+m) under TD-TOPO-01) is now complete — next is P2-DIFF-01 (diff engine visitor dispatcher).
+Backend track: `P2-DIFF-01` (diff engine visitor dispatcher). All P2-DOM-01a..f are now complete.
+P2-DIFF-08 (`topo_sort.py`, refactored to O(n+m) under TD-TOPO-01) is now complete.
 The `PgCatalogInspector` maps pg_catalog rows to domain objects using a single
 REPEATABLE READ transaction per ADR-0012 MVP.
 
@@ -32,6 +32,8 @@ TUI track unblocked at the shell level by `P4-TUI-01`. Remaining
 `P4-TUI-02..08` are blocked on the Phase 1-3 data they each consume.
 
 ## Done in current session
+
+- **P2-DOM-01f** — `domain/delta/schema.py`: five concrete schema/extension delta subclasses (`CreateSchema`, `DropSchema`, `CreateExtension`, `DropExtension`, `AlterExtension`), each frozen Pydantic v2 with globally-unique `kind` discriminator. `SchemaDelta` and `ExtensionDelta` discriminated union aliases. Global `Delta` union (spanning all 6 object categories) placed at bottom of `base.py` via circular-import-safe bottom-of-file imports; `DeltaSet.deltas` retyped to `tuple[Delta, ...]` + `model_rebuild()` called. Full re-export from `domain/delta/__init__.py`. `pg_schema` field naming (not `schema`) avoids Pydantic `BaseModel.schema()` shadowing. 69 new unit tests in `test_schema.py`; 995 total pass. All 4 import-linter contracts KEPT. mypy strict clean. Note: P2-DOM-01b (table deltas) was already implemented; marked complete.
 
 - **P2-DOM-01e** — `domain/delta/constraint.py`: two concrete constraint-level delta subclasses (`AddConstraint`, `DropConstraint`), each frozen Pydantic v2 with globally-unique `kind` discriminator. Single class covers all five constraint kinds (PK/Unique/Check/FK/Exclusion) via the nested `Constraint` discriminated-union payload. `ConstraintDelta` discriminated union alias. Re-exported from `domain/delta/__init__.py`. Rationale for Add/Drop only (vs ReplaceConstraint): constraint structural changes are DROP+ADD pairs at the engine level; risk classification and topo-sort must handle them independently; FK NOT VALID/VALIDATE interleaving requires separate deltas. 58 new unit tests; 925 total pass. All 4 import-linter contracts KEPT. mypy strict clean.
 

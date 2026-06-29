@@ -1,4 +1,4 @@
-"""Shared foundation for all delta (diff-result) types (task P2-DOM-01a).
+"""Shared foundation for all delta (diff-result) types (tasks P2-DOM-01a, P2-DOM-01f).
 
 This module defines the three building blocks that every concrete delta
 subclass and its consumers depend on:
@@ -11,6 +11,9 @@ subclass and its consumers depend on:
   ``Literal[DeltaOp.X]`` and add change-specific payload fields.
 - :class:`DeltaSet` — an ordered, immutable container of deltas that the diff
   engine, topo-sorter, risk classifier, and SQL emitter all pass around.
+- :data:`Delta` — global discriminated union over ALL concrete delta types
+  across all six object categories (table / column / index / constraint /
+  schema / extension).
 
 Design notes
 ------------
@@ -25,9 +28,22 @@ Design notes
   ``@property``.  Downstream topo-sort uses it as a stable tie-breaker after
   dependency ordering; deterministic output ordering also relies on it.
   See :attr:`DeltaBase.sort_key` for the exact shape.
-* ``DeltaSet`` stores items in a plain ``tuple[DeltaBase, ...]`` so it stays
-  frozen and value-equal.  Helper methods mirror the style established in
-  :class:`~pgschemadiff.domain.database.Database`.
+* ``DeltaSet`` stores items in a ``tuple[Delta, ...]`` so it stays frozen and
+  value-equal.  The ``kind``-discriminated :data:`Delta` union drives lossless
+  JSON round-trips: ``model_dump_json()`` → ``model_validate_json()`` preserves
+  every concrete subclass and its payload fields.  Helper methods mirror the
+  style established in :class:`~pgschemadiff.domain.database.Database`.
+
+Circular-import resolution
+--------------------------
+``DeltaSet.deltas`` is annotated as ``tuple[Delta, ...]`` where ``Delta`` is
+defined at the *bottom* of this module, AFTER the category modules have been
+imported.  Because ``from __future__ import annotations`` is active, Pydantic
+sees ``"Delta"`` as a forward reference at class-definition time and resolves
+it only when :meth:`DeltaSet.model_rebuild()` is called at the bottom of this
+module.  The category modules (column, constraint, index, schema, table) only
+import ``DeltaBase`` and ``DeltaOp`` from this module — both are defined above
+the class body — so no circular-import error occurs.
 
 All models are pure domain: no IO, no async, no external drivers.
 """
@@ -36,6 +52,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
 from enum import StrEnum
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -188,7 +205,7 @@ class DeltaBase(BaseModel):
 
 
 class DeltaSet(BaseModel):
-    """Ordered, immutable container of :class:`DeltaBase` instances.
+    """Ordered, immutable container of concrete :data:`Delta` instances.
 
     :class:`DeltaSet` is the unit of exchange between the diff engine, the
     topo-sorter, the risk classifier, and the SQL emitter.  It wraps a
@@ -209,27 +226,20 @@ class DeltaSet(BaseModel):
     Helpers mirror the style established in
     :class:`~pgschemadiff.domain.database.Database`.
 
-    Round-trip note
-    ---------------
-    .. TODO(P2-DOM-01f): Once the concrete delta subclasses (P2-DOM-01b..e)
-       and the discriminated ``Delta`` union (P2-DOM-01f) land, ``deltas``
-       will be retyped to ``tuple[Delta, ...]`` where ``Delta`` is an
-       ``Annotated`` discriminated union alias keyed on ``op`` (and/or a
-       secondary ``kind`` discriminator on subclasses).  Until then, a
-       ``model_dump_json()`` → ``model_validate_json()`` round-trip only
-       preserves the *base-level* fields (``op`` + ``target``); any
-       subclass-specific payload fields are **not** preserved because Pydantic
-       cannot know which concrete subclass to instantiate without the
-       discriminator.  This limitation is intentional and documented by the
-       round-trip unit tests in ``tests/unit/domain/delta/test_base.py``.
+    Round-trip (lossless)
+    ---------------------
+    ``model_dump_json()`` → ``model_validate_json()`` round-trips are lossless:
+    both the concrete subclass type AND its payload fields are preserved.
+    This is guaranteed by the ``kind``-discriminated :data:`Delta` union that
+    ``deltas`` is typed against — Pydantic uses the ``kind`` literal field to
+    reconstruct the exact concrete subclass during deserialization.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    # TODO(P2-DOM-01f): retype to tuple[Delta, ...] once the discriminated
-    # Delta union is defined.  Until then DeltaSet round-trips items as
-    # DeltaBase (subclass payload not preserved through JSON serialisation).
-    deltas: tuple[DeltaBase, ...] = Field(default=())
+    # ``Delta`` is a forward reference resolved by model_rebuild() at the
+    # bottom of this module, after all category modules have been imported.
+    deltas: tuple[Delta, ...] = Field(default=())
     """The ordered sequence of deltas in this set."""
 
     # ------------------------------------------------------------------
@@ -239,7 +249,7 @@ class DeltaSet(BaseModel):
     @classmethod
     def from_iterable(cls, deltas: Iterable[DeltaBase]) -> DeltaSet:
         """Construct a :class:`DeltaSet` from any iterable of deltas."""
-        return cls(deltas=tuple(deltas))
+        return cls(deltas=tuple(deltas))  # type: ignore[arg-type]
 
     # ------------------------------------------------------------------
     # Container protocol
@@ -272,3 +282,45 @@ class DeltaSet(BaseModel):
     def is_empty(self) -> bool:
         """Return ``True`` when no deltas are present."""
         return len(self.deltas) == 0
+
+
+# ---------------------------------------------------------------------------
+# Global ``Delta`` discriminated union  (P2-DOM-01f)
+# ---------------------------------------------------------------------------
+# These imports are at the BOTTOM of base.py so that by the time they run,
+# DeltaBase / DeltaOp / DeltaSet are already fully defined above.
+# Each category module only imports DeltaBase + DeltaOp from base (both
+# already available at the time of import), so there is no circular-import
+# error.  DeltaSet.model_rebuild() is then called to resolve the forward
+# reference to ``Delta`` in the ``deltas`` field annotation.
+
+from pgschemadiff.domain.delta.column import ColumnDelta  # noqa: E402
+from pgschemadiff.domain.delta.constraint import ConstraintDelta  # noqa: E402
+from pgschemadiff.domain.delta.index import IndexDelta  # noqa: E402
+from pgschemadiff.domain.delta.schema import ExtensionDelta, SchemaDelta  # noqa: E402
+from pgschemadiff.domain.delta.table import TableDelta  # noqa: E402
+
+Delta = Annotated[
+    TableDelta | ColumnDelta | IndexDelta | ConstraintDelta | SchemaDelta | ExtensionDelta,
+    Field(discriminator="kind"),
+]
+"""Global discriminated union over ALL concrete delta types.
+
+``kind`` (a globally-unique ``Literal`` field on every concrete subclass)
+drives Pydantic's discriminator logic.  A :class:`~pydantic.TypeAdapter`
+wrapping this type can round-trip any concrete delta through JSON without
+losing subclass type information or payload fields::
+
+    from pydantic import TypeAdapter
+    from pgschemadiff.domain.delta.base import Delta
+
+    ta: TypeAdapter[Delta] = TypeAdapter(Delta)
+    raw = ta.dump_json(some_delta)
+    restored = ta.validate_json(raw)
+    assert type(restored) is type(some_delta)
+
+This union is the field type of :attr:`DeltaSet.deltas`, enabling lossless
+``DeltaSet`` JSON round-trips.
+"""
+
+DeltaSet.model_rebuild()
