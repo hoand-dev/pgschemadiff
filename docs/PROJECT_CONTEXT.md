@@ -23,7 +23,7 @@ Last updated: **2026-06-21** — Review-fixes RF-1 (C1/C2), RF-2 (I1/I2), I3 app
 
 ## Active task
 
-Backend track: `P2-DOM-01e` (concrete delta subclasses — constraint deltas). P2-DOM-01a/b/c/d are now complete.
+Backend track: `P2-DOM-01f` (discriminated Delta union + full `domain/delta/__init__.py` re-export). P2-DOM-01a/b/c/d/e are now complete.
 P2-DIFF-08 (`topo_sort.py`, refactored to O(n+m) under TD-TOPO-01) is now complete — next is P2-DIFF-01 (diff engine visitor dispatcher).
 The `PgCatalogInspector` maps pg_catalog rows to domain objects using a single
 REPEATABLE READ transaction per ADR-0012 MVP.
@@ -32,6 +32,8 @@ TUI track unblocked at the shell level by `P4-TUI-01`. Remaining
 `P4-TUI-02..08` are blocked on the Phase 1-3 data they each consume.
 
 ## Done in current session
+
+- **P2-DOM-01e** — `domain/delta/constraint.py`: two concrete constraint-level delta subclasses (`AddConstraint`, `DropConstraint`), each frozen Pydantic v2 with globally-unique `kind` discriminator. Single class covers all five constraint kinds (PK/Unique/Check/FK/Exclusion) via the nested `Constraint` discriminated-union payload. `ConstraintDelta` discriminated union alias. Re-exported from `domain/delta/__init__.py`. Rationale for Add/Drop only (vs ReplaceConstraint): constraint structural changes are DROP+ADD pairs at the engine level; risk classification and topo-sort must handle them independently; FK NOT VALID/VALIDATE interleaving requires separate deltas. 58 new unit tests; 925 total pass. All 4 import-linter contracts KEPT. mypy strict clean.
 
 - **P2-DOM-01d** — `domain/delta/index.py`: three concrete index-level delta subclasses (`CreateIndex`, `DropIndex`, `ReplaceIndex`), each frozen Pydantic v2 with globally-unique `kind` discriminator. `IndexDelta` discriminated union alias. Re-exported from `domain/delta/__init__.py`. Rationale for `ReplaceIndex` (vs `AlterIndex*`) documented in module docstring: PostgreSQL indexes are immutable — any structural change requires DROP+CREATE. 56 new unit tests; 822 total pass. All 4 import-linter contracts KEPT. mypy strict clean.
 
