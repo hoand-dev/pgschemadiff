@@ -70,10 +70,10 @@
 | [x] | P2-DOM-01e | Concrete delta subclasses — constraint deltas | backend-engineer | P0 | P2-DOM-01a | M |
 | [x] | P2-DOM-01f | Discriminated Delta union + `domain/delta/__init__.py` full re-export | backend-engineer | P0 | P2-DOM-01b..e | S |
 | [x] | P2-DIFF-01 | `application/diff/engine.py` — visitor dispatcher | backend-engineer | P0 | P2-DOM-01 | M |
-| [ ] | P2-DIFF-02 | `comparators/table.py` | backend-engineer | P0 | P2-DIFF-01 | L |
+| [x] | P2-DIFF-02 | `comparators/table.py` (table-level + DI delegation) | backend-engineer | P0 | P2-DIFF-01 | L |
 | [ ] | P2-DIFF-03 | `comparators/column.py` | backend-engineer | P0 | P2-DIFF-02 | L |
-| [ ] | P2-DIFF-04 | `comparators/index.py` | backend-engineer | P0 | P2-DIFF-01 | M |
-| [ ] | P2-DIFF-05 | `comparators/constraint.py` (incl. FK) | backend-engineer | P0 | P2-DIFF-01 | M |
+| [x] | P2-DIFF-04 | `comparators/index.py` (Create/Drop/Replace) | backend-engineer | P0 | P2-DIFF-01 | M |
+| [x] | P2-DIFF-05 | `comparators/constraint.py` (incl. FK; drop+add on change) | backend-engineer | P0 | P2-DIFF-01 | M |
 | [ ] | P2-DIFF-06 | Rename annotation loader (YAML/TOML) | backend-engineer | P1 | P2-DIFF-03 | M |
 | [ ] | P2-DIFF-07 | Ignore-rules system | backend-engineer | P1 | P2-DIFF-01 | M |
 | [x] | P2-DIFF-08 | `topo_sort.py` — Kahn + cycle detect | backend-engineer | P0 | P2-DOM-01 | M |
