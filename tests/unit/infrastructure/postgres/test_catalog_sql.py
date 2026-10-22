@@ -231,23 +231,26 @@ def test_constraints_sql_includes_fk_reference_columns() -> None:
 
 
 @pytest.mark.unit
-def test_extensions_sql_selects_from_pg_available_extensions() -> None:
+def test_extensions_sql_selects_installed_extensions() -> None:
     sql = _load_sql("extensions.sql")
-    assert "pg_available_extensions" in sql
+    assert "FROM pg_catalog.pg_extension AS e" in sql
 
 
 @pytest.mark.unit
-def test_extensions_sql_filters_installed() -> None:
+def test_extensions_sql_joins_installed_schema_and_reads_comment() -> None:
     sql = _load_sql("extensions.sql")
-    assert "installed_version IS NOT NULL" in sql
+    assert "LEFT JOIN pg_catalog.pg_namespace AS n ON n.oid = e.extnamespace" in sql
+    assert "n.nspname AS installed_schema" in sql
+    assert "pg_catalog.obj_description(e.oid, 'pg_extension') AS comment" in sql
 
 
 @pytest.mark.unit
 def test_extensions_sql_selects_expected_columns() -> None:
     sql = _load_sql("extensions.sql")
     assert "extension_name" in sql
-    assert "default_version" in sql
     assert "installed_version" in sql
+    assert "installed_schema" in sql
+    assert "comment" in sql
 
 
 # ---------------------------------------------------------------------------
@@ -277,6 +280,13 @@ def test_schemas_sql_excludes_information_schema() -> None:
 def test_schemas_sql_selects_schema_name_column() -> None:
     sql = _load_sql("schemas.sql")
     assert "schema_name" in sql
+
+
+@pytest.mark.unit
+def test_schemas_sql_selects_owner_and_comment() -> None:
+    sql = _load_sql("schemas.sql")
+    assert "pg_catalog.pg_get_userbyid(n.nspowner) AS owner" in sql
+    assert "pg_catalog.obj_description(n.oid, 'pg_namespace') AS comment" in sql
 
 
 # ---------------------------------------------------------------------------
