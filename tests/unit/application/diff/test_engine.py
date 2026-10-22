@@ -26,6 +26,7 @@ import pytest
 import pgschemadiff.application.diff as _diff_pkg
 from pgschemadiff.application.diff import Comparator, DiffEngine
 from pgschemadiff.application.diff.engine import _fetch_objects_for_kind
+from pgschemadiff.application.diff.ignore import IgnoreRules
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -796,6 +797,22 @@ def test_diff_returns_delta_set_instance() -> None:
     engine = DiffEngine(comparators=[])
     result = engine.diff(_make_db(), _make_db())
     assert isinstance(result, DeltaSet)
+
+
+@pytest.mark.unit
+def test_diff_applies_ignore_rules_after_comparison() -> None:
+    delta = _create_schema_delta("a")
+    cmp = _RecordingComparator(kind=ObjectKind.SCHEMA, canned_deltas=(delta,))
+    engine = DiffEngine(comparators=[cmp])
+    database = _make_db(schemas=(_make_schema("a"),))
+
+    result = engine.diff(
+        database,
+        database,
+        ignore=IgnoreRules(objects=frozenset({delta.target})),
+    )
+
+    assert result.is_empty()
 
 
 @pytest.mark.unit

@@ -25,6 +25,7 @@ from __future__ import annotations
 import pytest
 
 from pgschemadiff.application.diff.comparators.constraint import ConstraintComparator
+from pgschemadiff.application.diff.renames import RenameAnnotations
 from pgschemadiff.domain.constraint import (
     CheckConstraint,
     ConstraintDeferrability,
@@ -707,3 +708,150 @@ class TestAllFiveKinds:
         assert len(result) == 2
         assert isinstance(result[0], DropConstraint)
         assert isinstance(result[1], AddConstraint)
+
+
+def test_column_rename_does_not_replace_structured_constraint_columns() -> None:
+    table_ref = ObjectRef(
+        kind=ObjectKind.TABLE,
+        qname=QualifiedName(namespace="public", name="users"),
+    )
+    source = _pk("users_pkey", columns=("email_addr",))
+    target = _pk("users_pkey", columns=("email",))
+    renames = RenameAnnotations.from_document(
+        {
+            "renames": [
+                {"kind": "column", "from": "public.users.email_addr", "to": "public.users.email"}
+            ]
+        }
+    )
+
+    result = ConstraintComparator().compare_with_renames(
+        table_ref,
+        table_ref,
+        (source,),
+        (target,),
+        renames,
+    )
+
+    assert result == ()
+
+
+def test_table_and_referenced_column_renames_do_not_replace_foreign_key() -> None:
+    table_ref = ObjectRef(
+        kind=ObjectKind.TABLE,
+        qname=QualifiedName(namespace="public", name="orders"),
+    )
+    source = _fk("orders_customer_fkey", ref_table="user_account", ref_columns=("user_id",))
+    target = _fk("orders_customer_fkey", ref_table="users", ref_columns=("id",))
+    renames = RenameAnnotations.from_document(
+        {
+            "renames": [
+                {"kind": "table", "from": "public.user_account", "to": "public.users"},
+                {"kind": "column", "from": "public.user_account.user_id", "to": "public.users.id"},
+            ]
+        }
+    )
+
+    result = ConstraintComparator().compare_with_renames(
+        table_ref,
+        table_ref,
+        (source,),
+        (target,),
+        renames,
+    )
+
+    assert result == ()
+
+
+def test_constraint_delta_payloads_keep_original_definitions_after_normalization() -> None:
+    table_ref = ObjectRef(
+        kind=ObjectKind.TABLE,
+        qname=QualifiedName(namespace="public", name="users"),
+    )
+    source = _pk("users_pkey", columns=("email_addr",))
+    target = PrimaryKeyConstraint(name="users_pkey", columns=("email",), index_method="hash")
+    renames = RenameAnnotations.from_document(
+        {
+            "renames": [
+                {"kind": "column", "from": "public.users.email_addr", "to": "public.users.email"}
+            ]
+        }
+    )
+
+    result = ConstraintComparator().compare_with_renames(
+        table_ref,
+        table_ref,
+        (source,),
+        (target,),
+        renames,
+    )
+
+    assert len(result) == 2
+    assert isinstance(result[0], DropConstraint)
+    assert result[0].constraint == source
+    assert isinstance(result[1], AddConstraint)
+    assert result[1].constraint == target
+
+
+def test_raw_check_expression_difference_remains_visible_with_column_rename() -> None:
+    table_ref = ObjectRef(
+        kind=ObjectKind.TABLE,
+        qname=QualifiedName(namespace="public", name="users"),
+    )
+    source = _chk("users_email_check", expression="email_addr <> ''")
+    target = _chk("users_email_check", expression="email <> ''")
+    renames = RenameAnnotations.from_document(
+        {
+            "renames": [
+                {"kind": "column", "from": "public.users.email_addr", "to": "public.users.email"}
+            ]
+        }
+    )
+
+    result = ConstraintComparator().compare_with_renames(
+        table_ref,
+        table_ref,
+        (source,),
+        (target,),
+        renames,
+    )
+
+    assert len(result) == 2
+    assert isinstance(result[0], DropConstraint)
+    assert isinstance(result[1], AddConstraint)
+
+
+def test_exclusion_expression_is_not_rewritten_as_a_column_reference() -> None:
+    table_ref = ObjectRef(
+        kind=ObjectKind.TABLE,
+        qname=QualifiedName(namespace="public", name="users"),
+    )
+    source = ExclusionConstraint(
+        name="users_email_excl",
+        index_method="gist",
+        elements=(ExclusionElement(column_or_expr="email_addr", operator="="),),
+    )
+    target = ExclusionConstraint(
+        name="users_email_excl",
+        index_method="gist",
+        elements=(ExclusionElement(column_or_expr="email", operator="="),),
+    )
+    renames = RenameAnnotations.from_document(
+        {
+            "renames": [
+                {"kind": "column", "from": "public.users.email_addr", "to": "public.users.email"}
+            ]
+        }
+    )
+
+    result = ConstraintComparator().compare_with_renames(
+        table_ref,
+        table_ref,
+        (source,),
+        (target,),
+        renames,
+    )
+
+    assert len(result) == 2
+    assert isinstance(result[0], DropConstraint)
+    assert isinstance(result[1], AddConstraint)

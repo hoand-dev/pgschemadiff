@@ -68,6 +68,7 @@ from pgschemadiff.domain.delta.constraint import AddConstraint, DropConstraint
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 
 if TYPE_CHECKING:
+    from pgschemadiff.application.diff.renames import RenameAnnotations
     from pgschemadiff.domain.constraint import Constraint
     from pgschemadiff.domain.delta.base import DeltaBase
 
@@ -110,6 +111,34 @@ class ConstraintComparator:
         table_ref: ObjectRef,
         source: tuple[Constraint, ...],
         target: tuple[Constraint, ...],
+    ) -> tuple[DeltaBase, ...]:
+        """Compare constraint sets without rename normalization."""
+        return self._compare_sets(table_ref, table_ref, source, target, None)
+
+    def compare_with_renames(
+        self,
+        source_table_ref: ObjectRef,
+        target_table_ref: ObjectRef,
+        source: tuple[Constraint, ...],
+        target: tuple[Constraint, ...],
+        renames: RenameAnnotations,
+    ) -> tuple[DeltaBase, ...]:
+        """Compare sets using mapped structured column/table references."""
+        return self._compare_sets(
+            source_table_ref,
+            target_table_ref,
+            source,
+            target,
+            renames,
+        )
+
+    def _compare_sets(
+        self,
+        source_table_ref: ObjectRef,
+        target_table_ref: ObjectRef,
+        source: tuple[Constraint, ...],
+        target: tuple[Constraint, ...],
+        renames: RenameAnnotations | None,
     ) -> tuple[DeltaBase, ...]:
         """Compare two constraint sets and return the ordered delta tuple.
 
@@ -166,7 +195,7 @@ class ConstraintComparator:
                 # Constraint exists only in the target — ADD it.
                 deltas.append(
                     AddConstraint(
-                        target=self._make_ref(table_ref, name),
+                        target=self._make_ref(target_table_ref, name),
                         constraint=tgt,
                     )
                 )
@@ -174,22 +203,26 @@ class ConstraintComparator:
                 # Constraint exists only in the source — DROP it.
                 deltas.append(
                     DropConstraint(
-                        target=self._make_ref(table_ref, name),
+                        target=self._make_ref(target_table_ref, name),
                         constraint=src,
                     )
                 )
-            elif src is not None and tgt is not None and src != tgt:
+            elif (
+                src is not None
+                and tgt is not None
+                and _normalize_constraint(src, source_table_ref, target_table_ref, renames) != tgt
+            ):
                 # Same name, different definition — replace (DROP old, ADD new).
                 # Drop first so the topo-sorter / SQL emitter see a valid sequence.
                 deltas.append(
                     DropConstraint(
-                        target=self._make_ref(table_ref, name),
+                        target=self._make_ref(target_table_ref, name),
                         constraint=src,
                     )
                 )
                 deltas.append(
                     AddConstraint(
-                        target=self._make_ref(table_ref, name),
+                        target=self._make_ref(target_table_ref, name),
                         constraint=tgt,
                     )
                 )
@@ -217,6 +250,33 @@ class ConstraintComparator:
             ),
             parent=table_ref,
         )
+
+
+def _normalize_constraint(
+    constraint: Constraint,
+    source_table_ref: ObjectRef,
+    target_table_ref: ObjectRef,
+    renames: RenameAnnotations | None,
+) -> Constraint:
+    """Return comparison-only copy with explicit structured references mapped."""
+    if renames is None:
+        return constraint
+
+    updates: dict[str, object] = {}
+    local_columns = renames.column_targets(source_table_ref.qname, target_table_ref.qname)
+    if hasattr(constraint, "columns"):
+        updates["columns"] = tuple(local_columns.get(name, name) for name in constraint.columns)
+
+    if constraint.kind == "foreign_key":
+        source_ref = QualifiedName(namespace=constraint.ref_namespace, name=constraint.ref_table)
+        target_ref = renames.map_table(source_ref)
+        updates["ref_namespace"] = target_ref.namespace
+        updates["ref_table"] = target_ref.name
+        referenced_columns = renames.column_targets(source_ref, target_ref)
+        updates["ref_columns"] = tuple(
+            referenced_columns.get(name, name) for name in constraint.ref_columns
+        )
+    return constraint.model_copy(update=updates) if updates else constraint
 
 
 __all__: list[str] = ["ConstraintComparator"]

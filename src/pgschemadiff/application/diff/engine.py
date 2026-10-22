@@ -48,7 +48,7 @@ Layer contract
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
 from pgschemadiff.domain.delta import DeltaBase, DeltaSet
 from pgschemadiff.domain.identity import ObjectKind, QualifiedName
@@ -57,7 +57,10 @@ from pgschemadiff.shared.errors import DiffError
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+    from pgschemadiff.application.diff.ignore import IgnoreRules
+    from pgschemadiff.application.diff.renames import RenameAnnotations
     from pgschemadiff.domain.database import Database
+    from pgschemadiff.domain.index import Index
 
 
 # ---------------------------------------------------------------------------
@@ -118,6 +121,20 @@ class Comparator(Protocol):
         target: object | None,
     ) -> Iterable[DeltaBase]:
         """Compare one (source, target) pair and return the emitted deltas."""
+        ...
+
+
+@runtime_checkable
+class RenameAwareComparator(Protocol):
+    """Optional comparator capability for explicit rename context."""
+
+    def compare_with_renames(
+        self,
+        source: object | None,
+        target: object | None,
+        renames: RenameAnnotations,
+    ) -> Iterable[DeltaBase]:
+        """Compare a pair while honoring explicit rename annotations."""
         ...
 
 
@@ -238,7 +255,14 @@ class DiffEngine:
     # Public API
     # ------------------------------------------------------------------
 
-    def diff(self, source: Database, target: Database) -> DeltaSet:
+    def diff(
+        self,
+        source: Database,
+        target: Database,
+        *,
+        renames: RenameAnnotations | None = None,
+        ignore: IgnoreRules | None = None,
+    ) -> DeltaSet:
         """Compare two database snapshots and return the collected deltas.
 
         For each registered :class:`Comparator` (in registration order):
@@ -250,6 +274,7 @@ class DiffEngine:
            where either argument is ``None`` when the name is absent on that
            side.
         5. Accumulate all returned deltas into the result.
+        6. Apply *ignore* rules to the completed result when provided.
 
         The result is a :class:`~pgschemadiff.domain.delta.DeltaSet` in a
         stable, reproducible order.  **This is NOT a topological sort** — the
@@ -262,6 +287,9 @@ class DiffEngine:
             The *current* database state (what exists now).
         target:
             The *desired* database state (what we want to reach).
+        ignore:
+            Optional exact-match object and attribute rules applied after
+            comparison.
 
         Returns
         -------
@@ -269,22 +297,80 @@ class DiffEngine:
             All deltas emitted by all registered comparators, in a
             deterministic pre-sorted order.
         """
+        if renames is not None:
+            if (renames.tables or renames.columns) and ObjectKind.TABLE not in self._registry:
+                raise DiffError("Rename annotations require a TABLE comparator")
+            renames.validate_for(source, target)
+
         all_deltas: list[DeltaBase] = []
 
         for kind, comparator in self._registry.items():
             source_objects = _fetch_objects_for_kind(source, kind)
             target_objects = _fetch_objects_for_kind(target, kind)
 
+            if kind is ObjectKind.INDEX and renames is not None and renames.tables:
+                source_index_list = [cast("Index", item) for item in source_objects.values()]
+                target_index_list = [cast("Index", item) for item in target_objects.values()]
+                source_indexes = {
+                    (_index_pair_parent(index, renames), index.ref.qname.name): index
+                    for index in source_index_list
+                }
+                target_indexes = {
+                    (index.table_ref.qname, index.ref.qname.name): index
+                    for index in target_index_list
+                }
+                pair_keys = sorted(
+                    source_indexes.keys() | target_indexes.keys(),
+                    key=lambda item: (item[0].namespace, item[0].name, item[1]),
+                )
+                for pair_key in pair_keys:
+                    all_deltas.extend(
+                        _compare_with_renames(
+                            comparator,
+                            source_indexes.get(pair_key),
+                            target_indexes.get(pair_key),
+                            renames,
+                        )
+                    )
+                continue
+
+            consumed_source: set[QualifiedName] = set()
+            consumed_target: set[QualifiedName] = set()
+
+            if kind is ObjectKind.TABLE and renames is not None:
+                for table_rename in sorted(
+                    renames.tables,
+                    key=lambda item: _qname_sort_key(item.source),
+                ):
+                    src_obj = source_objects[table_rename.source]
+                    tgt_obj = target_objects[table_rename.target]
+                    all_deltas.extend(_compare_with_renames(comparator, src_obj, tgt_obj, renames))
+                    consumed_source.add(table_rename.source)
+                    consumed_target.add(table_rename.target)
+
             all_qnames = set(source_objects) | set(target_objects)
-            sorted_qnames = sorted(all_qnames, key=_qname_sort_key)
+            sorted_qnames = sorted(
+                all_qnames - consumed_source - consumed_target,
+                key=_qname_sort_key,
+            )
 
             for qname in sorted_qnames:
                 src_obj = source_objects.get(qname)
                 tgt_obj = target_objects.get(qname)
-                emitted = comparator.compare(src_obj, tgt_obj)
+                if (
+                    kind in {ObjectKind.TABLE, ObjectKind.INDEX}
+                    and renames is not None
+                    and (renames.tables or renames.columns)
+                    and src_obj is not None
+                    and tgt_obj is not None
+                ):
+                    emitted = _compare_with_renames(comparator, src_obj, tgt_obj, renames)
+                else:
+                    emitted = comparator.compare(src_obj, tgt_obj)
                 all_deltas.extend(emitted)
 
-        return DeltaSet.from_iterable(all_deltas)
+        result = DeltaSet.from_iterable(all_deltas)
+        return ignore.apply(result) if ignore is not None else result
 
     # ------------------------------------------------------------------
     # Introspection helpers (useful for testing + debugging)
@@ -295,3 +381,20 @@ class DiffEngine:
         """The set of :class:`~pgschemadiff.domain.identity.ObjectKind` values
         for which a comparator has been registered."""
         return frozenset(self._registry)
+
+
+def _index_pair_parent(index: Index, renames: RenameAnnotations) -> QualifiedName:
+    """Map index's owning table identity for rename-aware logical pairing."""
+    return renames.map_table(index.table_ref.qname)
+
+
+def _compare_with_renames(
+    comparator: Comparator,
+    source: object | None,
+    target: object | None,
+    renames: RenameAnnotations,
+) -> Iterable[DeltaBase]:
+    """Dispatch explicit mappings only to comparators that support them."""
+    if not isinstance(comparator, RenameAwareComparator):
+        raise DiffError(f"Comparator for {comparator.kind!r} does not support rename annotations")
+    return comparator.compare_with_renames(source, target, renames)

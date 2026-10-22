@@ -54,6 +54,7 @@ from pgschemadiff.domain.delta.index import CreateIndex, DropIndex, ReplaceIndex
 from pgschemadiff.domain.identity import ObjectKind
 
 if TYPE_CHECKING:
+    from pgschemadiff.application.diff.renames import RenameAnnotations
     from pgschemadiff.domain.index import Index
 
 # ---------------------------------------------------------------------------
@@ -159,6 +160,42 @@ class IndexComparator:
             # (no AlterIndexComment delta in MVP-A).
             return ()
 
+        return (ReplaceIndex(target=target.ref, old_index=source, new_index=target),)
+
+    def compare_with_renames(
+        self,
+        source: Index | None,
+        target: Index | None,
+        renames: RenameAnnotations,
+    ) -> tuple[CreateIndex | DropIndex | ReplaceIndex, ...]:
+        """Compare indexes after mapping structured column references only."""
+        if source is None or target is None:
+            return self.compare(source, target)
+
+        if renames.map_table(source.table_ref.qname) != target.table_ref.qname:
+            return (ReplaceIndex(target=target.ref, old_index=source, new_index=target),)
+
+        column_map = renames.column_targets(source.table_ref.qname, target.table_ref.qname)
+        normalized_source = source
+        if column_map:
+            normalized_source = source.model_copy(
+                update={
+                    "key_columns": tuple(
+                        key.model_copy(
+                            update={"column_name": column_map.get(key.column_name, key.column_name)}
+                        )
+                        if key.column_name is not None
+                        else key
+                        for key in source.key_columns
+                    ),
+                    "include_columns": tuple(
+                        column_map.get(name, name) for name in source.include_columns
+                    ),
+                }
+            )
+
+        if _structurally_equal(normalized_source, target):
+            return ()
         return (ReplaceIndex(target=target.ref, old_index=source, new_index=target),)
 
 

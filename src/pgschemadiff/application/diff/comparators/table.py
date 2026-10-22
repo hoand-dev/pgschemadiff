@@ -54,12 +54,14 @@ Layer contract
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
-from pgschemadiff.domain.delta import AlterTableAttrs, CreateTable, DropTable
-from pgschemadiff.domain.identity import ObjectKind
+from pgschemadiff.domain.delta import AlterTableAttrs, CreateTable, DropTable, RenameTable
+from pgschemadiff.domain.identity import ObjectKind, QualifiedName
+from pgschemadiff.shared.errors import DiffError
 
 if TYPE_CHECKING:
+    from pgschemadiff.application.diff.renames import RenameAnnotations
     from pgschemadiff.domain.column import Column
     from pgschemadiff.domain.constraint import Constraint
     from pgschemadiff.domain.delta.base import DeltaBase
@@ -118,6 +120,36 @@ class ConstraintComparing(Protocol):
         target_constraints: tuple[Constraint, ...],
     ) -> tuple[DeltaBase, ...]:
         """Compare two constraint tuples and return the resulting constraint deltas."""
+        ...
+
+
+class RenameAwareColumnComparing(Protocol):
+    """Optional column-comparator capability for explicit rename pairs."""
+
+    def compare_columns_with_renames(
+        self,
+        source_table_ref: ObjectRef,
+        target_table_ref: ObjectRef,
+        source_columns: tuple[Column, ...],
+        target_columns: tuple[Column, ...],
+        renames: dict[str, str],
+    ) -> tuple[DeltaBase, ...]:
+        """Compare table columns using explicit source-to-target names."""
+        ...
+
+
+class RenameAwareConstraintComparing(Protocol):
+    """Optional constraint-comparator capability for explicit references."""
+
+    def compare_with_renames(
+        self,
+        source_table_ref: ObjectRef,
+        target_table_ref: ObjectRef,
+        source_constraints: tuple[Constraint, ...],
+        target_constraints: tuple[Constraint, ...],
+        renames: RenameAnnotations,
+    ) -> tuple[DeltaBase, ...]:
+        """Compare constraints using explicit local and referenced mappings."""
         ...
 
 
@@ -223,11 +255,47 @@ class TableComparator:
         # Both tables present — emit table-level attrs delta + delegate sub-objects
         return self._compare_both(src, tgt)
 
+    def compare_with_renames(
+        self,
+        source: object | None,
+        target: object | None,
+        renames: RenameAnnotations,
+    ) -> tuple[DeltaBase, ...]:
+        """Compare a pair selected by explicit table/column annotations."""
+        src: Table | None = source  # type: ignore[assignment]
+        tgt: Table | None = target  # type: ignore[assignment]
+        if src is None or tgt is None:
+            return self.compare(src, tgt)
+
+        table_rename = renames.table_target(src.ref.qname) == tgt.ref.qname
+        if src.ref.qname != tgt.ref.qname and not table_rename:
+            raise DiffError(
+                f"Table pair {src.ref.qname.fqn} -> {tgt.ref.qname.fqn} has no explicit annotation"
+            )
+
+        result: list[DeltaBase] = []
+        if table_rename:
+            result.append(
+                RenameTable(
+                    target=src.ref,
+                    old_name=src.ref.qname,
+                    new_name=tgt.ref.qname,
+                )
+            )
+        result.extend(self._compare_both(src, tgt, renames=renames))
+        return tuple(result)
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _compare_both(self, source: Table, target: Table) -> tuple[DeltaBase, ...]:
+    def _compare_both(
+        self,
+        source: Table,
+        target: Table,
+        *,
+        renames: RenameAnnotations | None = None,
+    ) -> tuple[DeltaBase, ...]:
         """Handle the case where both source and target tables exist.
 
         Emits deltas in deterministic order:
@@ -238,32 +306,101 @@ class TableComparator:
         result: list[DeltaBase] = []
 
         # --- Table-level attribute comparison ---
-        attr_delta = self._build_attr_delta(source, target)
+        attr_delta = self._build_attr_delta(source, target, renames=renames)
         if attr_delta is not None:
             result.append(attr_delta)
 
-        # --- Column delegation ---
-        if self._column_comparator is not None:
-            col_deltas = self._column_comparator.compare_columns(
-                source.ref,
-                source.columns,
-                target.columns,
-            )
-            result.extend(col_deltas)
-
-        # --- Constraint delegation ---
-        if self._constraint_comparator is not None:
-            ct_deltas = self._constraint_comparator.compare_sets(
-                source.ref,
-                source.constraints,
-                target.constraints,
-            )
-            result.extend(ct_deltas)
-
+        result.extend(self._compare_columns(source, target, renames))
+        result.extend(self._compare_constraints(source, target, renames))
         return tuple(result)
 
+    def _compare_columns(
+        self,
+        source: Table,
+        target: Table,
+        renames: RenameAnnotations | None,
+    ) -> tuple[DeltaBase, ...]:
+        """Delegate column pairing, passing explicit mappings when present."""
+        column_renames = (
+            renames.column_targets(source.ref.qname, target.ref.qname)
+            if renames is not None
+            else {}
+        )
+        if self._column_comparator is None:
+            if renames is not None and (column_renames or source.columns != target.columns):
+                raise DiffError("Rename-aware table comparison requires a column comparator")
+            return ()
+
+        if renames is not None and (column_renames or source.ref != target.ref):
+            compare_with_renames = getattr(
+                self._column_comparator,
+                "compare_columns_with_renames",
+                None,
+            )
+            if not callable(compare_with_renames):
+                raise DiffError("Column comparator does not support rename annotations")
+            return cast(
+                "RenameAwareColumnComparing", self._column_comparator
+            ).compare_columns_with_renames(
+                source.ref,
+                target.ref,
+                source.columns,
+                target.columns,
+                column_renames,
+            )
+
+        return self._column_comparator.compare_columns(
+            source.ref,
+            source.columns,
+            target.columns,
+        )
+
+    def _compare_constraints(
+        self,
+        source: Table,
+        target: Table,
+        renames: RenameAnnotations | None,
+    ) -> tuple[DeltaBase, ...]:
+        """Delegate constraint comparison, normalizing mapped references."""
+        if self._constraint_comparator is None:
+            if renames is not None and source.constraints != target.constraints:
+                raise DiffError("Rename-aware table comparison requires a constraint comparator")
+            return ()
+
+        if renames is not None:
+            compare_with_renames = getattr(
+                self._constraint_comparator,
+                "compare_with_renames",
+                None,
+            )
+            if callable(compare_with_renames):
+                return cast(
+                    "RenameAwareConstraintComparing",
+                    self._constraint_comparator,
+                ).compare_with_renames(
+                    source.ref,
+                    target.ref,
+                    source.constraints,
+                    target.constraints,
+                    renames,
+                )
+            if source.constraints == target.constraints:
+                return ()
+            raise DiffError("Constraint comparator does not support rename annotations")
+
+        return self._constraint_comparator.compare_sets(
+            target.ref,
+            source.constraints,
+            target.constraints,
+        )
+
     @staticmethod
-    def _build_attr_delta(source: Table, target: Table) -> AlterTableAttrs | None:
+    def _build_attr_delta(
+        source: Table,
+        target: Table,
+        *,
+        renames: RenameAnnotations | None = None,
+    ) -> AlterTableAttrs | None:
         """Build an :class:`~pgschemadiff.domain.delta.AlterTableAttrs` when any
         table-level attribute differs between *source* and *target*.
 
@@ -288,8 +425,22 @@ class TableComparator:
         new_partition_info = (
             target.partition_info if target.partition_info != source.partition_info else None
         )
+        source_partition_of = source.partition_of
+        if source_partition_of is not None and renames is not None:
+            source_parent = QualifiedName(
+                namespace=source_partition_of.parent_namespace,
+                name=source_partition_of.parent_name,
+            )
+            target_parent = renames.map_table(source_parent)
+            if target_parent != source_parent:
+                source_partition_of = source_partition_of.model_copy(
+                    update={
+                        "parent_namespace": target_parent.namespace,
+                        "parent_name": target_parent.name,
+                    }
+                )
         new_partition_of = (
-            target.partition_of if target.partition_of != source.partition_of else None
+            target.partition_of if target.partition_of != source_partition_of else None
         )
 
         # Nothing changed → no delta
@@ -303,7 +454,7 @@ class TableComparator:
             return None
 
         return AlterTableAttrs(
-            target=source.ref,
+            target=target.ref,
             new_owner=new_owner,
             new_tablespace=new_tablespace,
             new_comment=new_comment,

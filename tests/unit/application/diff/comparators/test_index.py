@@ -23,6 +23,7 @@ from pgschemadiff.application.diff.comparators.index import (
     _structurally_equal,
 )
 from pgschemadiff.application.diff.engine import Comparator
+from pgschemadiff.application.diff.renames import RenameAnnotations
 from pgschemadiff.domain.delta.index import CreateIndex, DropIndex, ReplaceIndex
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index, IndexKeyColumn, IndexMethod, SortOrder
@@ -406,3 +407,43 @@ class TestStructurallyEqual:
         a = _make_index(predicate=None)
         b = _make_index(predicate="WHERE active")
         assert _structurally_equal(a, b) is False
+
+
+def test_explicit_column_rename_does_not_replace_structured_index_columns() -> None:
+    renames = RenameAnnotations.from_document(
+        {
+            "renames": [
+                {"kind": "column", "from": "public.users.old_email", "to": "public.users.email"}
+            ]
+        }
+    )
+    source = _make_index(
+        key_columns=(_key_col("old_email"),),
+        include_columns=("old_email",),
+    )
+    target = _make_index(
+        key_columns=(_key_col("email"),),
+        include_columns=("email",),
+    )
+
+    result = IndexComparator().compare_with_renames(source, target, renames)
+
+    assert result == ()
+
+
+def test_raw_index_predicate_difference_remains_visible_with_column_rename() -> None:
+    renames = RenameAnnotations.from_document(
+        {
+            "renames": [
+                {"kind": "column", "from": "public.users.old_email", "to": "public.users.email"}
+            ]
+        }
+    )
+    source = _make_index(predicate="old_email IS NOT NULL")
+    target = _make_index(predicate="email IS NOT NULL")
+
+    (delta,) = IndexComparator().compare_with_renames(source, target, renames)
+
+    assert isinstance(delta, ReplaceIndex)
+    assert delta.old_index == source
+    assert delta.new_index == target

@@ -18,6 +18,7 @@ from pgschemadiff.domain.delta.column import (
     AddColumn,
     AlterColumnType,
     DropColumn,
+    RenameColumn,
     SetColumnDefault,
     SetColumnNullability,
 )
@@ -46,63 +47,124 @@ class ColumnComparator:
         source_columns: tuple[Column, ...],
         target_columns: tuple[Column, ...],
     ) -> tuple[DeltaBase, ...]:
+        """Compare columns without rename annotations."""
+        return self.compare_columns_with_renames(
+            table_ref,
+            table_ref,
+            source_columns,
+            target_columns,
+            {},
+        )
+
+    def compare_columns_with_renames(
+        self,
+        source_table_ref: ObjectRef,
+        target_table_ref: ObjectRef,
+        source_columns: tuple[Column, ...],
+        target_columns: tuple[Column, ...],
+        renames: dict[str, str],
+    ) -> tuple[DeltaBase, ...]:
         """Compare two column tuples and return deterministic column deltas.
 
-        Columns present on only one side emit ``AddColumn`` or ``DropColumn``.
-        Results are ordered by column position (name breaks position ties).
-        Same-name columns emit supported attribute deltas in type, default,
-        then nullability order.  A different name is treated as independent
-        add/drop operations; rename inference is intentionally avoided.
+        Explicit mappings pair renamed columns; all other names retain normal
+        add/drop matching. Alterations after a rename target the target table
+        and column identity, while ``RenameColumn`` targets the source identity.
         """
         source_by_name = {column.name: column for column in source_columns}
         target_by_name = {column.name: column for column in target_columns}
-        columns_by_name = source_by_name | target_by_name
-        result: list[DeltaBase] = []
+        if len(set(renames.values())) != len(renames):
+            raise DiffError("Multiple column renames target the same column")
 
-        for name in sorted(
-            columns_by_name,
-            key=lambda column_name: (columns_by_name[column_name].position, column_name),
-        ):
-            source = source_by_name.get(name)
-            target = target_by_name.get(name)
-            column_ref = self._make_ref(table_ref, name)
-
-            if source is None:
-                assert target is not None
-                result.append(AddColumn(target=column_ref, column=target))
-                continue
-
-            if target is None:
-                result.append(DropColumn(target=column_ref, column=source))
-                continue
-
-            if source.position != target.position:
-                raise DiffError(f"Unsupported column position change for {column_ref.qname.fqn}")
-            if source.identity != target.identity:
-                raise DiffError(f"Unsupported identity change for {column_ref.qname.fqn}")
-            if source.generated_expression != target.generated_expression:
+        pairs: list[tuple[Column | None, Column | None]] = []
+        renamed_sources = set(renames)
+        renamed_targets = set(renames.values())
+        for source_name, target_name in renames.items():
+            source = source_by_name.get(source_name)
+            target = target_by_name.get(target_name)
+            if source is None or target is None:
                 raise DiffError(
-                    f"Unsupported generated_expression change for {column_ref.qname.fqn}"
+                    f"Annotated column rename {source_name!r} -> {target_name!r} not found"
                 )
-            if source.collation != target.collation and target.collation is None:
-                raise DiffError(f"Unsupported collation removal for {column_ref.qname.fqn}")
+            pairs.append((source, target))
 
-            collation_changed = source.collation != target.collation
-            if source.data_type != target.data_type or collation_changed:
-                result.append(
-                    AlterColumnType(
-                        target=column_ref,
-                        new_data_type=target.data_type,
-                        new_collation=target.collation if collation_changed else None,
-                    )
+        same_names = (
+            (source_by_name.keys() & target_by_name.keys()) - renamed_sources - renamed_targets
+        )
+        pairs.extend((source_by_name[name], target_by_name[name]) for name in same_names)
+        pairs.extend(
+            (source_by_name[name], None)
+            for name in source_by_name.keys() - renamed_sources - same_names
+        )
+        pairs.extend(
+            (None, target_by_name[name])
+            for name in target_by_name.keys() - renamed_targets - same_names
+        )
+
+        def _pair_sort_key(pair: tuple[Column | None, Column | None]) -> tuple[int, str]:
+            column = pair[1] if pair[1] is not None else pair[0]
+            assert column is not None
+            return column.position, column.name
+
+        pairs.sort(key=_pair_sort_key)
+
+        result: list[DeltaBase] = []
+        for source, target in pairs:
+            result.extend(self._compare_pair(source, target, source_table_ref, target_table_ref))
+
+        return tuple(result)
+
+    def _compare_pair(
+        self,
+        source: Column | None,
+        target: Column | None,
+        source_table_ref: ObjectRef,
+        target_table_ref: ObjectRef,
+    ) -> tuple[DeltaBase, ...]:
+        """Compare one already-matched source/target column pair."""
+        if source is None:
+            assert target is not None
+            target_ref = self._make_ref(target_table_ref, target.name)
+            return (AddColumn(target=target_ref, column=target),)
+
+        if target is None:
+            source_ref = self._make_ref(source_table_ref, source.name)
+            return (DropColumn(target=source_ref, column=source),)
+
+        target_ref = self._make_ref(target_table_ref, target.name)
+        result: list[DeltaBase] = []
+        if source.name != target.name:
+            result.append(
+                RenameColumn(
+                    target=self._make_ref(source_table_ref, source.name),
+                    old_name=source.name,
+                    new_name=target.name,
                 )
+            )
 
-            if source.default_expr != target.default_expr:
-                result.append(SetColumnDefault(target=column_ref, new_default=target.default_expr))
+        if source.position != target.position:
+            raise DiffError(f"Unsupported column position change for {target_ref.qname.fqn}")
+        if source.identity != target.identity:
+            raise DiffError(f"Unsupported identity change for {target_ref.qname.fqn}")
+        if source.generated_expression != target.generated_expression:
+            raise DiffError(f"Unsupported generated_expression change for {target_ref.qname.fqn}")
+        if source.collation != target.collation and target.collation is None:
+            raise DiffError(f"Unsupported collation removal for {target_ref.qname.fqn}")
 
-            if source.nullable != target.nullable:
-                result.append(SetColumnNullability(target=column_ref, nullable=target.nullable))
+        collation_changed = source.collation != target.collation
+        if source.data_type != target.data_type or collation_changed:
+            result.append(
+                AlterColumnType(
+                    target=target_ref,
+                    new_data_type=target.data_type,
+                    new_collation=target.collation if collation_changed else None,
+                )
+            )
 
+        if source.default_expr != target.default_expr:
+            result.append(SetColumnDefault(target=target_ref, new_default=target.default_expr))
+
+        if source.nullable != target.nullable:
+            result.append(SetColumnNullability(target=target_ref, nullable=target.nullable))
         return tuple(result)
 
     @staticmethod
