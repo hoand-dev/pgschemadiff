@@ -5,40 +5,56 @@
 
 ## Context
 
-The same DDL statement can be fine on a 100-row dev table and catastrophic
-on a 100M-row production table. The tool's job is not to ban changes — it
-is to **classify** them so the operator decides. A binary "safe/unsafe"
-flag is too coarse; a free-form severity string is too vague.
+Risk needs to describe operational impact without changing the domain diff
+contract. The same change can have different impact depending on table size,
+but current deltas do not carry row-count or size estimates. A binary
+safe/unsafe flag is too coarse, and a free-form severity string is too vague.
 
 ## Decision
 
-Each `Delta` carries a `risk: RiskLevel` enum with **five** values:
+Risk is an external assessment of each domain delta; a `Delta` does not carry
+risk metadata. The immutable `RiskAssessment` contains the original `delta`,
+its `RiskLevel`, and a deterministic, non-empty `reason`. Classification is
+static and delta-only. It does not inspect SQL, execution mode, or live catalog
+state. Conditional rules use the highest applicable severity.
+
+The five levels are ordered explicitly from least to most severe:
 
 | Level | Meaning | Examples |
 |---|---|---|
-| `SAFE` | Additive, no data change, no lock escalation | `CREATE INDEX CONCURRENTLY`, `ADD COLUMN NULL`, `CREATE FUNCTION`, `ALTER TYPE ADD VALUE` |
-| `WARNING` | Additive but heavy lock or rewrite | `ADD COLUMN NOT NULL DEFAULT`, `CREATE INDEX` (non-concurrent), `VALIDATE CONSTRAINT` |
-| `DANGEROUS` | Data-preserving but blocking-long | `ALTER COLUMN TYPE` (rewrite), `ADD PRIMARY KEY` (non-concurrent) |
-| `DESTRUCTIVE` | Possible data loss | `DROP COLUMN`, `DROP TABLE`, `DROP CONSTRAINT` |
-| `BLOCKED` | PostgreSQL cannot express this safely; refuses to generate | enum value removal, column reorder, rename without annotation |
+| `SAFE` | Additive or metadata-only change with no expected data rewrite or material lock. | Create an empty schema or table; add a nullable column without a default, identity, or generated expression; change owner/comment or a column default; allow NULLs. |
+| `WARNING` | Usually data-preserving, but may need operator attention for locking, table work, or extension scripts. | Install or relocate an extension; create a partition child; rename a table or column; change tablespace; add a column with a default, `NOT NULL`, identity, or generated expression; create an index when execution mode is unspecified. |
+| `DANGEROUS` | May block for a material duration, require validation/rebuild, or change operational/integrity behavior. | Update an extension version; change partition metadata; alter a column type; set `NOT NULL`; drop a non-unique index; rebuild an index; add a constraint. |
+| `DESTRUCTIVE` | Removes data, schema objects, or an enforced integrity guarantee. Requires explicit opt-in above the default limit. | Drop a schema, table, column, extension, or constraint; drop a unique index; replace a unique index with a non-unique one. |
+| `BLOCKED` | No explicit risk policy exists or the operation is unsupported. Never generate. | An unrecognized `DeltaBase` subclass. |
 
-The CLI gates generation behind `--max-risk <level>` (default: refuses
-`DESTRUCTIVE` and `BLOCKED`). The TUI surfaces a coloured risk badge per
-delta. The risk of a generated migration is `max(deltas.risk)`.
+`CreateIndex` is `WARNING`: the delta has no execution-mode field, so the
+classifier cannot prove that `CONCURRENTLY` will be used. Classifications are
+policy assessments, not guarantees about PostgreSQL execution, errors, or
+downtime.
+
+The risk limit defaults to `DANGEROUS`: `SAFE`, `WARNING`, and `DANGEROUS`
+assessments pass; `DESTRUCTIVE` does not. `DESTRUCTIVE` passes only when the
+caller explicitly raises the limit, for example to `DESTRUCTIVE`. `BLOCKED`
+never passes, even when selected as the limit. A migration's aggregate risk is
+the highest delta assessment; an empty assessment set has no risky delta.
+
+Table-size/row-count estimates and other live catalog context are deferred
+until the domain or inspector can supply that information.
 
 ## Consequences
 
 - **Positive:**
-  - Operators have a clear vocabulary
-  - Safe default (no destructive change without explicit opt-in)
-  - CI pipelines can fail PRs that introduce `DESTRUCTIVE` changes
+  - Risk explanations stay outside domain deltas, preserving the diff contract.
+  - The default gate rejects destructive changes, and unsupported deltas fail closed.
 - **Negative:**
-  - The classifier must encode PostgreSQL operational knowledge per delta
+  - Static rules are conservative and cannot refine risk using table size or execution context.
+  - The classifier must maintain explicit operational policy for each delta type.
 - **Neutral:**
-  - `BLOCKED` is distinct from `DESTRUCTIVE`: a blocked change refuses to
-    generate SQL at all, while a destructive one will generate `DROP` if
-    the user opts in.
+  - `BLOCKED` is distinct from `DESTRUCTIVE`: a destructive assessment can pass
+    with an explicit higher limit; a blocked assessment cannot pass any limit.
 
 ## References
 
-- See `application/sql_emit/risk.py` (Phase 3, P3-RISK-01).
+- `docs/specs/2026-10-22-p3-risk-01-risk-classifier-design.md`
+- `src/pgschemadiff/application/sql_emit/risk.py` (P3-RISK-01).
