@@ -48,6 +48,8 @@ class RiskAssessment:
     reason: str
 
     def __post_init__(self) -> None:
+        if not isinstance(self.level, RiskLevel):
+            raise TypeError("RiskAssessment.level must be a RiskLevel")
         if not self.reason.strip():
             raise ValueError("Risk assessment reason must not be blank")
 
@@ -59,6 +61,29 @@ _RISK_RANK = {
     RiskLevel.DESTRUCTIVE: 3,
     RiskLevel.BLOCKED: 4,
 }
+
+_SUPPORTED_DELTA_TYPES: tuple[type[DeltaBase], ...] = (
+    CreateSchema,
+    DropSchema,
+    CreateExtension,
+    DropExtension,
+    AlterExtension,
+    CreateTable,
+    DropTable,
+    RenameTable,
+    AlterTableAttrs,
+    AddColumn,
+    DropColumn,
+    AlterColumnType,
+    SetColumnDefault,
+    SetColumnNullability,
+    RenameColumn,
+    CreateIndex,
+    DropIndex,
+    ReplaceIndex,
+    AddConstraint,
+    DropConstraint,
+)
 
 
 def passes_risk_limit(
@@ -76,6 +101,13 @@ def passes_risk_limit(
 
 def classify_risk(delta: DeltaBase) -> RiskAssessment:  # noqa: PLR0912, PLR0915
     """Classify a schema delta using the approved static risk policy."""
+    if type(delta) not in _SUPPORTED_DELTA_TYPES:
+        return RiskAssessment(
+            delta=delta,
+            level=RiskLevel.BLOCKED,
+            reason="No risk policy exists for this delta type.",
+        )
+
     if isinstance(delta, CreateSchema):
         level, reason = RiskLevel.SAFE, "Creates an empty schema."
     elif isinstance(delta, DropSchema):

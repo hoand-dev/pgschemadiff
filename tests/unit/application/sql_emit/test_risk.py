@@ -407,8 +407,19 @@ class UnsupportedDelta(DeltaBase):
     kind: Literal["unsupported"] = "unsupported"
 
 
+class DerivedCreateSchema(CreateSchema):
+    pass
+
+
 def test_unknown_delta_fails_closed() -> None:
     delta = UnsupportedDelta(op=DeltaOp.ALTER, target=_SCHEMA_REF)
+    assessment = classify_risk(delta)
+    assert assessment.level is RiskLevel.BLOCKED
+    assert not passes_risk_limit((assessment,), max_risk=RiskLevel.BLOCKED)
+
+
+def test_unrecognized_subclass_of_known_delta_fails_closed() -> None:
+    delta = DerivedCreateSchema(target=_SCHEMA_REF, pg_schema=Schema(ref=_SCHEMA_REF))
     assessment = classify_risk(delta)
     assert assessment.level is RiskLevel.BLOCKED
     assert not passes_risk_limit((assessment,), max_risk=RiskLevel.BLOCKED)
@@ -431,6 +442,11 @@ def test_assessment_keeps_delta_is_frozen_and_rejects_blank_reason() -> None:
         assessment.reason = "changed"  # type: ignore[misc]
     with pytest.raises(ValueError, match="blank"):
         RiskAssessment(delta=_DELTA, level=RiskLevel.SAFE, reason="  ")
+
+
+def test_assessment_rejects_non_risk_level() -> None:
+    with pytest.raises(TypeError, match=r"RiskAssessment\.level must be a RiskLevel"):
+        RiskAssessment(delta=_DELTA, level="blocked", reason="blocked")  # type: ignore[arg-type]
 
 
 def test_default_risk_limit_allows_through_dangerous() -> None:
