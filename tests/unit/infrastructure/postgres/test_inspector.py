@@ -65,9 +65,7 @@ from pgschemadiff.shared.errors import InspectionError
 # Row factories — mimic namedtuple_row output
 # ---------------------------------------------------------------------------
 
-_SchemaRow = namedtuple(
-    "_SchemaRow", ["schema_name", "owner", "comment"], defaults=[None, None]
-)
+_SchemaRow = namedtuple("_SchemaRow", ["schema_name", "owner", "comment"], defaults=[None, None])
 _TableRow = namedtuple(
     "_TableRow",
     [
