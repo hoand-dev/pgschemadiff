@@ -65,7 +65,9 @@ from pgschemadiff.shared.errors import InspectionError
 # Row factories — mimic namedtuple_row output
 # ---------------------------------------------------------------------------
 
-_SchemaRow = namedtuple("_SchemaRow", ["schema_name"])
+_SchemaRow = namedtuple(
+    "_SchemaRow", ["schema_name", "owner", "comment"], defaults=[None, None]
+)
 _TableRow = namedtuple(
     "_TableRow",
     [
@@ -126,7 +128,8 @@ _ConstraintRow = namedtuple(
 )
 _ExtensionRow = namedtuple(
     "_ExtensionRow",
-    ["extension_name", "default_version", "installed_version"],
+    ["extension_name", "installed_version", "installed_schema", "comment"],
+    defaults=[None, None],
 )
 
 
@@ -234,12 +237,14 @@ def _make_index_row(
 def _make_extension_row(
     name: str = "pgcrypto",
     installed: str = "1.3",
-    default: str = "1.3",
+    installed_schema: str | None = None,
+    comment: str | None = None,
 ) -> Any:
     return _ExtensionRow(
         extension_name=name,
         installed_version=installed,
-        default_version=default,
+        installed_schema=installed_schema,
+        comment=comment,
     )
 
 
@@ -397,6 +402,44 @@ async def test_schema_filter_none_includes_all() -> None:
     schema_names = [s.name for s in result.schemas]
     assert "public" in schema_names
     assert "audit" in schema_names
+
+
+@pytest.mark.unit
+def test_assemble_maps_schema_and_extension_metadata() -> None:
+    inspector = PgCatalogInspector(MagicMock(), schemas=["public"])
+    database = inspector._assemble(
+        schemas_rows=[_SchemaRow("public", "owner_role", "schema note")],
+        tables_rows=[],
+        columns_rows=[],
+        indexes_rows=[],
+        constraints_rows=[],
+        extensions_rows=[_ExtensionRow("pgcrypto", "1.3", "extensions", "extension note")],
+    )
+
+    assert database.schemas[0].owner == "owner_role"
+    assert database.schemas[0].comment == "schema note"
+    assert len(database.extensions) == 1
+    assert database.extensions[0].installed_schema == "extensions"
+    assert database.extensions[0].comment == "extension note"
+
+
+@pytest.mark.unit
+def test_assemble_keeps_extensions_database_wide_with_schema_filter() -> None:
+    inspector = PgCatalogInspector(MagicMock(), schemas=["public"])
+    database = inspector._assemble(
+        schemas_rows=[_SchemaRow("public"), _SchemaRow("audit")],
+        tables_rows=[],
+        columns_rows=[],
+        indexes_rows=[],
+        constraints_rows=[],
+        extensions_rows=[
+            _ExtensionRow("pgcrypto", "1.3", "extensions", None),
+            _ExtensionRow("hstore", "1.8", "extensions", None),
+        ],
+    )
+
+    assert [schema.name for schema in database.schemas] == ["public"]
+    assert [extension.name for extension in database.extensions] == ["pgcrypto", "hstore"]
 
 
 # ===========================================================================
@@ -886,7 +929,7 @@ async def test_inspect_returns_database() -> None:
                 definition="PRIMARY KEY (id)",
             )
         ],
-        extensions_rows=[_make_extension_row("pgcrypto", "1.3", "1.3")],
+        extensions_rows=[_make_extension_row("pgcrypto", "1.3")],
     )
 
     inspector = PgCatalogInspector(pool)
@@ -911,8 +954,8 @@ async def test_inspect_with_extension() -> None:
     """Extension rows should be mapped correctly to Extension domain objects."""
     pool = _build_mock_pool(
         extensions_rows=[
-            _make_extension_row("postgis", "3.3", "3.3"),
-            _make_extension_row("pgcrypto", "1.3", "1.3"),
+            _make_extension_row("postgis", "3.3"),
+            _make_extension_row("pgcrypto", "1.3"),
         ],
     )
     inspector = PgCatalogInspector(pool)

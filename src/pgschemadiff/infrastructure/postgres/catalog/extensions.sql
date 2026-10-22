@@ -1,14 +1,15 @@
 -- catalog/extensions.sql
--- Returns all currently installed PostgreSQL extensions.
--- Source: pg_available_extensions view (built-in, no extra joins needed).
+-- Returns all currently installed PostgreSQL extensions and their metadata.
 -- Result columns:
 --   extension_name     text  -- extension name
---   default_version    text  -- version that would be installed by default
 --   installed_version  text  -- currently installed version
+--   installed_schema   text  -- schema containing extension objects
+--   comment            text  -- optional extension comment
 SELECT
-    name              AS extension_name,
-    default_version,
-    installed_version
-FROM pg_catalog.pg_available_extensions
-WHERE installed_version IS NOT NULL
-ORDER BY name
+    e.extname AS extension_name,
+    e.extversion AS installed_version,
+    n.nspname AS installed_schema,
+    pg_catalog.obj_description(e.oid, 'pg_extension') AS comment
+FROM pg_catalog.pg_extension AS e
+LEFT JOIN pg_catalog.pg_namespace AS n ON n.oid = e.extnamespace
+ORDER BY e.extname

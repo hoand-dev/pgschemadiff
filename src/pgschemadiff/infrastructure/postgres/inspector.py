@@ -605,6 +605,7 @@ class PgCatalogInspector:
         extensions = self._build_extensions(extensions_rows)
 
         allowed: set[str] | None = set(self._schemas) if self._schemas is not None else None
+        schemas_by_name = {row.schema_name: row for row in schemas_rows}
         schema_names = [
             row.schema_name for row in schemas_rows if allowed is None or row.schema_name in allowed
         ]
@@ -619,7 +620,9 @@ class PgCatalogInspector:
 
         return Database(
             name="inspected",
-            schemas=tuple(self._build_schemas(schema_names, tables_by_schema, idxs_by_schema)),
+            schemas=tuple(
+                self._build_schemas(schema_names, tables_by_schema, idxs_by_schema, schemas_by_name)
+            ),
             extensions=tuple(extensions),
         )
 
@@ -714,17 +717,21 @@ class PgCatalogInspector:
         schema_names: list[str],
         tables_by_schema: dict[str, list[Table]],
         idxs_by_schema: dict[str, list[Index]],
+        schemas_by_name: dict[str, Any],
     ) -> list[Schema]:
         result: list[Schema] = []
         for name in schema_names:
+            row = schemas_by_name[name]
             result.append(
                 Schema(
                     ref=ObjectRef(
                         kind=ObjectKind.SCHEMA,
                         qname=QualifiedName(namespace=name, name=name),
                     ),
+                    owner=row.owner,
                     tables=tuple(tables_by_schema.get(name, [])),
                     indexes=tuple(idxs_by_schema.get(name, [])),
+                    comment=row.comment,
                 )
             )
         return result
@@ -745,6 +752,8 @@ class PgCatalogInspector:
                         qname=QualifiedName(namespace="public", name=row.extension_name),
                     ),
                     version=row.installed_version or "0",
+                    installed_schema=row.installed_schema,
+                    comment=row.comment,
                 )
             )
         return result

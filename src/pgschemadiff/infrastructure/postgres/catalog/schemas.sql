@@ -2,9 +2,13 @@
 -- Returns all user-defined schemas, excluding built-in system schemas.
 -- Result columns:
 --   schema_name  text  -- pg_namespace.nspname
+--   owner        text  -- role owning the schema
+--   comment      text  -- optional schema comment
 SELECT
-    nspname AS schema_name
-FROM pg_catalog.pg_namespace
-WHERE nspname NOT LIKE 'pg_%'
-  AND nspname != 'information_schema'
-ORDER BY nspname
+    n.nspname AS schema_name,
+    pg_catalog.pg_get_userbyid(n.nspowner) AS owner,
+    pg_catalog.obj_description(n.oid, 'pg_namespace') AS comment
+FROM pg_catalog.pg_namespace AS n
+WHERE n.nspname NOT LIKE 'pg_%'
+  AND n.nspname != 'information_schema'
+ORDER BY n.nspname
