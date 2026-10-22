@@ -9,6 +9,7 @@ objects to the matching comparator.
 Public surface::
 
     from pgschemadiff.application.diff.comparators import (
+        ColumnComparator,
         TableComparator,
         IndexComparator,
         ConstraintComparator,
@@ -22,6 +23,7 @@ hard import dependency).
 
 from __future__ import annotations
 
+from pgschemadiff.application.diff.comparators.column import ColumnComparator
 from pgschemadiff.application.diff.comparators.constraint import ConstraintComparator
 from pgschemadiff.application.diff.comparators.index import IndexComparator
 from pgschemadiff.application.diff.comparators.table import (
@@ -31,6 +33,7 @@ from pgschemadiff.application.diff.comparators.table import (
 )
 
 __all__ = [
+    "ColumnComparator",
     "ColumnComparing",
     "ConstraintComparator",
     "ConstraintComparing",

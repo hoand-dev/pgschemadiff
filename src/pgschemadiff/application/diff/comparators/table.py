@@ -83,8 +83,9 @@ class ColumnComparing(Protocol):
     it deems deterministic.
 
     This Protocol is intentionally defined here so that :class:`TableComparator`
-    can be tested in isolation using a stub implementation.  P2-DIFF-03 will
-    implement the concrete class that satisfies this Protocol.
+    can be tested in isolation using a stub implementation.  The concrete
+    :class:`~pgschemadiff.application.diff.comparators.column.ColumnComparator`
+    satisfies this protocol structurally.
     """
 
     def compare_columns(
