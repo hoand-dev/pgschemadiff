@@ -12,6 +12,7 @@ from pgschemadiff.domain.delta.column import AddColumn, DropColumn, RenameColumn
 from pgschemadiff.domain.delta.constraint import AddConstraint, DropConstraint
 from pgschemadiff.domain.delta.index import CreateIndex, DropIndex, ReplaceIndex
 from pgschemadiff.domain.delta.schema import (
+    AlterExtension,
     CreateExtension,
     CreateSchema,
     DropExtension,
@@ -100,9 +101,15 @@ def _add_create_dependencies(
         }:
             for schema_create in schema_creates.get(delta.target.qname.namespace, ()):
                 add(schema_create, delta)
-        elif isinstance(delta, CreateExtension) and delta.extension.installed_schema is not None:
-            for schema_create in schema_creates.get(delta.extension.installed_schema, ()):
-                add(schema_create, delta)
+        elif isinstance(delta, (CreateExtension, AlterExtension)):
+            schema_name = (
+                delta.extension.installed_schema
+                if isinstance(delta, CreateExtension)
+                else delta.new_schema
+            )
+            if schema_name is not None:
+                for schema_create in schema_creates.get(schema_name, ()):
+                    add(schema_create, delta)
 
 
 def _add_index_create_dependencies(

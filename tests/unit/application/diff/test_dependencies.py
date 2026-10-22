@@ -10,6 +10,7 @@ from pgschemadiff.domain.delta.column import AddColumn, DropColumn, RenameColumn
 from pgschemadiff.domain.delta.constraint import AddConstraint, DropConstraint
 from pgschemadiff.domain.delta.index import CreateIndex, DropIndex, ReplaceIndex
 from pgschemadiff.domain.delta.schema import (
+    AlterExtension,
     CreateExtension,
     CreateSchema,
     DropExtension,
@@ -272,6 +273,18 @@ def test_extension_membership_orders_create_and_drop_with_schema() -> None:
 
     _assert_precedes(created, create_schema, create_extension)
     _assert_precedes(dropped, drop_extension, drop_schema)
+
+
+def test_extension_schema_move_waits_for_new_schema_creation() -> None:
+    schema_ref = _ref(ObjectKind.SCHEMA, "reporting")
+    schema = Schema(ref=schema_ref)
+    create_schema = CreateSchema(target=schema_ref, pg_schema=schema)
+    extension_ref = _ref(ObjectKind.EXTENSION, "hstore")
+    alter_extension = AlterExtension(target=extension_ref, new_schema="reporting")
+
+    ordered = order_deltas(DeltaSet.from_iterable((alter_extension, create_schema))).deltas
+
+    _assert_precedes(ordered, create_schema, alter_extension)
 
 
 def test_unrelated_deltas_have_deterministic_sort_key_order() -> None:
