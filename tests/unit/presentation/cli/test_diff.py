@@ -15,6 +15,7 @@ from pgschemadiff.domain.delta.schema import CreateExtension
 from pgschemadiff.domain.extension import Extension
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.presentation.cli.main import app
+from pgschemadiff.shared.errors import DiffError
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine
@@ -184,7 +185,7 @@ def test_diff_prints_parseable_typed_delta_json(monkeypatch: pytest.MonkeyPatch)
     assert DeltaSet.model_validate(serialized) == DeltaSet()
 
 
-def test_diff_compares_database_wide_extensions_without_schema_filter(
+def test_diff_compares_database_wide_extensions_under_schema_filter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     source_url = "postgresql://source/db"
@@ -204,10 +205,13 @@ def test_diff_compares_database_wide_extensions_without_schema_filter(
         },
     )
 
-    result = CliRunner().invoke(app, ["diff", source_url, target_url])
+    result = CliRunner().invoke(
+        app,
+        ["diff", source_url, target_url, "--schema", "public"],
+    )
 
     assert result.exit_code == 0
-    assert [inspector.schemas for inspector in inspectors] == [None, None]
+    assert [inspector.schemas for inspector in inspectors] == [["public"], ["public"]]
     deltas = DeltaSet.model_validate_json(result.stdout)
     assert len(deltas.deltas) == 1
     assert isinstance(deltas.deltas[0], CreateExtension)
@@ -235,6 +239,33 @@ def test_diff_reports_errors_to_stderr_with_nonzero_exit(
     assert result.exit_code == 1
     assert "Error:" in result.stderr
     assert "private failure detail" not in result.stderr
+
+
+def test_diff_error_redacts_detail_from_output_and_logs(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    source_url = "postgresql://source/db"
+    target_url = "postgresql://target/db"
+    _patch_infrastructure(
+        monkeypatch,
+        {source_url: Database(name="source"), target_url: Database(name="target")},
+    )
+
+    async def compare_schemas(
+        _source: FakeInspector, _target: FakeInspector, **_kwargs: object
+    ) -> DeltaSet:
+        raise DiffError("diff-secret-marker")
+
+    monkeypatch.setattr(diff_command, "compare_schemas", compare_schemas, raising=False)
+
+    result = CliRunner().invoke(app, ["diff", source_url, target_url])
+
+    assert result.exit_code == 1
+    assert "Schema comparison failed." in result.stderr
+    assert "diff-secret-marker" not in result.stderr
+    assert "diff-secret-marker" not in result.output
+    assert "diff-secret-marker" not in caplog.text
 
 
 class FailingPool:

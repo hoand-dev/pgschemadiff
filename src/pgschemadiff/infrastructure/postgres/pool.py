@@ -80,7 +80,11 @@ class Pool:
             # explicitly so we can pass wait=True for synchronous readiness.
             open=False,
         )
-        await pool.open(wait=True, timeout=self._open_timeout)
+        try:
+            await pool.open(wait=True, timeout=self._open_timeout)
+        except BaseException:
+            await pool.close()
+            raise
         self._pool = pool
         return self
 

@@ -14,6 +14,8 @@ These tests do NOT require a live PostgreSQL instance.  They verify:
 
 from __future__ import annotations
 
+import asyncio
+
 import psycopg_pool
 import pytest
 
@@ -148,6 +150,30 @@ async def test_aenter_opens_pool_and_returns_self(monkeypatch: pytest.MonkeyPatc
 
     # Cleanup: call aexit manually
     await pool.__aexit__(None, None, None)
+    assert fake.close_called
+    assert pool._pool is None
+
+
+class _CancelledOpenPool(_OpenTrackingPool):
+    async def open(self, *, wait: bool, timeout: float) -> None:
+        raise asyncio.CancelledError
+
+
+@pytest.mark.unit
+async def test_aenter_closes_underlying_pool_when_open_is_cancelled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _CancelledOpenPool()
+    monkeypatch.setattr(
+        psycopg_pool,
+        "AsyncConnectionPool",
+        lambda **_kw: fake,
+    )
+
+    pool = Pool("postgresql://localhost/test")
+    with pytest.raises(asyncio.CancelledError):
+        await pool.__aenter__()
+
     assert fake.close_called
     assert pool._pool is None
 
