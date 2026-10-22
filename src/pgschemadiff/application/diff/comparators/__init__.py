@@ -13,6 +13,8 @@ Public surface::
         TableComparator,
         IndexComparator,
         ConstraintComparator,
+        SchemaComparator,
+        ExtensionComparator,
     )
 
 ``TableComparator`` delegates sub-object diffing to injected collaborators
@@ -25,7 +27,9 @@ from __future__ import annotations
 
 from pgschemadiff.application.diff.comparators.column import ColumnComparator
 from pgschemadiff.application.diff.comparators.constraint import ConstraintComparator
+from pgschemadiff.application.diff.comparators.extension import ExtensionComparator
 from pgschemadiff.application.diff.comparators.index import IndexComparator
+from pgschemadiff.application.diff.comparators.schema import SchemaComparator
 from pgschemadiff.application.diff.comparators.table import (
     ColumnComparing,
     ConstraintComparing,
@@ -37,6 +41,8 @@ __all__ = [
     "ColumnComparing",
     "ConstraintComparator",
     "ConstraintComparing",
+    "ExtensionComparator",
     "IndexComparator",
+    "SchemaComparator",
     "TableComparator",
 ]
