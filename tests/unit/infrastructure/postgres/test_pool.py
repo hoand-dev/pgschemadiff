@@ -159,6 +159,20 @@ class _CancelledOpenPool(_OpenTrackingPool):
         raise asyncio.CancelledError
 
 
+class _OpenAndCloseFailingPool(_OpenTrackingPool):
+    def __init__(self, open_error: BaseException, close_error: BaseException) -> None:
+        super().__init__()
+        self.open_error = open_error
+        self.close_error = close_error
+
+    async def open(self, *, wait: bool, timeout: float) -> None:
+        raise self.open_error
+
+    async def close(self) -> None:
+        self.close_called = True
+        raise self.close_error
+
+
 @pytest.mark.unit
 async def test_aenter_closes_underlying_pool_when_open_is_cancelled(
     monkeypatch: pytest.MonkeyPatch,
@@ -176,6 +190,32 @@ async def test_aenter_closes_underlying_pool_when_open_is_cancelled(
 
     assert fake.close_called
     assert pool._pool is None
+
+
+@pytest.mark.unit
+async def test_aenter_preserves_open_error_when_close_also_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    open_error = RuntimeError("original open failure")
+    close_error = RuntimeError("postgresql://user:cleanup-secret@host/db cleanup failure")
+    fake = _OpenAndCloseFailingPool(open_error, close_error)
+    monkeypatch.setattr(
+        psycopg_pool,
+        "AsyncConnectionPool",
+        lambda **_kw: fake,
+    )
+    pool = Pool("postgresql://localhost/test")
+
+    with pytest.raises(RuntimeError, match="original open failure") as exc_info:
+        await pool.__aenter__()
+
+    assert exc_info.value is open_error
+    assert fake.close_called
+    assert pool._pool is None
+    diagnostics = "\n".join(getattr(open_error, "__notes__", []))
+    assert "RuntimeError" in diagnostics
+    assert "details omitted" in diagnostics
+    assert "cleanup-secret" not in diagnostics
 
 
 @pytest.mark.unit

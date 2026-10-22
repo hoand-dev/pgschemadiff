@@ -82,8 +82,13 @@ class Pool:
         )
         try:
             await pool.open(wait=True, timeout=self._open_timeout)
-        except BaseException:
-            await pool.close()
+        except BaseException as open_error:
+            try:
+                await pool.close()
+            except BaseException as cleanup_error:
+                open_error.add_note(
+                    f"Pool cleanup also failed ({type(cleanup_error).__name__}); details omitted."
+                )
             raise
         self._pool = pool
         return self
