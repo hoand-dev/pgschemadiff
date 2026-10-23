@@ -149,6 +149,9 @@ class ConstraintComparator:
         -----
         * Name present in *target* only → emit :class:`AddConstraint`.
         * Name present in *source* only → emit :class:`DropConstraint`.
+        * A one-sided inherited constraint is ignored; the parent owns it.
+        * Same-name constraints inherited on both sides are ignored even if their
+          catalog definitions differ. Inherited/local metadata alone is ignored.
         * Same name on both sides, **identical** definition (value equality
           across all fields) → no delta emitted.
         * Same name on both sides, **different** definition (any field differs)
@@ -193,23 +196,26 @@ class ConstraintComparator:
 
             if src is None and tgt is not None:
                 # Constraint exists only in the target — ADD it.
-                deltas.append(
-                    AddConstraint(
-                        target=self._make_ref(target_table_ref, name),
-                        constraint=tgt,
+                if not tgt.inherited:
+                    deltas.append(
+                        AddConstraint(
+                            target=self._make_ref(target_table_ref, name),
+                            constraint=tgt,
+                        )
                     )
-                )
             elif tgt is None and src is not None:
                 # Constraint exists only in the source — DROP it.
-                deltas.append(
-                    DropConstraint(
-                        target=self._make_ref(target_table_ref, name),
-                        constraint=src,
+                if not src.inherited:
+                    deltas.append(
+                        DropConstraint(
+                            target=self._make_ref(target_table_ref, name),
+                            constraint=src,
+                        )
                     )
-                )
             elif (
                 src is not None
                 and tgt is not None
+                and not (src.inherited and tgt.inherited)
                 and _normalize_constraint(src, source_table_ref, target_table_ref, renames)
                 != _normalize_constraint(tgt, target_table_ref, target_table_ref, None)
             ):

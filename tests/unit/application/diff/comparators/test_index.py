@@ -59,6 +59,7 @@ def _make_index(
     unique: bool = False,
     predicate: str | None = None,
     comment: str | None = None,
+    constraint_name: str | None = None,
 ) -> Index:
     return Index(
         ref=index_ref or _index_ref(),
@@ -69,6 +70,7 @@ def _make_index(
         unique=unique,
         predicate=predicate,
         comment=comment,
+        constraint_name=constraint_name,
     )
 
 
@@ -127,6 +129,11 @@ class TestCreateIndex:
         assert isinstance(delta, CreateIndex)
         assert delta.target.qname.namespace == "myschema"
 
+    def test_constraint_backed_index_is_not_created_standalone(self) -> None:
+        idx = _make_index(constraint_name="users_pkey")
+
+        assert IndexComparator().compare(None, idx) == ()
+
 
 # ---------------------------------------------------------------------------
 # DROP: source set, target=None
@@ -153,6 +160,11 @@ class TestDropIndex:
         (delta,) = cmp.compare(idx, None)
         assert isinstance(delta, DropIndex)
         assert delta.index == idx
+
+    def test_constraint_backed_index_is_not_dropped_standalone(self) -> None:
+        idx = _make_index(constraint_name="users_pkey")
+
+        assert IndexComparator().compare(idx, None) == ()
 
 
 # ---------------------------------------------------------------------------
@@ -217,6 +229,28 @@ class TestReplaceIndex:
         target = _make_index(unique=True)
         delta = self._assert_replace(source, target)
         assert delta.target == target.ref
+
+    def test_two_constraint_backed_indexes_never_emit_replace(self) -> None:
+        source = _make_index(unique=True, constraint_name="users_uq")
+        target = _make_index(unique=False, constraint_name="users_uq")
+
+        assert IndexComparator().compare(source, target) == ()
+
+    def test_constraint_backed_to_standalone_emits_only_create(self) -> None:
+        source = _make_index(unique=True, constraint_name="users_uq")
+        target = _make_index(unique=False)
+
+        assert IndexComparator().compare(source, target) == (
+            CreateIndex(target=target.ref, index=target),
+        )
+
+    def test_standalone_to_constraint_backed_emits_only_drop(self) -> None:
+        source = _make_index(unique=False)
+        target = _make_index(unique=True, constraint_name="users_uq")
+
+        assert IndexComparator().compare(source, target) == (
+            DropIndex(target=source.ref, index=source),
+        )
 
     # --- Parametrized: one structural field at a time -------------------------
 
@@ -440,6 +474,25 @@ def test_explicit_column_rename_does_not_replace_structured_index_columns() -> N
     result = IndexComparator().compare_with_renames(source, target, renames)
 
     assert result == ()
+
+
+def test_constraint_backed_transition_with_renames_emits_only_standalone_side() -> None:
+    renames = RenameAnnotations.from_document(
+        {
+            "renames": [
+                {"kind": "column", "from": "public.users.old_email", "to": "public.users.email"}
+            ]
+        }
+    )
+    source = _make_index(
+        key_columns=(_key_col("old_email"),),
+        constraint_name="users_email_key",
+    )
+    target = _make_index(key_columns=(_key_col("email"),))
+
+    assert IndexComparator().compare_with_renames(source, target, renames) == (
+        CreateIndex(target=target.ref, index=target),
+    )
 
 
 def test_raw_index_predicate_difference_remains_visible_with_column_rename() -> None:

@@ -28,6 +28,7 @@ from pgschemadiff.application.diff.comparators.constraint import ConstraintCompa
 from pgschemadiff.application.diff.renames import RenameAnnotations
 from pgschemadiff.domain.constraint import (
     CheckConstraint,
+    Constraint,
     ConstraintDeferrability,
     ExclusionConstraint,
     ExclusionElement,
@@ -435,6 +436,60 @@ class TestDefinitionChanged:
         assert len(result) == 2
         assert isinstance(result[0], DropConstraint)
         assert isinstance(result[1], AddConstraint)
+
+
+class TestInheritedConstraints:
+    def test_inherited_constraints_are_ignored_while_local_constraints_diff(self) -> None:
+        table_ref = ObjectRef(
+            kind=ObjectKind.TABLE,
+            qname=QualifiedName(namespace="public", name="partition_child"),
+        )
+        inherited_source = CheckConstraint(name="parent_check", expression="id > 0", inherited=True)
+        inherited_target = CheckConstraint(
+            name="parent_check", expression="id >= 0", inherited=True
+        )
+        local_source = _chk("local_old", "value > 0")
+        local_target = _chk("local_new", "value >= 0")
+
+        result = ConstraintComparator().compare_sets(
+            table_ref,
+            source=(inherited_source, local_source),
+            target=(inherited_target, local_target),
+        )
+
+        assert len(result) == 2
+        constraint_deltas = [
+            delta for delta in result if isinstance(delta, (DropConstraint, AddConstraint))
+        ]
+        assert {delta.constraint.name for delta in constraint_deltas} == {
+            "local_old",
+            "local_new",
+        }
+        assert {type(delta) for delta in constraint_deltas} == {DropConstraint, AddConstraint}
+
+    @pytest.mark.parametrize(
+        ("source", "target"),
+        [
+            pytest.param(
+                (CheckConstraint(name="parent_check", expression="id > 0", inherited=True),),
+                (),
+                id="inherited-only-in-source",
+            ),
+            pytest.param(
+                (),
+                (CheckConstraint(name="parent_check", expression="id > 0", inherited=True),),
+                id="inherited-only-in-target",
+            ),
+        ],
+    )
+    def test_inherited_constraint_only_on_one_side_is_ignored(
+        self,
+        cmp: ConstraintComparator,
+        table_ref: ObjectRef,
+        source: tuple[Constraint, ...],
+        target: tuple[Constraint, ...],
+    ) -> None:
+        assert cmp.compare_sets(table_ref, source=source, target=target) == ()
 
 
 # ---------------------------------------------------------------------------

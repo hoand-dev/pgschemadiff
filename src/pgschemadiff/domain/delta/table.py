@@ -86,13 +86,18 @@ from pgschemadiff.domain.table import PartitionInfo, PartitionOf, Table
 class CreateTable(DeltaBase):
     """Delta for ``CREATE TABLE`` (or ``CREATE TABLE … PARTITION OF …``).
 
-    Carries the full :class:`~pgschemadiff.domain.table.Table` aggregate so
-    that the SQL emitter has all the information it needs to reconstruct the
-    DDL without additional lookups.
+    Carries the full :class:`~pgschemadiff.domain.table.Table` aggregate so the
+    delta preserves a lossless snapshot for downstream inspection.
 
     ``target`` (inherited from :class:`~pgschemadiff.domain.delta.base.DeltaBase`)
     must equal ``table.ref`` for identity consistency; the validator enforces
     this at construction time.
+
+    Usage
+    -----
+    The payload retains constraints for a lossless snapshot, but the SQL emitter
+    uses only table/column/partition fields here. Local constraints are emitted
+    separately by ``AddConstraint`` deltas to prevent duplicate DDL.
 
     ``kind`` is the globally-unique union discriminator for ``CreateTable``.
     """

@@ -4,7 +4,7 @@ Covers:
 - ``TableComparator.kind`` equals ``ObjectKind.TABLE``
 - ``isinstance(comparator, Comparator)`` — Protocol satisfaction
 - ``compare(None, None)`` → empty tuple
-- ``compare(None, target)`` → single ``CreateTable`` delta (whole table, no extra deltas)
+- ``compare(None, target)`` → ``CreateTable`` plus local ``AddConstraint`` deltas
 - ``compare(source, None)`` → single ``DropTable`` delta
 - Identical tables → empty tuple (no delta)
 - Owner change → ``AlterTableAttrs(new_owner=...)``
@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from pgschemadiff.application.diff.comparators.constraint import ConstraintComparator
 from pgschemadiff.application.diff.comparators.table import (
     ColumnComparing,
     ConstraintComparing,
@@ -249,17 +250,42 @@ def test_compare_create_table() -> None:
 
 @pytest.mark.unit
 def test_create_table_delta_carries_whole_table() -> None:
-    """The ``CreateTable`` delta carries the full table aggregate (cols + constraints)."""
+    """CreateTable keeps full payload while local constraints get separate deltas."""
     col = _col("id", 1)
     pk = PrimaryKeyConstraint(name="pk", columns=("id",))
     target = _make_table(columns=(col,), constraints=(pk,))
-    cmp = TableComparator()
+    cmp = TableComparator(constraint_comparator=ConstraintComparator())
     result = cmp.compare(None, target)
-    assert len(result) == 1
-    delta = result[0]
-    assert isinstance(delta, CreateTable)
-    assert delta.table.columns == (col,)
-    assert delta.table.constraints == (pk,)
+    assert len(result) == 2
+    create, add = result
+    assert isinstance(create, CreateTable)
+    assert create.table.columns == (col,)
+    assert create.table.constraints == (pk,)
+    assert isinstance(add, AddConstraint)
+    assert add.constraint == pk
+    assert add.target.parent == target.ref
+
+
+@pytest.mark.unit
+def test_new_table_adds_local_constraints_in_name_order_after_create_table() -> None:
+    """New-table constraints are local-only and deterministic after table create."""
+    target = _make_table_with_col(
+        constraints=(
+            CheckConstraint(name="z_local", expression="id < 10"),
+            CheckConstraint(name="parent_check", expression="id > 0", inherited=True),
+            CheckConstraint(name="a_local", expression="id >= 0"),
+        )
+    )
+
+    result = TableComparator(constraint_comparator=ConstraintComparator()).compare(None, target)
+
+    assert [type(delta) for delta in result] == [CreateTable, AddConstraint, AddConstraint]
+    create = result[0]
+    assert isinstance(create, CreateTable)
+    assert create.table == target
+    additions = [delta for delta in result if isinstance(delta, AddConstraint)]
+    assert [delta.constraint.name for delta in additions] == ["a_local", "z_local"]
+    assert all(delta.target.parent == target.ref for delta in additions)
 
 
 @pytest.mark.unit
@@ -281,13 +307,14 @@ def test_create_table_no_per_column_deltas() -> None:
 
 
 @pytest.mark.unit
-def test_create_table_constraint_comparator_not_called() -> None:
-    """When creating a table, the constraint comparator must NOT be called."""
+def test_create_table_constraint_comparator_receives_empty_source_set() -> None:
+    """New tables delegate target constraints against an empty source set."""
     ct_stub = _StubConstraintComparator()
-    target = _make_table_with_col()
+    target = _make_table_with_col(constraints=(CheckConstraint(name="chk", expression="id > 0"),))
     cmp = TableComparator(constraint_comparator=ct_stub)
-    cmp.compare(None, target)
-    assert ct_stub.calls == []
+    result = cmp.compare(None, target)
+    assert ct_stub.calls == [(target.ref, (), target.constraints)]
+    assert isinstance(result[0], CreateTable)
 
 
 # ---------------------------------------------------------------------------

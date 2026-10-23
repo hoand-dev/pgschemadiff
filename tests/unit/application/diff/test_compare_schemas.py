@@ -2,11 +2,15 @@ from pgschemadiff.application.diff.compare_schemas import compare_schemas
 from pgschemadiff.application.diff.ignore import IgnoreRules
 from pgschemadiff.application.diff.renames import RenameAnnotations, TableRename
 from pgschemadiff.domain.column import Column
-from pgschemadiff.domain.constraint import ForeignKeyConstraint, UniqueConstraint
+from pgschemadiff.domain.constraint import (
+    CheckConstraint,
+    ForeignKeyConstraint,
+    UniqueConstraint,
+)
 from pgschemadiff.domain.database import Database
 from pgschemadiff.domain.delta.base import DeltaSet
 from pgschemadiff.domain.delta.column import AddColumn
-from pgschemadiff.domain.delta.constraint import AddConstraint
+from pgschemadiff.domain.delta.constraint import AddConstraint, DropConstraint
 from pgschemadiff.domain.delta.index import CreateIndex
 from pgschemadiff.domain.delta.schema import CreateExtension, CreateSchema
 from pgschemadiff.domain.delta.table import CreateTable, RenameTable
@@ -14,7 +18,7 @@ from pgschemadiff.domain.extension import Extension
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index, IndexKeyColumn
 from pgschemadiff.domain.schema import Schema
-from pgschemadiff.domain.table import Table
+from pgschemadiff.domain.table import PartitionOf, Table
 
 
 def _ref(
@@ -92,6 +96,84 @@ async def test_compare_schemas_uses_all_default_comparators() -> None:
     assert {AddColumn, AddConstraint, CreateIndex, CreateExtension} <= delta_types
 
 
+async def test_compare_schemas_creates_table_before_local_constraints() -> None:
+    table_ref = _ref(ObjectKind.TABLE, "accounts")
+    column = Column(name="id", position=1, data_type="integer", nullable=False)
+    table = Table(
+        ref=table_ref,
+        columns=(column,),
+        constraints=(
+            CheckConstraint(name="z_local_check", expression="id < 100"),
+            CheckConstraint(name="parent_check", expression="id > 0", inherited=True),
+            CheckConstraint(name="a_local_check", expression="id >= 0"),
+        ),
+    )
+    target = StubInspector(
+        Database(name="target", schemas=(Schema(ref=_schema().ref, tables=(table,)),))
+    )
+
+    result = await compare_schemas(StubInspector(Database(name="source")), target)
+
+    assert [type(delta) for delta in result.deltas] == [
+        CreateSchema,
+        CreateTable,
+        AddConstraint,
+        AddConstraint,
+    ]
+    create_table = result.deltas[1]
+    assert isinstance(create_table, CreateTable)
+    assert create_table.table == table
+    additions = [delta for delta in result.deltas if isinstance(delta, AddConstraint)]
+    assert [delta.constraint.name for delta in additions] == ["a_local_check", "z_local_check"]
+    assert all(delta.target.parent == table.ref for delta in additions)
+    assert not any(isinstance(delta, AddColumn) for delta in result.deltas)
+
+
+async def test_compare_schemas_ignores_changed_inherited_partition_constraints() -> None:
+    parent_ref = _ref(ObjectKind.TABLE, "parents")
+    child_ref = _ref(ObjectKind.TABLE, "children")
+    parent = Table(ref=parent_ref)
+    inherited_source = CheckConstraint(name="parent_check", expression="id > 0", inherited=True)
+    inherited_target = CheckConstraint(name="parent_check", expression="id >= 0", inherited=True)
+    child_source = Table(
+        ref=child_ref,
+        constraints=(
+            inherited_source,
+            CheckConstraint(name="local_old", expression="value > 0"),
+        ),
+        partition_of=PartitionOf(parent_namespace="public", parent_name="parents"),
+    )
+    child_target = Table(
+        ref=child_ref,
+        constraints=(
+            inherited_target,
+            CheckConstraint(name="local_new", expression="value >= 0"),
+        ),
+        partition_of=PartitionOf(parent_namespace="public", parent_name="parents"),
+    )
+    source = StubInspector(
+        Database(
+            name="source",
+            schemas=(Schema(ref=_schema().ref, tables=(parent, child_source)),),
+        )
+    )
+    target = StubInspector(
+        Database(
+            name="target",
+            schemas=(Schema(ref=_schema().ref, tables=(parent, child_target)),),
+        )
+    )
+
+    result = await compare_schemas(source, target)
+
+    assert len(result.deltas) == 2
+    constraint_deltas = [
+        delta for delta in result.deltas if isinstance(delta, (DropConstraint, AddConstraint))
+    ]
+    assert {type(delta) for delta in constraint_deltas} == {DropConstraint, AddConstraint}
+    assert {delta.constraint.name for delta in constraint_deltas} == {"local_old", "local_new"}
+
+
 async def test_compare_schemas_applies_programmatic_ignore_rules() -> None:
     extension_ref = _ref(ObjectKind.EXTENSION, "pgcrypto")
     source = StubInspector(Database(name="source"))
@@ -163,5 +245,18 @@ async def test_compare_schemas_orders_typed_deltas_by_foreign_key_dependency() -
     result = await compare_schemas(StubInspector(Database(name="source")), target)
 
     assert isinstance(result, DeltaSet)
-    assert [type(delta) for delta in result.deltas] == [CreateSchema, CreateTable, CreateTable]
-    assert [delta.target for delta in result.deltas] == [_schema().ref, parent_ref, child_ref]
+    assert [type(delta) for delta in result.deltas] == [
+        CreateSchema,
+        CreateTable,
+        CreateTable,
+        AddConstraint,
+    ]
+    assert [delta.target for delta in result.deltas[:3]] == [
+        _schema().ref,
+        parent_ref,
+        child_ref,
+    ]
+    constraint_delta = result.deltas[3]
+    assert isinstance(constraint_delta, AddConstraint)
+    assert constraint_delta.target.parent == child_ref
+    assert constraint_delta.constraint.name == "a_child_parent_id_fkey"

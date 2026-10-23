@@ -21,6 +21,10 @@ The structural fields compared by this comparator are:
 - ``unique`` — uniqueness flag
 - ``predicate`` — ``WHERE`` predicate for partial indexes
 
+Indexes with ``constraint_name`` set are owned by their constraint and never
+produce standalone index deltas. If ownership changes on only one side, only
+the standalone side's create/drop is emitted.
+
 The ``comment`` field is *non-structural*: a comment-only difference does not
 require a rebuild.  However, there is no ``AlterIndexComment`` delta type in
 MVP-A.  Therefore a **comment-only difference is silently ignored** (returns
@@ -109,6 +113,12 @@ class IndexComparator:
     |                    |                    | never calls this branch)      |
     +--------------------+--------------------+-------------------------------+
 
+    Constraint-backed indexes
+    -------------------------
+    The create/drop/replace rules above apply to standalone indexes. If both
+    sides are constraint-backed, no index delta is emitted. If ownership exists
+    on only one side, only the standalone side's create or drop is emitted.
+
     Comment-only differences
     ------------------------
     A change limited to the ``comment`` field is a non-structural diff that
@@ -142,6 +152,17 @@ class IndexComparator:
             Zero or one delta in a tuple.  Never returns more than one delta
             per call (replace covers both drop + create semantically).
         """
+        # Constraint DDL owns constraint-backed indexes. If ownership differs,
+        # only the standalone side needs an explicit index delta.
+        if source is not None and source.constraint_name is not None:
+            if target is not None and target.constraint_name is None:
+                return (CreateIndex(target=target.ref, index=target),)
+            return ()
+        if target is not None and target.constraint_name is not None:
+            if source is not None:
+                return (DropIndex(target=source.ref, index=source),)
+            return ()
+
         # --- CREATE: exists only in target -----------------------------------
         if source is None and target is not None:
             return (CreateIndex(target=target.ref, index=target),)
@@ -169,7 +190,12 @@ class IndexComparator:
         renames: RenameAnnotations,
     ) -> tuple[CreateIndex | DropIndex | ReplaceIndex, ...]:
         """Compare indexes after mapping structured column references only."""
-        if source is None or target is None:
+        if (
+            source is None
+            or target is None
+            or source.constraint_name is not None
+            or target.constraint_name is not None
+        ):
             return self.compare(source, target)
 
         if renames.map_table(source.table_ref.qname) != target.table_ref.qname:

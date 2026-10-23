@@ -13,13 +13,19 @@ Rename is never inferred (ADR-0007)
 Table-level vs. structural deltas
     :class:`TableComparator` is responsible for **table-level** deltas only:
 
-    * :class:`~pgschemadiff.domain.delta.CreateTable` — new table in target only.
+    * :class:`~pgschemadiff.domain.delta.CreateTable` — new table in target only;
+      the full table payload, including constraints, remains lossless.
     * :class:`~pgschemadiff.domain.delta.DropTable` — table removed from source.
     * :class:`~pgschemadiff.domain.delta.AlterTableAttrs` — owner / tablespace /
       comment / partition metadata changed.
 
-    Structural sub-object diffs (columns, constraints) are **delegated** to
-    injected sub-comparators (see *Dependency injection* below).
+    On creation, the injected constraint comparator emits one ``AddConstraint``
+    per local target constraint after ``CreateTable``; it emits no
+    ``AddColumn`` deltas. The SQL emitter ignores constraints in the
+    ``CreateTable.table`` payload and emits them only from ``AddConstraint``.
+    Dropping a table still emits only ``DropTable``. For existing tables,
+    structural sub-object diffs (columns, constraints) are delegated to injected
+    sub-comparators (see *Dependency injection* below).
 
 Indexes are NOT delegated here
     Indexes are top-level objects in pgschemadiff's object model.  They are
@@ -36,16 +42,15 @@ Dependency injection (DI)
     (:class:`ColumnComparing` and :class:`ConstraintComparing`).
 
     When a sub-comparator is ``None`` the delegation step is skipped silently;
-    table-level deltas are still emitted.  Once P2-DIFF-03 and P2-DIFF-05 land,
-    callers wire them at construction time.
+    table-level deltas are still emitted. The standard ``compare_schemas``
+    composition wires both comparators, as required for complete deltas.
 
 Deterministic output ordering
-    For any ``(source, target)`` pair where both are present, the method returns
-    deltas in the following stable order:
+    Deltas are returned in stable order:
 
-    1. Table-level delta(s) — zero or one :class:`~pgschemadiff.domain.delta.AlterTableAttrs`.
-    2. Column deltas — returned by the injected ``column_comparator`` (if any).
-    3. Constraint deltas — returned by the injected ``constraint_comparator`` (if any).
+    1. New table: :class:`~pgschemadiff.domain.delta.CreateTable`, then local
+       ``AddConstraint`` deltas in constraint-name order.
+    2. Existing table: table-level delta, column deltas, then constraint deltas.
 
 Layer contract
     Pure application layer: no IO, no async, no psycopg, no infra/presentation
@@ -105,9 +110,10 @@ class ConstraintComparing(Protocol):
     """Structural interface for the constraint sub-comparator (P2-DIFF-05).
 
     :class:`TableComparator` calls :meth:`compare_sets` with the parent table
-    reference and both constraint tuples when both source and target tables are
-    present.  The constraint comparator returns a tuple of constraint-level
-    :class:`~pgschemadiff.domain.delta.base.DeltaBase` subclasses.
+    reference and both constraint tuples when both tables exist, or with an
+    empty source tuple when creating a table. The constraint comparator returns
+    a tuple of constraint-level :class:`~pgschemadiff.domain.delta.base.DeltaBase`
+    subclasses.
 
     The method name ``compare_sets`` matches the API that P2-DIFF-05
     (``ConstraintComparator``) is implementing, allowing zero-change wiring.
@@ -214,11 +220,10 @@ class TableComparator:
         Returns
         -------
         tuple[DeltaBase, ...]
-            * ``source is None, target set`` →
-              ``(CreateTable(target=target.ref, table=target),)``
-              The table is created whole — its columns and constraints travel
-              with it.  No per-column or per-constraint deltas are emitted in
-              this case.
+            * ``source is None, target set`` → ``CreateTable`` followed by
+              delegated ``AddConstraint`` deltas for local target constraints.
+              The table payload remains lossless; no ``AddColumn`` deltas are
+              emitted.
             * ``source set, target is None`` →
               ``(DropTable(target=source.ref, table=source),)``
             * ``both set`` → table-level attr delta (if any) + delegated column
@@ -245,7 +250,15 @@ class TableComparator:
         if src is None:
             # Table exists only in target → CREATE
             assert tgt is not None  # narrowed above
-            return (CreateTable(target=tgt.ref, table=tgt),)
+            create_delta = CreateTable(target=tgt.ref, table=tgt)
+            if self._constraint_comparator is None:
+                return (create_delta,)
+            constraint_deltas = self._constraint_comparator.compare_sets(
+                tgt.ref,
+                (),
+                tgt.constraints,
+            )
+            return (create_delta, *constraint_deltas)
 
         if tgt is None:
             # Table exists only in source → DROP
