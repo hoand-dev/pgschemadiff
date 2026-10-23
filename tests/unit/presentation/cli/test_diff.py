@@ -42,7 +42,17 @@ def test_diff_command_is_registered() -> None:
 
 
 def test_diff_help_exposes_two_urls_and_optional_flags() -> None:
-    result = CliRunner().invoke(app, ["diff", "--help"])
+    result = CliRunner().invoke(
+        app,
+        ["diff", "--help"],
+        env={
+            "NO_COLOR": "1",
+            "TERM": "dumb",
+            "COLUMNS": "120",
+            "FORCE_COLOR": None,
+            "GITHUB_ACTIONS": None,
+        },
+    )
 
     assert result.exit_code == 0
     assert "SOURCE_URL" in result.output
