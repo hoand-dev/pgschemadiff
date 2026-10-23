@@ -17,6 +17,7 @@ These tests do NOT require a live PostgreSQL instance.  They verify:
 from __future__ import annotations
 
 from collections import namedtuple
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -50,6 +51,7 @@ from pgschemadiff.infrastructure.postgres.inspector import (
     _map_fk_action,
     _map_fk_constraint,
     _map_fk_match,
+    _map_index,
     _map_index_method,
     _map_partition_strategy,
     _map_pk_constraint,
@@ -108,7 +110,10 @@ _IndexRow = namedtuple(
         "is_exclusion",
         "index_definition",
         "predicate",
+        "include_columns",
+        "constraint_name",
     ],
+    defaults=[(), None],
 )
 _ConstraintRow = namedtuple(
     "_ConstraintRow",
@@ -751,6 +756,40 @@ def test_parse_index_key_columns_multi() -> None:
 
 
 @pytest.mark.unit
+def test_parse_index_key_columns_excludes_include_columns() -> None:
+    definition = "CREATE INDEX i ON t USING btree (email) INCLUDE (display_name, created_at)"
+
+    keys = _parse_index_key_columns(definition)
+
+    assert tuple(key.column_name for key in keys) == ("email",)
+
+
+@pytest.mark.unit
+def test_map_index_preserves_definition_include_columns_and_constraint_name() -> None:
+    definition = (
+        'CREATE UNIQUE INDEX "users_email_idx" ON public.users USING btree (email) '
+        "INCLUDE (display_name)"
+    )
+    row = SimpleNamespace(
+        schema_name="public",
+        table_name="users",
+        index_name="users_email_idx",
+        index_method="btree",
+        is_unique=True,
+        index_definition=definition,
+        predicate=None,
+        include_columns=("display_name",),
+        constraint_name="users_email_key",
+    )
+
+    index = _map_index(row)
+
+    assert index.definition == definition
+    assert index.include_columns == ("display_name",)
+    assert index.constraint_name == "users_email_key"
+
+
+@pytest.mark.unit
 def test_parse_index_key_columns_desc() -> None:
     """DESC sort order should be parsed."""
     defn = "CREATE INDEX i ON t USING btree (created_at DESC)"
@@ -783,9 +822,9 @@ def test_map_index_method_known() -> None:
 
 
 @pytest.mark.unit
-def test_map_index_method_unknown_falls_back() -> None:
-    """An unknown method name should fall back to BTREE."""
-    assert _map_index_method("custom_am") == IndexMethod.BTREE
+def test_map_index_method_rejects_unknown_access_method() -> None:
+    with pytest.raises(InspectionError, match="Unsupported PostgreSQL index method: 'custom_am'"):
+        _map_index_method("custom_am")
 
 
 # ===========================================================================

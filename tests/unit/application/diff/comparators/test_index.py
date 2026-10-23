@@ -172,6 +172,17 @@ class TestNoChange:
         cmp = IndexComparator()
         assert cmp.compare(idx_a, idx_b) == ()
 
+    def test_definition_only_difference_emits_no_delta(self) -> None:
+        base = _make_index().model_dump()
+        source = Index.model_validate(
+            {**base, "definition": "CREATE INDEX users_email_idx ON users (email)"}
+        )
+        target = Index.model_validate(
+            {**base, "definition": "CREATE INDEX users_email_idx ON users (email) INCLUDE (name)"}
+        )
+
+        assert IndexComparator().compare(source, target) == ()
+
     def test_both_none_emits_nothing(self) -> None:
         """Defensive: engine should never pass (None, None) but must not raise."""
         cmp = IndexComparator()

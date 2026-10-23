@@ -8,6 +8,7 @@
   ``NULLS FIRST/LAST`` preference, and operator class.
 - An optional ``INCLUDE`` column list.
 - An optional ``WHERE`` predicate for partial indexes.
+- The raw ``pg_get_indexdef`` result and any owning constraint name.
 - The uniqueness flag.
 
 All models are pure domain: no IO, no async, no external drivers.
@@ -136,6 +137,12 @@ class Index(BaseModel):
 
     predicate: str | None = None
     """``WHERE`` predicate for partial indexes, or ``None``."""
+
+    definition: str | None = None
+    """Full ``pg_get_indexdef`` output, preserved verbatim. ``None`` for hand-built models."""
+
+    constraint_name: str | None = None
+    """Owning PK, UNIQUE, or EXCLUSION constraint name, or ``None``."""
 
     comment: str | None = None
     """Optional ``COMMENT ON INDEX`` value."""

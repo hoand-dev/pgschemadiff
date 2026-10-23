@@ -278,8 +278,13 @@ def test_index_json_round_trip() -> None:
         unique=True,
         predicate="(active = true)",
         comment="Index for case-insensitive email lookups",
+        definition=(
+            'CREATE INDEX "users_email_lower_idx" ON public.users USING btree (lower(email)) '
+            "INCLUDE (name)"
+        ),
+        constraint_name="users_email_key",
     )
-    restored = Index.model_validate_json(idx.model_dump_json())
+    restored = Index.model_validate(idx.model_dump(mode="json"))
     assert restored == idx
 
 

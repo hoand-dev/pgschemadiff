@@ -10,6 +10,8 @@
 --   is_primary        bool       -- pg_index.indisprimary
 --   is_exclusion      bool       -- pg_index.indisexclusion
 --   index_definition  text       -- full CREATE [UNIQUE] INDEX … statement
+--   include_columns   text[]      -- names after the first indnkeyatts index attributes
+--   constraint_name   text|null   -- owning PK/UNIQUE/EXCLUSION constraint, if any
 --   predicate         text|null  -- WHERE clause expression or null (non-partial indexes)
 SELECT
     n.nspname                                            AS schema_name,
@@ -20,6 +22,15 @@ SELECT
     i.indisprimary                                       AS is_primary,
     i.indisexclusion                                     AS is_exclusion,
     pg_get_indexdef(i.indexrelid)                        AS index_definition,
+    ARRAY(
+        SELECT a.attname::text
+        FROM generate_series(i.indnkeyatts, i.indnatts - 1) AS k(position)
+        JOIN pg_catalog.pg_attribute a
+            ON a.attrelid = i.indrelid
+           AND a.attnum = i.indkey[k.position]
+        ORDER BY k.position
+    )                                                    AS include_columns,
+    con.conname                                          AS constraint_name,
     CASE
         WHEN i.indpred IS NOT NULL
             THEN pg_get_expr(i.indpred, i.indrelid)
@@ -34,6 +45,9 @@ JOIN pg_catalog.pg_namespace n
     ON n.oid = c.relnamespace
 JOIN pg_catalog.pg_am am
     ON am.oid = ic.relam
+LEFT JOIN pg_catalog.pg_constraint con
+    ON con.conindid = i.indexrelid
+   AND con.contype IN ('p', 'u', 'x')
 WHERE n.nspname NOT LIKE 'pg_%'
   AND n.nspname != 'information_schema'
 ORDER BY n.nspname, c.relname, ic.relname

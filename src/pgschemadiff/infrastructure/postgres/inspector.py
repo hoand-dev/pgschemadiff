@@ -174,8 +174,8 @@ def _map_index_method(name: str) -> IndexMethod:
     """Map pg_am.amname to :class:`IndexMethod`."""
     try:
         return IndexMethod(name.lower())
-    except ValueError:
-        return IndexMethod.BTREE
+    except ValueError as exc:
+        raise InspectionError(f"Unsupported PostgreSQL index method: {name!r}") from exc
 
 
 def _split_top_level_commas(raw: str) -> list[str]:
@@ -334,8 +334,11 @@ def _map_index(row: Any) -> Index:
         ),
         method=_map_index_method(row.index_method),
         key_columns=_parse_index_key_columns(row.index_definition),
+        include_columns=tuple(row.include_columns or ()),
         unique=bool(row.is_unique),
         predicate=row.predicate or None,
+        definition=row.index_definition,
+        constraint_name=row.constraint_name,
     )
 
 

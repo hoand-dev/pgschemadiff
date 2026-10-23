@@ -186,6 +186,18 @@ def test_indexes_sql_includes_predicate() -> None:
     assert "predicate" in sql
 
 
+@pytest.mark.unit
+def test_indexes_sql_selects_include_columns_and_constraint_owner() -> None:
+    sql = _load_sql("indexes.sql")
+    assert "i.indnkeyatts" in sql
+    assert "i.indnatts" in sql
+    assert "pg_catalog.pg_attribute" in sql
+    assert "AS include_columns" in sql
+    assert "con.conindid = i.indexrelid" in sql
+    assert "con.contype IN ('p', 'u', 'x')" in sql
+    assert "AS constraint_name" in sql
+
+
 # ---------------------------------------------------------------------------
 # constraints.sql specific checks
 # ---------------------------------------------------------------------------
