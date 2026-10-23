@@ -293,6 +293,30 @@ class TestIdenticalNoDelta:
         result = cmp.compare_sets(table_ref, source=(pk, uq, chk), target=(pk, uq, chk))
         assert result == ()
 
+    def test_definition_only_difference_produces_no_delta(
+        self, cmp: ConstraintComparator, table_ref: ObjectRef
+    ) -> None:
+        source = PrimaryKeyConstraint(
+            name="orders_pkey",
+            columns=("id",),
+            definition="PRIMARY KEY (id)",
+        )
+        target = PrimaryKeyConstraint(
+            name="orders_pkey",
+            columns=("id",),
+            definition="PRIMARY KEY (id) /* normalized */",
+        )
+
+        assert cmp.compare_sets(table_ref, source=(source,), target=(target,)) == ()
+
+    def test_inherited_only_difference_produces_no_delta(
+        self, cmp: ConstraintComparator, table_ref: ObjectRef
+    ) -> None:
+        source = PrimaryKeyConstraint(name="orders_pkey", columns=("id",), inherited=False)
+        target = PrimaryKeyConstraint(name="orders_pkey", columns=("id",), inherited=True)
+
+        assert cmp.compare_sets(table_ref, source=(source,), target=(target,)) == ()
+
 
 # ---------------------------------------------------------------------------
 # Definition-changed → Drop + Add pair
@@ -741,8 +765,22 @@ def test_table_and_referenced_column_renames_do_not_replace_foreign_key() -> Non
         kind=ObjectKind.TABLE,
         qname=QualifiedName(namespace="public", name="orders"),
     )
-    source = _fk("orders_customer_fkey", ref_table="user_account", ref_columns=("user_id",))
-    target = _fk("orders_customer_fkey", ref_table="users", ref_columns=("id",))
+    source = ForeignKeyConstraint(
+        name="orders_customer_fkey",
+        columns=("customer_id",),
+        ref_namespace="public",
+        ref_table="user_account",
+        ref_columns=("user_id",),
+        definition="FOREIGN KEY (customer_id) REFERENCES public.user_account (user_id)",
+    )
+    target = ForeignKeyConstraint(
+        name="orders_customer_fkey",
+        columns=("customer_id",),
+        ref_namespace="public",
+        ref_table="users",
+        ref_columns=("id",),
+        definition="FOREIGN KEY (customer_id) REFERENCES public.users (id)",
+    )
     renames = RenameAnnotations.from_document(
         {
             "renames": [

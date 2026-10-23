@@ -458,17 +458,23 @@ def _map_constraint(row: Any) -> _AnyConstraint:
     definition: str = row.definition
     deferrability = _map_deferrability(bool(row.deferrable), bool(row.initially_deferred))
 
+    constraint: _AnyConstraint
     if constraint_type == "p":
-        return _map_pk_constraint(name, definition, deferrability)
-    if constraint_type == "u":
-        return _map_unique_constraint(name, definition, deferrability)
-    if constraint_type == "c":
-        return _map_check_constraint(name, definition, deferrability)
-    if constraint_type == "f":
-        return _map_fk_constraint(name, definition, deferrability, row)
-    if constraint_type == "x":
-        return _map_exclusion_constraint(name, definition, deferrability)
-    raise InspectionError(f"Unknown constraint type: {constraint_type!r}")
+        constraint = _map_pk_constraint(name, definition, deferrability)
+    elif constraint_type == "u":
+        constraint = _map_unique_constraint(name, definition, deferrability)
+    elif constraint_type == "c":
+        constraint = _map_check_constraint(name, definition, deferrability)
+    elif constraint_type == "f":
+        constraint = _map_fk_constraint(name, definition, deferrability, row)
+    elif constraint_type == "x":
+        constraint = _map_exclusion_constraint(name, definition, deferrability)
+    else:
+        raise InspectionError(f"Unknown constraint type: {constraint_type!r}")
+
+    return constraint.model_copy(
+        update={"definition": definition, "inherited": bool(row.inherited)}
+    )
 
 
 def _safe_map_constraints(

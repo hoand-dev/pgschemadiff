@@ -237,6 +237,12 @@ def test_constraints_sql_includes_fk_reference_columns() -> None:
     assert "ref_table" in sql
 
 
+@pytest.mark.unit
+def test_constraints_sql_selects_inherited_status() -> None:
+    sql = _load_sql("constraints.sql")
+    assert "(con.conparentid <> 0 OR NOT con.conislocal)         AS inherited" in sql
+
+
 # ---------------------------------------------------------------------------
 # extensions.sql specific checks
 # ---------------------------------------------------------------------------

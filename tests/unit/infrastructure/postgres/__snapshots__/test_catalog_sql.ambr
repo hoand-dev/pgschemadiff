@@ -81,6 +81,7 @@
   --   constraint_name    text       -- pg_constraint.conname
   --   constraint_type    text       -- 'p'=PK, 'u'=unique, 'c'=check, 'f'=FK, 'x'=exclusion
   --   definition         text       -- pg_get_constraintdef(con.oid, true)
+  --   inherited          bool       -- conparentid <> 0 OR NOT conislocal
   --   ref_schema         text|null  -- referenced schema (FK only, null otherwise)
   --   ref_table          text|null  -- referenced table  (FK only, null otherwise)
   --   deferrable         bool       -- con.condeferrable
@@ -91,6 +92,7 @@
       con.conname                                          AS constraint_name,
       con.contype::text                                    AS constraint_type,
       pg_get_constraintdef(con.oid, true)                  AS definition,
+      (con.conparentid <> 0 OR NOT con.conislocal)         AS inherited,
       rn.nspname                                           AS ref_schema,
       rc.relname                                           AS ref_table,
       con.condeferrable                                    AS deferrable,

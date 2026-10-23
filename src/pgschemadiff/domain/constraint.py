@@ -64,6 +64,12 @@ class _ConstraintBase(BaseModel):
     name: str = Field(min_length=1)
     """Constraint name (``pg_constraint.conname``)."""
 
+    definition: str | None = None
+    """Raw ``pg_get_constraintdef(oid, true)`` text, excluding the constraint name."""
+
+    inherited: bool = False
+    """True when ``conparentid <> 0`` or ``conislocal`` is false."""
+
     deferrability: ConstraintDeferrability = ConstraintDeferrability.NOT_DEFERRABLE
     """Deferral behaviour.  Most constraints are ``NOT DEFERRABLE`` (default)."""
 

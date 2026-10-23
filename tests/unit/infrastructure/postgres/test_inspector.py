@@ -48,6 +48,7 @@ from pgschemadiff.infrastructure.postgres.inspector import (
     _map_column,
     _map_constraint,
     _map_deferrability,
+    _map_exclusion_constraint,
     _map_fk_action,
     _map_fk_constraint,
     _map_fk_match,
@@ -127,7 +128,9 @@ _ConstraintRow = namedtuple(
         "ref_table",
         "deferrable",
         "initially_deferred",
+        "inherited",
     ],
+    defaults=[False],
 )
 _ExtensionRow = namedtuple(
     "_ExtensionRow",
@@ -200,6 +203,7 @@ def _make_constraint_row(
     ref_table: str | None = None,
     deferrable: bool = False,
     initially_deferred: bool = False,
+    inherited: bool = False,
 ) -> Any:
     return _ConstraintRow(
         schema_name=schema,
@@ -211,6 +215,7 @@ def _make_constraint_row(
         ref_table=ref_table,
         deferrable=deferrable,
         initially_deferred=initially_deferred,
+        inherited=inherited,
     )
 
 
@@ -540,11 +545,14 @@ def test_map_constraint_primary_key() -> None:
         name="users_pkey",
         constraint_type="p",
         definition="PRIMARY KEY (id)",
+        inherited=True,
     )
     ct = _map_constraint(row)
     assert isinstance(ct, PrimaryKeyConstraint)
     assert ct.name == "users_pkey"
     assert ct.columns == ("id",)
+    assert ct.definition == "PRIMARY KEY (id)"
+    assert ct.inherited is True
 
 
 @pytest.mark.unit
@@ -567,11 +575,14 @@ def test_map_constraint_unique() -> None:
         name="users_email_key",
         constraint_type="u",
         definition="UNIQUE (email)",
+        inherited=True,
     )
     ct = _map_constraint(row)
     assert isinstance(ct, UniqueConstraint)
     assert ct.columns == ("email",)
     assert ct.nulls_not_distinct is False
+    assert ct.definition == "UNIQUE (email)"
+    assert ct.inherited is True
 
 
 @pytest.mark.unit
@@ -592,10 +603,13 @@ def test_map_constraint_check() -> None:
         name="users_age_check",
         constraint_type="c",
         definition="CHECK ((age > 0))",
+        inherited=True,
     )
     ct = _map_constraint(row)
     assert isinstance(ct, CheckConstraint)
     assert "age" in ct.expression
+    assert ct.definition == "CHECK ((age > 0))"
+    assert ct.inherited is True
 
 
 @pytest.mark.unit
@@ -618,6 +632,7 @@ def test_map_constraint_foreign_key() -> None:
         definition="FOREIGN KEY (user_id) REFERENCES public.users (id)",
         ref_schema="public",
         ref_table="users",
+        inherited=True,
     )
     ct = _map_constraint(row)
     assert isinstance(ct, ForeignKeyConstraint)
@@ -625,6 +640,8 @@ def test_map_constraint_foreign_key() -> None:
     assert ct.ref_namespace == "public"
     assert ct.ref_table == "users"
     assert ct.ref_columns == ("id",)
+    assert ct.definition == "FOREIGN KEY (user_id) REFERENCES public.users (id)"
+    assert ct.inherited is True
 
 
 @pytest.mark.unit
@@ -659,11 +676,43 @@ def test_map_constraint_exclusion() -> None:
         name="room_excl",
         constraint_type="x",
         definition="EXCLUDE USING gist (room WITH =, during WITH &&)",
+        inherited=True,
     )
     ct = _map_constraint(row)
     assert isinstance(ct, ExclusionConstraint)
     assert ct.index_method == "gist"
     assert len(ct.elements) >= 1
+    assert ct.definition == "EXCLUDE USING gist (room WITH =, during WITH &&)"
+    assert ct.inherited is True
+
+
+@pytest.mark.unit
+def test_failed_constraint_parsers_leave_question_mark_sentinels() -> None:
+    deferrability = ConstraintDeferrability.NOT_DEFERRABLE
+    pk = _map_pk_constraint("pk", "not a primary key", deferrability)
+    unique = _map_unique_constraint("uq", "not a unique constraint", deferrability)
+    fk = _map_fk_constraint(
+        "fk",
+        "not a foreign key",
+        deferrability,
+        MagicMock(ref_schema="public", ref_table="users"),
+    )
+    fk_without_catalog_ref = _map_fk_constraint(
+        "fk",
+        "not a foreign key",
+        deferrability,
+        SimpleNamespace(ref_schema=None, ref_table=None),
+    )
+    exclusion = _map_exclusion_constraint("excl", "not an exclusion", deferrability)
+    exclusion_elements = _parse_exclusion_elements("unrecognized element")
+
+    assert pk.columns == ("?",)
+    assert unique.columns == ("?",)
+    assert fk.columns == ("?",)
+    assert fk.ref_columns == ("?",)
+    assert fk_without_catalog_ref.ref_table == "?"
+    assert exclusion.elements[0].column_or_expr == "?"
+    assert exclusion_elements[0].column_or_expr == "?"
 
 
 @pytest.mark.unit

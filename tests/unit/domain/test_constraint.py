@@ -64,6 +64,8 @@ def test_pk_constraint_minimal() -> None:
     assert pk.columns == ("id",)
     assert pk.index_method == "btree"
     assert pk.deferrability is ConstraintDeferrability.NOT_DEFERRABLE
+    assert pk.definition is None
+    assert pk.inherited is False
 
 
 @pytest.mark.unit
@@ -331,9 +333,27 @@ _CONSTRAINT_TA: TypeAdapter[Constraint] = TypeAdapter(Constraint)
 @pytest.mark.parametrize(
     "raw",
     [
-        {"kind": "primary_key", "name": "pk", "columns": ["id"]},
-        {"kind": "unique", "name": "u", "columns": ["email"]},
-        {"kind": "check", "name": "c", "expression": "(x > 0)"},
+        {
+            "kind": "primary_key",
+            "name": "pk",
+            "columns": ["id"],
+            "definition": "PRIMARY KEY (id)",
+            "inherited": True,
+        },
+        {
+            "kind": "unique",
+            "name": "u",
+            "columns": ["email"],
+            "definition": "UNIQUE (email)",
+            "inherited": True,
+        },
+        {
+            "kind": "check",
+            "name": "c",
+            "expression": "(x > 0)",
+            "definition": "CHECK ((x > 0))",
+            "inherited": True,
+        },
         {
             "kind": "foreign_key",
             "name": "fk",
@@ -341,12 +361,16 @@ _CONSTRAINT_TA: TypeAdapter[Constraint] = TypeAdapter(Constraint)
             "ref_namespace": "public",
             "ref_table": "users",
             "ref_columns": ["id"],
+            "definition": "FOREIGN KEY (user_id) REFERENCES public.users (id)",
+            "inherited": True,
         },
         {
             "kind": "exclusion",
             "name": "e",
             "index_method": "gist",
             "elements": [{"column_or_expr": "r", "operator": "&&"}],
+            "definition": "EXCLUDE USING gist (r WITH &&)",
+            "inherited": True,
         },
     ],
 )
@@ -356,6 +380,8 @@ def test_constraint_discriminated_union_round_trip(raw: dict[str, object]) -> No
     dumped = _CONSTRAINT_TA.dump_python(constraint, mode="json")
     restored = _CONSTRAINT_TA.validate_python(dumped)
     assert restored == constraint
+    assert restored.definition == raw["definition"]
+    assert restored.inherited is True
 
 
 @pytest.mark.unit

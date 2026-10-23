@@ -210,7 +210,8 @@ class ConstraintComparator:
             elif (
                 src is not None
                 and tgt is not None
-                and _normalize_constraint(src, source_table_ref, target_table_ref, renames) != tgt
+                and _normalize_constraint(src, source_table_ref, target_table_ref, renames)
+                != _normalize_constraint(tgt, target_table_ref, target_table_ref, None)
             ):
                 # Same name, different definition — replace (DROP old, ADD new).
                 # Drop first so the topo-sorter / SQL emitter see a valid sequence.
@@ -259,24 +260,25 @@ def _normalize_constraint(
     renames: RenameAnnotations | None,
 ) -> Constraint:
     """Return comparison-only copy with explicit structured references mapped."""
-    if renames is None:
-        return constraint
+    # Inherited/local ownership does not alter the constraint's semantic definition.
+    updates: dict[str, object] = {"definition": None, "inherited": False}
+    if renames is not None:
+        local_columns = renames.column_targets(source_table_ref.qname, target_table_ref.qname)
+        if hasattr(constraint, "columns"):
+            updates["columns"] = tuple(local_columns.get(name, name) for name in constraint.columns)
 
-    updates: dict[str, object] = {}
-    local_columns = renames.column_targets(source_table_ref.qname, target_table_ref.qname)
-    if hasattr(constraint, "columns"):
-        updates["columns"] = tuple(local_columns.get(name, name) for name in constraint.columns)
-
-    if constraint.kind == "foreign_key":
-        source_ref = QualifiedName(namespace=constraint.ref_namespace, name=constraint.ref_table)
-        target_ref = renames.map_table(source_ref)
-        updates["ref_namespace"] = target_ref.namespace
-        updates["ref_table"] = target_ref.name
-        referenced_columns = renames.column_targets(source_ref, target_ref)
-        updates["ref_columns"] = tuple(
-            referenced_columns.get(name, name) for name in constraint.ref_columns
-        )
-    return constraint.model_copy(update=updates) if updates else constraint
+        if constraint.kind == "foreign_key":
+            source_ref = QualifiedName(
+                namespace=constraint.ref_namespace, name=constraint.ref_table
+            )
+            target_ref = renames.map_table(source_ref)
+            updates["ref_namespace"] = target_ref.namespace
+            updates["ref_table"] = target_ref.name
+            referenced_columns = renames.column_targets(source_ref, target_ref)
+            updates["ref_columns"] = tuple(
+                referenced_columns.get(name, name) for name in constraint.ref_columns
+            )
+    return constraint.model_copy(update=updates)
 
 
 __all__: list[str] = ["ConstraintComparator"]
