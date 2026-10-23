@@ -4,7 +4,9 @@
 > changes the phase status, finishes a milestone, or adds an ADR. Read me at
 > the start of every chat session.
 
-Last updated: **2026-06-29** — P2-DIFF-01 complete: `Comparator` Protocol + `DiffEngine` visitor dispatcher; 990 unit tests pass, all 4 import-linter contracts KEPT, mypy strict clean.
+Last updated: **2026-10-23** — project state reconciled; P3-RISK-01 and P3-SQL-01 complete.
+
+**Status:** Phase 0 done except P0-CI-03; Phase 1 feature shipped (P1-TEST-02 needs-human, benchmark unmeasured); Phase 2 complete (M2 unit-level); Phase 3a in progress, P3-SQL-02 next; TUI shell/views use mock data.
 
 ---
 
@@ -12,10 +14,10 @@ Last updated: **2026-06-29** — P2-DIFF-01 complete: `Comparator` Protocol + `D
 
 | Field | Value |
 |---|---|
-| Current phase | **Phase 0** — Stabilization |
-| Completed milestones | _none yet_ |
-| Next milestone | **M0** — CI green on empty project |
-| Working branch | `claude/stoic-pascal-LOygS` |
+| Current phase | **Phase 3a** — Migration Generator |
+| Completed milestones | M0 baseline (coverage gate open); M2 reached at unit level; M1 feature shipped with caveat |
+| Next milestone | **M3** — round-trip integration test |
+| Working branch | `main` (4 commits ahead of `origin/main`) |
 | Python version | 3.13 |
 | PostgreSQL target | 18 ↔ 18 (MVP) |
 | Package manager | uv 0.8+ |
@@ -23,14 +25,14 @@ Last updated: **2026-06-29** — P2-DIFF-01 complete: `Comparator` Protocol + `D
 
 ## Active task
 
-Backend track: `P2-DIFF-02..05` (concrete comparators — table, column, index, constraint).
-P2-DIFF-01 (`application/diff/engine.py` — `Comparator` Protocol + `DiffEngine`) is now complete.
-All P2-DOM-01a..f and P2-DIFF-08 are also complete.
+Backend track: **P3-SQL-02** (`application/sql_emit/table_emitter.py`) is next.
+P3-RISK-01 and P3-SQL-01 are complete; remaining P3 tasks and dependencies are in
+`TASK_INDEX.md` and `docs/TASKS.md`.
 
-TUI track unblocked at the shell level by `P4-TUI-01`. Remaining
-`P4-TUI-02..08` are blocked on the Phase 1-3 data they each consume.
+Phase 2 is complete. The TUI shell and seven views run on mock data; wiring them
+to real use cases remains pending.
 
-## Done in current session
+## Selected completed work (history)
 
 - **P2-DIFF-01** — `application/diff/engine.py`: `Comparator` Protocol (`@runtime_checkable`, `kind: ObjectKind` + `compare(source, target) -> Iterable[DeltaBase]`), `DiffEngine` visitor dispatcher (constructed from an `Iterable[Comparator]` registry indexed by kind; duplicate-kind registration raises `DiffError`; `diff(source, target) -> DeltaSet` enumerates objects by kind, pairs by `QualifiedName`, sorts for determinism, dispatches, aggregates). `_fetch_objects_for_kind` covers SCHEMA/EXTENSION/TABLE/INDEX; unknown kinds return `{}` (no error, no deltas). `application/diff/__init__.py` updated to export `Comparator`, `DiffEngine`, `topological_sort`. 40 new unit tests in `test_engine.py`; 990 total pass. All 4 import-linter contracts KEPT. mypy strict clean. P2-DIFF-02..05 now UNBLOCKED.
 
@@ -89,21 +91,23 @@ TUI track unblocked at the shell level by `P4-TUI-01`. Remaining
 
 ## Blockers
 
-- None.
+- P1-TEST-02 remains needs-human (PR #3 was closed; do not recreate without direction).
+- P0-CI-03 coverage gate remains open; P1-INFRA-07 is deferred.
+- M1's 1000-object benchmark is unmeasured.
+- `MigrationWriter` in `domain/ports.py` accepts one SQL string. P3-OUT-01 must change the port; rollback generation needs source state or an explicit irreversible annotation.
+- Four local commits are ahead of `origin/main`; not pushed in this run. Commit `5f34d3f` appeared from concurrent CI work during this run.
 
 ## Known limitations / debt (running list)
 
-- TUI design not yet provided by user → Phase 4 task breakdown is a placeholder
-- Original Claude share-link transcript could not be machine-read (SPA) →
-  user will paste the relevant decisions; until then, this PROJECT_CONTEXT is
-  the source of truth.
+- TUI shell and seven views are mock-backed; real-use-case wiring is incomplete.
+- P1-INFRA-07 multi-connection snapshot remains deferred.
 
 ## UI Design Decisions
 
-_Awaiting user-provided summary. Will populate this section with screen flow,
-key components, and Textual widget choices once the transcript is shared._
+The user-provided design is documented in `docs/ui-design.md`; its reference
+bundle and ZIP remain under `docs/ui-design/`.
 
-Placeholder screen flow (subject to user input):
+Screen flow:
 
 ```
 Connection → Compare → DiffTree → SQLPreview → ApplyConfirm
@@ -128,7 +132,7 @@ See `docs/adr/` for the full set. Numbered list:
 
 ## Session bootstrap checklist (for the next AI engineering team session)
 
-1. `git pull origin claude/stoic-pascal-LOygS`
+1. `git pull origin main`
 2. Read this file (`docs/PROJECT_CONTEXT.md`)
 3. Read `docs/ROADMAP.md` for phase status
 4. Read `docs/TASKS.md` for the task board (single source of truth in-repo)

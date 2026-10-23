@@ -1,5 +1,5 @@
 # TASK_INDEX.md
-_Last updated: 2026-10-22_
+_Last updated: 2026-10-23_
 _Canonical task list lives in `docs/TASKS.md` — this file mirrors the execution queue._
 
 ---
@@ -37,7 +37,7 @@ _Canonical task list lives in `docs/TASKS.md` — this file mirrors the executio
 
 ---
 
-## Phase 1 — Infrastructure (EXECUTION QUEUE)
+## Phase 1 — Infrastructure (done; exceptions listed below)
 
 ### Batch A — DONE ✅
 
@@ -48,10 +48,10 @@ _Canonical task list lives in `docs/TASKS.md` — this file mirrors the executio
 [x] P1-INFRA-04  catalog/extensions.sql + schemas
 ```
 
-### Batch A2 — unblocked
+### Batch A2 — DONE ✅
 
 ```
-[ ] P1-TEST-01   session-scoped pg18 container fixture   ← dispatch now
+[x] P1-TEST-01   session-scoped pg18 container fixture
 ```
 
 ### Batch B — DONE ✅
@@ -78,7 +78,7 @@ Status key: [x] done (merged to main) · [H] needs-human.
 
 ---
 
-## Phase 2 — Diff Engine (EXECUTION QUEUE)
+## Phase 2 — Diff Engine (done)
 
 Decomposed from docs/TASKS.md P2-* (M2 gate). Each unit ≤ ~3 files + one testable
 done-condition. Clean Architecture per ADR-0005: deltas live in `domain/`, the
@@ -99,43 +99,48 @@ per-type comparators per ADR-0006; explicit-annotation renames per ADR-0007.
 |---|---|---|---|---|---|---|
 | P2-DOM-01a | `domain/delta/` package: shared `DeltaBase`, `DeltaOp`/discriminator, `DeltaSet` container | done | P1-DOM-07, P1-INFRA-05 | src/pgschemadiff/domain/delta/__init__.py, src/pgschemadiff/domain/delta/base.py, tests/unit/domain/delta/test_base.py | 1 | high | **MERGED to main via PR #4** (rebase, 2026-06-23); reviewed + RF-A |
 | P2-DOM-01b | Table-level deltas (Create/Drop/RenameTable, partition/owner attrs) | done | P2-DOM-01a | src/pgschemadiff/domain/delta/table.py, tests/unit/domain/delta/test_table.py | 0 | high |
-| P2-DOM-01c | Column deltas (Add/Drop/AlterType/SetDefault/Nullability/RenameColumn) | done | P2-DOM-01a | src/pgschemadiff/domain/delta/column.py, tests/unit/domain/delta/test_column.py | 1 | high | **INTEGRATED on `claude/rebase-merge-main-u55dvs` (2026-06-29) — PR #6 conflict resolved via 3-way merge; column code applied cleanly; full gate green. Pending land on main.** |
-| P2-DOM-01d | Index deltas (Create/Drop/Replace, method/predicate/include changes) | done | P2-DOM-01a, P2-DOM-01c | src/pgschemadiff/domain/delta/index.py, tests/unit/domain/delta/test_index.py | 0 | high | on active branch at `30fc278` |
-| P2-DOM-01e | Constraint deltas incl. FK (Add/Drop PK/Unique/Check/FK/Exclusion) | done | P2-DOM-01a, P2-DOM-01d | src/pgschemadiff/domain/delta/constraint.py, tests/unit/domain/delta/test_constraint.py | 0 | high | on active branch at `30fc278` |
-| P2-DOM-01f | Schema + extension deltas (Create/Drop schema, Create/Drop/Alter extension) **+ retype `DeltaSet.deltas` to the concrete `Delta` discriminated-union alias** (RF-A `TODO(P2-DOM-01f)` in delta/base.py — closes the lossy-round-trip gap) | done | P2-DOM-01a, P2-DOM-01e | src/pgschemadiff/domain/delta/schema.py, src/pgschemadiff/domain/delta/base.py, tests/unit/domain/delta/test_schema.py | 0 | high | on active branch at `30fc278` |
-| P2-DIFF-01 | `application/diff/engine.py` — visitor dispatcher over `ObjectRef.kind` → comparators | done | P2-DOM-01b, P2-DOM-01c, P2-DOM-01d, P2-DOM-01e, P2-DOM-01f | src/pgschemadiff/application/diff/engine.py, src/pgschemadiff/application/diff/__init__.py, tests/unit/application/diff/test_engine.py | 0 | high | on active branch at `30fc278` |
-| P2-DIFF-02 | `comparators/table.py` — table-level diff (create/drop/rename/attrs), delegates cols/idx/constraints | done | P2-DIFF-01 | src/pgschemadiff/application/diff/comparators/table.py, tests/unit/application/diff/comparators/test_table.py | 0 | high | on active branch at `30fc278` |
+| P2-DOM-01c | Column deltas (Add/Drop/AlterType/SetDefault/Nullability/RenameColumn) | done | P2-DOM-01a | src/pgschemadiff/domain/delta/column.py, tests/unit/domain/delta/test_column.py | 1 | high | on main; integrated 2026-06-29 |
+| P2-DOM-01d | Index deltas (Create/Drop/Replace, method/predicate/include changes) | done | P2-DOM-01a, P2-DOM-01c | src/pgschemadiff/domain/delta/index.py, tests/unit/domain/delta/test_index.py | 0 | high | on main |
+| P2-DOM-01e | Constraint deltas incl. FK (Add/Drop PK/Unique/Check/FK/Exclusion) | done | P2-DOM-01a, P2-DOM-01d | src/pgschemadiff/domain/delta/constraint.py, tests/unit/domain/delta/test_constraint.py | 0 | high | on main |
+| P2-DOM-01f | Schema + extension deltas (Create/Drop schema, Create/Drop/Alter extension) **+ retype `DeltaSet.deltas` to the concrete `Delta` discriminated-union alias** (RF-A `TODO(P2-DOM-01f)` in delta/base.py — closes the lossy-round-trip gap) | done | P2-DOM-01a, P2-DOM-01e | src/pgschemadiff/domain/delta/schema.py, src/pgschemadiff/domain/delta/base.py, tests/unit/domain/delta/test_schema.py | 0 | high | on main |
+| P2-DIFF-01 | `application/diff/engine.py` — visitor dispatcher over `ObjectRef.kind` → comparators | done | P2-DOM-01b, P2-DOM-01c, P2-DOM-01d, P2-DOM-01e, P2-DOM-01f | src/pgschemadiff/application/diff/engine.py, src/pgschemadiff/application/diff/__init__.py, tests/unit/application/diff/test_engine.py | 0 | high | on main |
+| P2-DIFF-02 | `comparators/table.py` — table-level diff (create/drop/rename/attrs), delegates cols/idx/constraints | done | P2-DIFF-01 | src/pgschemadiff/application/diff/comparators/table.py, tests/unit/application/diff/comparators/test_table.py | 0 | high | on main |
 | P2-DIFF-03 | `comparators/column.py` — per-column diff (add/drop/type/default/nullability) | done | P2-DIFF-02 | src/pgschemadiff/application/diff/comparators/column.py, tests/unit/application/diff/comparators/test_column.py | 1 | high | commit `709467e`; full unit suite: 1,135 passed |
-| P2-DIFF-04 | `comparators/index.py` — index diff (create/drop/replace on method/predicate/include) | done | P2-DIFF-01 | src/pgschemadiff/application/diff/comparators/index.py, tests/unit/application/diff/comparators/test_index.py | 0 | high | on active branch at `30fc278` |
-| P2-DIFF-05 | `comparators/constraint.py` — constraint diff incl. FK (add/drop) | done | P2-DIFF-01 | src/pgschemadiff/application/diff/comparators/constraint.py, tests/unit/application/diff/comparators/test_constraint.py | 0 | high | on active branch at `30fc278` |
+| P2-DIFF-04 | `comparators/index.py` — index diff (create/drop/replace on method/predicate/include) | done | P2-DIFF-01 | src/pgschemadiff/application/diff/comparators/index.py, tests/unit/application/diff/comparators/test_index.py | 0 | high | on main |
+| P2-DIFF-05 | `comparators/constraint.py` — constraint diff incl. FK (add/drop) | done | P2-DIFF-01 | src/pgschemadiff/application/diff/comparators/constraint.py, tests/unit/application/diff/comparators/test_constraint.py | 0 | high | on main |
 | P2-DIFF-06 | Rename annotation loader (YAML/TOML) feeding the engine (ADR-0007) | done | P2-DIFF-03 | src/pgschemadiff/application/diff/renames.py, src/pgschemadiff/infrastructure/config/rename_loader.py, tests/unit/application/diff/test_renames.py | 1 | med | explicit table/column mappings integrated; dependent references normalized without SQL rewriting; 1,173 tests, Ruff, formatter, mypy, and build pass; CLI deferred to P2-CLI-01 |
 | P2-DIFF-07 | Ignore-rules system (object/attr exclusion filter on DeltaSet) | done | P2-DIFF-01 | src/pgschemadiff/application/diff/ignore.py, src/pgschemadiff/application/diff/engine.py, src/pgschemadiff/application/diff/__init__.py, tests/unit/application/diff/test_ignore.py, tests/unit/application/diff/test_engine.py | 0 | med | Exact object/attribute filtering integrated into `DiffEngine.diff`; 1,227 non-integration tests, Ruff, format, and full mypy pass; Docker integration unavailable locally |
 | P2-DIFF-08 | `topo_sort.py` — Kahn ordering + cycle detection → `CyclicDependencyError` | done | P2-DOM-01a | src/pgschemadiff/application/diff/topo_sort.py, tests/unit/application/diff/test_topo_sort.py | 1 | high | **MERGED to main (rebase, human, 2026-06-26) via PR #7 — main now `27f63d7`, CI green.** |
-| TD-TOPO-01 | Tech-debt (reviewer N1–N5): refactor topo_sort `id()`-keyed O(n·m) → hashable-node dict O(n+m); test-hardening (assert non-cycle node absent from cycle msg; Hypothesis DAG property test); doc fix re removed `DeltaOp.NO_CHANGE` | done | P2-DIFF-08 | src/pgschemadiff/application/diff/topo_sort.py, tests/unit/application/diff/test_topo_sort.py, docs/PROJECT_CONTEXT.md, pyproject.toml | 1 | low | **INTEGRATED on `claude/rebase-merge-main-u55dvs` (2026-06-29) — PR #8 merged cleanly into the integration branch; gate green. Pending land on main.** |
+| TD-TOPO-01 | Tech-debt (reviewer N1–N5): refactor topo_sort `id()`-keyed O(n·m) → hashable-node dict O(n+m); test-hardening (assert non-cycle node absent from cycle msg; Hypothesis DAG property test); doc fix re removed `DeltaOp.NO_CHANGE` | done | P2-DIFF-08 | src/pgschemadiff/application/diff/topo_sort.py, tests/unit/application/diff/test_topo_sort.py, docs/PROJECT_CONTEXT.md, pyproject.toml | 1 | low | on main |
 | P2-TEST-01 | Per-comparator unit tests (edge cases beyond per-task tests) | done | P2-DIFF-02, P2-DIFF-03, P2-DIFF-04, P2-DIFF-05 | tests/unit/application/diff/comparators/test_comparators_edge.py | 0 | high | Added column ordering/type+collation, index nested-key, and constraint-field edge cases; 1,230 unit tests pass; Ruff, format, mypy, and import-linter pass |
 | P2-TEST-02 | Hypothesis idempotent-diff + ordering property tests (max_examples=500) | done | P2-DIFF-01, P2-DIFF-02, P2-DIFF-03, P2-DIFF-04, P2-DIFF-05, P2-DIFF-08 | tests/unit/application/diff/test_diff_properties.py | 0 | high | Added 500-example properties for deep-copy self-diff and order stability under reversed schema/table/column collections; 1,232 unit tests + 6 snapshots, Ruff, format, mypy, and import-linter pass |
-| P2-CLI-01 | `pgsd diff <src> <tgt>` — emit ordered DeltaSet JSON (M2 gate) | done | P2-DIFF-01, P2-DIFF-02, P2-DIFF-03, P2-DIFF-04, P2-DIFF-05, P2-DIFF-06, P2-DIFF-07, P2-DIFF-08 | src/pgschemadiff/infrastructure/postgres/catalog/schemas.sql, src/pgschemadiff/infrastructure/postgres/catalog/extensions.sql, src/pgschemadiff/infrastructure/postgres/inspector.py, tests/unit/infrastructure/postgres/test_inspector.py, tests/unit/infrastructure/postgres/test_catalog_sql.py, tests/unit/infrastructure/postgres/__snapshots__/test_catalog_sql.ambr, src/pgschemadiff/application/diff/comparators/schema.py, src/pgschemadiff/application/diff/comparators/extension.py, src/pgschemadiff/application/diff/comparators/__init__.py, tests/unit/application/diff/comparators/test_schema.py, tests/unit/application/diff/comparators/test_extension.py, src/pgschemadiff/application/diff/dependencies.py, tests/unit/application/diff/test_dependencies.py, src/pgschemadiff/application/diff/compare_schemas.py, tests/unit/application/diff/test_compare_schemas.py, src/pgschemadiff/presentation/cli/commands/diff.py, src/pgschemadiff/presentation/cli/main.py, src/pgschemadiff/infrastructure/postgres/pool.py, tests/unit/presentation/__init__.py, tests/unit/presentation/cli/__init__.py, tests/unit/presentation/cli/test_diff.py, tests/unit/infrastructure/postgres/test_pool.py | 1 | med | 1,218 unit tests + 6 snapshots; Ruff check/format, mypy, and import-linter pass; Docker integration not run (Docker CLI unavailable) |
+| P2-CLI-01 | `pgsd diff <src> <tgt>` — emit ordered DeltaSet JSON (M2 gate) | done | P2-DIFF-01, P2-DIFF-02, P2-DIFF-03, P2-DIFF-04, P2-DIFF-05, P2-DIFF-06, P2-DIFF-07, P2-DIFF-08 | src/pgschemadiff/infrastructure/postgres/catalog/schemas.sql, src/pgschemadiff/infrastructure/postgres/catalog/extensions.sql, src/pgschemadiff/infrastructure/postgres/inspector.py, tests/unit/infrastructure/postgres/test_inspector.py, tests/unit/infrastructure/postgres/test_catalog_sql.py, src/pgschemadiff/application/diff/comparators/schema.py, src/pgschemadiff/application/diff/comparators/extension.py, src/pgschemadiff/application/diff/dependencies.py, src/pgschemadiff/application/diff/compare_schemas.py, src/pgschemadiff/presentation/cli/commands/diff.py, src/pgschemadiff/presentation/cli/main.py, src/pgschemadiff/infrastructure/postgres/pool.py | 1 | med | on main; 1,338 unit tests pass; Docker integration not run locally |
 ```
-[x] P2-DIFF-01..08 implemented on the active branch.
+[x] P2-DIFF-01..08 implemented on main.
 [x] P2-DIFF-06 done; explicit YAML/TOML annotations integrated; CLI flag deferred to P2-CLI-01.
 [x] P2-DIFF-07 done; exact object/attribute ignore rules integrated into `DiffEngine.diff`.
 ```
 
-## Phase 3 — Migration Generator (blocked on Phase 2)
+## Phase 3 — Migration Generator (in progress)
 
-```
-[ ] P3-SQL-01..05   emitters (table, column, index, constraint)
-[ ] P3-RISK-01      risk classifier (5 levels)
-[ ] P3-TX-01        transaction splitter
-[ ] P3-OUT-01       multi-file migration writer
-[ ] P3-APPLY-01     postgres applier
-[ ] P3-CLI-01       pgsd generate + pgsd apply
-[ ] P3-TEST-01      round-trip integration test (M3 gate)
-[ ] P3-TEST-02      emitter snapshot tests
-```
+| id | title | status | deps | files | attempts | priority |
+|---|---|---|---|---|---:|---|
+| P3-RISK-01 | Five-level risk classifier | done | P2-DOM-01 | src/pgschemadiff/application/sql_emit/risk.py | — | high |
+| P3-SQL-01 | Exact-type SQL emitter dispatcher | done | P2-DOM-01 | src/pgschemadiff/application/sql_emit/emitter.py | — | high |
+| P3-SQL-02 | Table emitter | todo | P3-SQL-01 | src/pgschemadiff/application/sql_emit/table_emitter.py | 0 | high |
+| P3-SQL-03 | Column emitter | todo | P3-SQL-01 | src/pgschemadiff/application/sql_emit/column_emitter.py | 0 | high |
+| P3-SQL-04 | Index emitter (CONCURRENTLY default) | todo | P3-SQL-01 | src/pgschemadiff/application/sql_emit/index_emitter.py | 0 | high |
+| P3-SQL-05 | Constraint emitter (NOT VALID + VALIDATE) | todo | P3-SQL-01 | src/pgschemadiff/application/sql_emit/constraint_emitter.py | 0 | high |
+| P3-SQL-06 | Schema/extension emitter + `default_handlers()` registry | todo | P3-SQL-01 | src/pgschemadiff/application/sql_emit/schema_emitter.py, src/pgschemadiff/application/sql_emit/registry.py | 0 | high |
+| P3-TX-01 | Transaction unit splitter | todo | P3-SQL-04, P3-RISK-01 | — | 0 | high |
+| P3-OUT-01 | Multi-file migration writer; resolve rollback source-state / irreversible annotation and replace single-string `MigrationWriter` contract | todo | P3-SQL-01..05, P3-TX-01 | src/pgschemadiff/domain/ports.py | 0 | high |
+| P3-APPLY-01 | PostgreSQL applier | todo | P3-OUT-01 | src/pgschemadiff/infrastructure/postgres/applier.py | 0 | high |
+| P3-CLI-01 | `pgsd generate` + `pgsd apply` | todo | P3-OUT-01, P3-APPLY-01 | — | 0 | high |
+| P3-TEST-01 | Round-trip integration test (M3 gate) | todo | P3-APPLY-01 | — | 0 | high |
+| P3-TEST-02 | Emitter snapshot tests | todo | P3-SQL-02..05 | — | 0 | high |
 
 ## Phase 4 — TUI
-P4-UX-01 and P4-TUI-01 DONE (TUI shell). **P4-TUI-02..08 DONE** — all 7 views landed on main via `e4f0367` (2026-06-24), implemented OUTSIDE this orchestrator session (external session/human). Currently mock-data-backed (`_mock.py`); wiring to real `application/` use cases tracked with Phase 2/3 progress.
+P4-UX-01 and P4-TUI-01 DONE. The shell and all seven views are implemented on mock data (`presentation/tui/_mock.py`); P4-TUI-02..08 real-use-case wiring remains TODO.
 
 ---
 
@@ -143,7 +148,7 @@ P4-UX-01 and P4-TUI-01 DONE (TUI shell). **P4-TUI-02..08 DONE** — all 7 views 
 
 | Gate | Condition | Status |
 |---|---|---|
-| M0 | CI green; layered arch enforced | ✅ (CI green on `main`) |
-| M1 | `pgsd inspect` dumps schema JSON | ✅ feature MERGED to main via PR #2 (2026-06-22). ⚠️ full ROADMAP M1 exit gate (integration test suite green vs pg18 + 1000-obj <2s benchmark) NOT met — P1-TEST-02 PR #3 closed by human (needs-human). |
-| M2 | `pgsd diff` emits typed DeltaSet | ✅ P2-CLI-01 implemented; all local gates pass (1,218 unit tests + static checks); Docker integration not run (Docker CLI unavailable). |
-| M3 | round-trip integration test green | ❌ |
+| M0 | CI green; layered arch enforced | Phase 0 done except open P0-CI-03 coverage gate; CI fixes committed locally as `5f34d3f`, remote CI not rechecked |
+| M1 | `pgsd inspect` dumps schema JSON | Feature shipped; exit caveat: P1-TEST-02 needs-human and 1000-object benchmark unmeasured |
+| M2 | `pgsd diff` emits typed DeltaSet | ✅ Phase 2 complete; 1,338 unit tests pass; Docker integration not run locally |
+| M3 | round-trip integration test green | In progress; P3-RISK-01 and P3-SQL-01 done, next P3-SQL-02 |

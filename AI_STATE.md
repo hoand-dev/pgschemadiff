@@ -1,7 +1,7 @@
 # AI_STATE.md
-_Last updated: 2026-06-29_
+_Last updated: 2026-10-23_
 
-RUN_ID: 2026-06-29-2
+RUN_ID: 2026-10-23-1
 STATE: ACTIVE
 STALL_COUNTER: 0
 
@@ -10,61 +10,62 @@ STALL_COUNTER: 0
 Goal: inspect two Postgres DBs, show schema diff, generate safe migration SQL.
 
 ## Active Branch
-`claude/progress-check-kspf8m` — current working branch. All P2-DOM-01a..f are on this branch; P2-DIFF-08 (topo_sort) is on this branch; P2-DIFF-01 (diff engine) is now also on this branch.
+`main` — local branch is 4 commits ahead of `origin/main`: `fc46210`, `a1c9596`, `2da7603` (P3-SQL-01) and `5f34d3f` (CI fix). Not pushed.
 
 ---
 
 ## Current Project Phase
-**Phase 2 — Diff Engine — in progress.**
-- Phase 1 ✅ (M1 feature complete).
-- Delta foundation P2-DOM-01a..f ✅ ALL DONE on this branch.
-- P2-DIFF-08 (topo_sort Kahn O(n+m)) ✅ DONE on this branch.
-- P2-DIFF-01 (DiffEngine + Comparator Protocol) ✅ DONE on this branch (this run).
-- Next: P2-DIFF-02..05 (concrete comparators for table/column/index/constraint) — all UNBLOCKED.
+**Phase 3a — Migration Generator — in progress.**
+- Phase 0 done except open P0-CI-03 coverage gate.
+- Phase 1 domain/infrastructure done; `pgsd inspect` shipped. M1 caveat: P1-TEST-02 needs-human; 1000-object benchmark not measured; P1-INFRA-07 deferred.
+- Phase 2 complete: `pgsd diff`, comparators, rename/ignore rules, dependencies, topo-sort, and tests done. M2 reached at unit level; Docker integration not run locally.
+- P3-RISK-01 and P3-SQL-01 done. Next: P3-SQL-02 table emitter.
+- Phase 4 TUI shell and seven views run on mock data; not wired to real use cases.
 
 ---
 
 ## CI / PR Status
-- **main**: previous state; this branch advances main with all Phase 2 diff work.
-- P2-DOM-01a..f: DONE on branch.
-- P2-DIFF-08 (TD-TOPO-01): DONE on branch.
-- P2-DIFF-01: DONE on branch (this session).
-- P1-TEST-02: `needs-human` (PR #3 human-closed; do NOT recreate).
+- `main` is 4 commits ahead of `origin/main` (`fc46210`, `a1c9596`, `2da7603`, `5f34d3f`); do not push in this run.
+- `5f34d3f` (step 1 CI fix): integration job uses Testcontainers only and fails closed; the ANSI-colored `--help` unit assertion is fixed. The unit job on `origin/main` was red before it; remote CI re-check pending push.
+- Local gate: ruff, ruff format, mypy strict, import-linter (4/4 KEPT), and 1,338 unit tests pass. Docker integration not run locally.
+- P1-TEST-02 remains `needs-human` (PR #3 human-closed; do NOT recreate).
 
 ### Local gate status (this run, `uv run`)
-`ruff check .` ✅ · `ruff format --check .` ✅ (99 files) · `mypy src/ tests/` ✅ (100 files, 0 issues) · `lint-imports` ✅ (4/4 contracts KEPT) · `pytest tests/unit` ✅ (990 passed, 6 snapshots). Integration tests require Docker → not run locally (testcontainers not installed in this environment).
+`ruff check .` ✅ · `ruff format --check .` ✅ · `mypy src/ tests/` ✅ · `lint-imports` ✅ (4/4 contracts KEPT) · `pytest tests/unit` ✅ (1,338 passed). Docker integration not run locally.
 
 ---
 
 ## Execution Queue
-1. **P2-DIFF-02** — `comparators/table.py` — table-level comparator. Unblocked by P2-DIFF-01.
-2. **P2-DIFF-03** — `comparators/column.py` — column-level comparator. Depends on P2-DIFF-02.
-3. **P2-DIFF-04** — `comparators/index.py` — index-level comparator. Unblocked by P2-DIFF-01.
-4. **P2-DIFF-05** — `comparators/constraint.py` — constraint comparator (incl. FK). Unblocked by P2-DIFF-01.
-5. **P2-DIFF-02 and P2-DIFF-04/05** can run in parallel (B3 batch per TASKS.md).
-6. **P0-CI-03** — coverage gate. low priority, held.  **P1-INFRA-07** — multi-conn snapshot. deferred.
+0. Emitter prerequisites per `docs/specs/2026-10-23-p3-sql-02-06-ddl-emitters-design.md` slices 1–5: preserve raw index/constraint definitions + ownership/inherited metadata in inspector/domain, new-table `AddConstraint` deltas, dependency edges (FK cycles, partition parent, constraint replacement), `quoting.py`.
+1. **P3-SQL-02** — table emitter (spec slice 6).
+2. **P3-SQL-03** — column emitter; depends on P3-SQL-01.
+3. **P3-SQL-04** — index emitter; depends on P3-SQL-01.
+4. **P3-SQL-05** — constraint emitter; depends on P3-SQL-01.
+5. **P3-TX-01** — transaction splitter; depends on P3-SQL-04 and P3-RISK-01.
+6. **P3-OUT-01** — multi-file writer; depends on P3-SQL-01..05 and P3-TX-01.
+7. **P3-APPLY-01**, then **P3-CLI-01** and **P3-TEST-01**; P3-TEST-02 follows P3-SQL-02..05.
 
 ## Next Actions
-- Dispatch P2-DIFF-02 and P2-DIFF-04/P2-DIFF-05 in parallel (they are independent).
-- P2-DIFF-03 depends on P2-DIFF-02 (column comparator needs the table context).
+- Start spec slice 1 (preserve raw index definitions) and slice 5 (`quoting.py`) — independent.
+- Resolve the `down.sql` contract in P3-OUT-01: rollback needs source state or an explicit irreversible annotation; `MigrationWriter` currently accepts one SQL string.
 
 ## Ready To Merge
-- `claude/progress-check-kspf8m` — all gate checks green on this branch (990 unit tests, 4/4 import-linter contracts, mypy strict).
+- None.
 
 ## Needs Human
-- [ ] P1-TEST-02 | Inspector integration-tests PR (#3) closed without merge by human. | options: (A) re-approach & retry / (B) defer & proceed Phase 2 / (C) leave M1 exit gate intentionally unmet. **Will NOT recreate without your call.** | since: 2026-06-22-1
-- [ ] repo-branch-protection | GitHub branch protection not confirmed: disallow merge commits, require linear history (one-time human action). | since: 2026-06-20-1  *(non-blocking)*
+- [ ] P1-TEST-02 | Inspector integration tests: PR #3 was closed by human; do not recreate without direction. | options: authorize a new attempt / leave M1 caveat open | since: 2026-06-22
+- [ ] repo-branch-protection | GitHub branch protection not confirmed (linear history / merge-commit policy). | options: confirm settings / leave unconfirmed | since: 2026-06-20 (non-blocking)
+- [ ] repo-file-acl | Tracked files are owned by another SID; the working account has `RX,W` only, so delete/rename fail (`git mv`, `git checkout`, `uv sync` on `.venv`). Blocks archiving `PROGRESS.md`, `REVIEW.md`, `docs/migration.md` into `docs/archive/`. | options: fix ownership/ACL / keep files in place | since: 2026-10-23-1
+- [ ] push-local-commits | `main` is 4 commits ahead of `origin/main` (`fc46210`, `a1c9596`, `2da7603`, `5f34d3f`); not pushed per task instructions. | options: authorize push / keep local | since: 2026-10-23-1
 
 ## Resolved
-- **P2-DIFF-01** — DONE 2026-06-29 (this run): `Comparator` Protocol + `DiffEngine` dispatcher. 40 new unit tests; 990 total pass. All 4 import-linter contracts KEPT. mypy strict clean.
-- **P2-DOM-01d/e/f** — DONE: index/constraint/schema+extension deltas + global `Delta` union + `DeltaSet` retypes. All on this branch.
-- **PR-7-merge / P2-DIFF-08** — DONE: merged. P2-DIFF-08 topo_sort on main.
-- **PR-6-integration / P2-DOM-01c** — DONE: column deltas on this branch.
-- **PR-5-merge / PR-4-merge** — DONE: P2-DOM-01a/01b on main.
-- **phase2-go-ahead** — confirmed.
-- **orchestrator-fragmentation** — resolved: single authoritative branch `claude/progress-check-kspf8m`.
+- Phase 1 complete; `pgsd inspect` shipped. P1-TEST-02 remains needs-human.
+- Phase 2 complete; `pgsd diff` shipped and M2 reached at unit level.
+- P3-RISK-01 and P3-SQL-01 complete on `main`.
 
 ## Key Architectural Decisions
+- **2026-10-23 P3-SQL-01:** SQL emission uses exact-type dispatch; `SqlStatement` carries forward SQL, transactional metadata, and originating `Delta`. Emit forward SQL only; do not fabricate rollback SQL. Open contract for P3-OUT-01: `down.sql` needs source state or an explicit irreversible annotation, and `MigrationWriter` must change from its current single-SQL-string port.
+- **2026-10-23 P3-RISK-01:** Risk is an assessment separate from `Delta`; unknown exact delta subclasses fail closed as `BLOCKED`.
 - **2026-06-29 P2-DIFF-01 (this run):** `Comparator` Protocol is `@runtime_checkable`; `kind: ObjectKind` class attribute + `compare(source, target) -> Iterable[DeltaBase]`. `DiffEngine` constructor indexed by `kind`; duplicate raises `DiffError`. `diff()` enumerates objects via `_fetch_objects_for_kind` (covers SCHEMA/EXTENSION/TABLE/INDEX; unknown kinds return `{}`), pairs by `QualifiedName`, sorts by `(namespace, name)` for determinism, dispatches, aggregates into `DeltaSet`. This is NOT a topo-sort — that is downstream.
 - **2026-06-27 TD-TOPO-01:** `topo_sort` refactored from `id()`-keyed O(n·m) to direct hashable-node dicts → O(n+m); public signature unchanged.
 - **2026-06-25 P2-DIFF-08 topo_sort:** generic pure application-layer Kahn sort; NO `domain.delta` coupling; deterministic smallest-by-`key` first; raises `CyclicDependencyError`.
@@ -72,4 +73,5 @@ Goal: inspect two Postgres DBs, show schema diff, generate safe migration SQL.
 - **2026-06-23 P2-DOM-01a:** `DeltaBase.sort_key` folds parent identity (total order); `DeltaSet.deltas = tuple[Delta,...]` since P2-DOM-01f.
 
 ## Run-History Note
+- 2026-10-23 (RUN 2026-10-23-1): Reconciled project docs and state. CI fixed in `5f34d3f`. Archive and plan rename moves are blocked by Windows ACLs; no push or commit performed by this session. Next: P3-SQL-02.
 - 2026-06-29 (RUN 2026-06-29-2): Implemented P2-DIFF-01 (`Comparator` Protocol + `DiffEngine`). Branch `claude/progress-check-kspf8m`. AI_STATE.md reconciled: old stale reference to `claude/rebase-merge-main-u55dvs` removed; P2-DOM-01a..f all confirmed on current branch; P2-DIFF-08/TD-TOPO-01 confirmed done; P2-DIFF-01 now done. 990 unit tests pass.

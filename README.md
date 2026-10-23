@@ -2,7 +2,7 @@
 
 > Compare PostgreSQL schemas, generate safe migrations, with an interactive TUI and a scriptable CLI.
 
-**Status:** Pre-alpha. Phase 0 baseline + first slice of Phase 1 (domain identity) + Phase 4 TUI shell. See [`docs/ROADMAP.md`](docs/ROADMAP.md) and [`docs/PROJECT_CONTEXT.md`](docs/PROJECT_CONTEXT.md).
+**Status:** Phase 0 done except P0-CI-03; Phase 1 feature shipped (P1-TEST-02 needs-human, benchmark unmeasured); Phase 2 complete (M2 unit-level); Phase 3a in progress, P3-SQL-02 next; TUI shell/views use mock data. See [`docs/ROADMAP.md`](docs/ROADMAP.md) and [`docs/PROJECT_CONTEXT.md`](docs/PROJECT_CONTEXT.md).
 
 ## What it does
 
@@ -16,7 +16,7 @@
 
 ## Quickstart
 
-> The project is still being bootstrapped. The commands below describe the intended UX once Phase 1+ ships.
+> `pgsd inspect` and `pgsd diff` are implemented. `pgsd generate` and `pgsd apply` are planned Phase 3 work.
 
 ```bash
 # install (Phase 5)

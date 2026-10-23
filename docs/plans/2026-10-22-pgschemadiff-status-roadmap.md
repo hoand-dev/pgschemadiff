@@ -58,7 +58,7 @@ Dự án đã có nền tảng domain, PostgreSQL introspection, typed deltas, t
 - `MigrationWriter` trong `domain/ports.py` nhận một `migration_sql: str`, chưa khớp ADR-0008 yêu cầu `up.sql`, `down.sql`, `manifest.json`, `deltas.json`, `README.md` và transaction units. Chốt contract trước khi viết filesystem adapter.
 - ADR-0009 yêu cầu risk theo delta và default chặn `DESTRUCTIVE`/`BLOCKED`; cần quyết định risk nằm trong Delta hay assessment/manifest trước khi thiết kế JSON/CLI.
 - Prototype modules còn nằm cạnh TUI hiện tại; Ruff/mypy loại một số module cũ, pytest bỏ `tests/test_screens.py`. Chọn canonical code/test path; không xóa file khi chưa xác nhận còn được dùng.
-- Docs `docs/migration.md` mô tả package chưa tồn tại và entry point cũ, không còn đúng.
+- Hướng dẫn package cũ đã obsolete; `docs/architecture.md` mô tả cấu trúc hiện tại.
 - Coverage được upload nhưng chưa enforce threshold. Inspector đang dùng một connection REPEATABLE READ; giữ cách này đến khi benchmark chứng minh cần multi-connection snapshot theo ADR-0012.
 - Remote branch chưa có PR mở và còn 5 commits so với main. Merge là human gate theo `ORCHESTRATOR.md`; không auto-merge.
 
@@ -281,7 +281,7 @@ Frozen domain models, phân tầng rõ, import-linter, mypy strict, lossless del
 ### Refactor đề xuất
 
 1. Đồng bộ `AI_STATE.md`, `TASK_INDEX.md`, `docs/TASKS.md`, `docs/PROJECT_CONTEXT.md`, `docs/ROADMAP.md`; thống nhất task catalog và execution queue theo `ORCHESTRATOR.md`.
-2. Cập nhật/đánh dấu obsolete `docs/migration.md`; package và entry point cũ không còn đúng.
+2. Đánh dấu hướng dẫn package cũ obsolete; tham chiếu `docs/architecture.md` làm tài liệu hiện hành.
 3. Rà soát prototype modules trong `src/pgschemadiff/presentation/app.py`, `presentation/screens/`, `presentation/widgets/`, `domain/models/`, `infrastructure/config/`; quyết định giữ làm reference, thay thế hay xóa sau khi xác minh.
 4. Rà soát pytest ignore/exclusion trong `pyproject.toml`, nhất là `tests/test_screens.py` và module bị loại khỏi Ruff/mypy. Không xóa test trước khi biết behavior nào đang được cover.
 

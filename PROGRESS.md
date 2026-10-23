@@ -37,7 +37,7 @@ Tracks implementation status by phase. Updated as work lands.
 ## Phase 1 — Package reorganisation
 
 > Goal: make the project installable and runnable as a proper Python package.
-> See [`docs/migration.md`](docs/migration.md) for step-by-step instructions.
+> See [`docs/architecture.md`](docs/architecture.md) for the current package structure.
 
 | Task | Status | Notes |
 |------|--------|-------|

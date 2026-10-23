@@ -74,23 +74,25 @@
 | [x] | P2-DIFF-03 | `comparators/column.py` | backend-engineer | P0 | P2-DIFF-02 | L |
 | [x] | P2-DIFF-04 | `comparators/index.py` (Create/Drop/Replace) | backend-engineer | P0 | P2-DIFF-01 | M |
 | [x] | P2-DIFF-05 | `comparators/constraint.py` (incl. FK; drop+add on change) | backend-engineer | P0 | P2-DIFF-01 | M |
-| [ ] | P2-DIFF-06 | Rename annotation loader (YAML/TOML) | backend-engineer | P1 | P2-DIFF-03 | M |
-| [ ] | P2-DIFF-07 | Ignore-rules system | backend-engineer | P1 | P2-DIFF-01 | M |
+| [x] | P2-DIFF-06 | Rename annotation loader (YAML/TOML) | backend-engineer | P1 | P2-DIFF-03 | M |
+| [x] | P2-DIFF-07 | Ignore-rules system | backend-engineer | P1 | P2-DIFF-01 | M |
 | [x] | P2-DIFF-08 | `topo_sort.py` — Kahn + cycle detect | backend-engineer | P0 | P2-DOM-01 | M |
 | [x] | P2-TEST-01 | Per-comparator unit tests | qa-engineer | P0 | P2-DIFF-02..05 | L |
 | [x] | P2-TEST-02 | Hypothesis property tests | qa-engineer | P0 | P2-DIFF-01..05 | L |
-| [ ] | P2-CLI-01 | `pgsd diff` command | backend-engineer | P1 | P2-DIFF-01..08 | S |
+| [x] | P2-CLI-01 | `pgsd diff` command | backend-engineer | P1 | P2-DIFF-01..08 | S |
 
 ## Phase 3a — Migration Generator (MVP-A)
 
 | Status | ID | Title | Owner | Pri | Deps | Cx |
 |---|---|---|---|---|---|---|
-| [ ] | P3-SQL-01 | `sql_emit/emitter.py` — dispatcher | backend-engineer | P0 | P2-DOM-01 | M |
+| [x] | P3-SQL-01 | `sql_emit/emitter.py` — dispatcher | backend-engineer | P0 | P2-DOM-01 | M |
 | [ ] | P3-SQL-02 | `table_emitter.py` | backend-engineer | P0 | P3-SQL-01 | L |
 | [ ] | P3-SQL-03 | `column_emitter.py` | backend-engineer | P0 | P3-SQL-01 | L |
 | [ ] | P3-SQL-04 | `index_emitter.py` (CONCURRENTLY default) | backend-engineer | P0 | P3-SQL-01 | M |
 | [ ] | P3-SQL-05 | `constraint_emitter.py` (NOT VALID + VALIDATE) | backend-engineer | P0 | P3-SQL-01 | M |
-| [ ] | P3-RISK-01 | Risk classifier (5 levels) | backend-engineer | P0 | P2-DOM-01 | M |
+| [ ] | P3-SQL-06 | `schema_emitter.py` + `registry.py` (schema/extension DDL, `default_handlers()`) | backend-engineer | P0 | P3-SQL-01 | M |
+| [ ] | TD-INSPECT-01 | Capture `relpersistence` (UNLOGGED) in inspector/domain | backend-engineer | P2 | P3-SQL-02 | S |
+| [x] | P3-RISK-01 | Risk classifier (5 levels) | backend-engineer | P0 | P2-DOM-01 | M |
 | [ ] | P3-TX-01 | Transaction unit splitter | backend-engineer | P0 | P3-SQL-04, P3-RISK-01 | M |
 | [ ] | P3-OUT-01 | Multi-file migration writer | backend-engineer | P0 | P3-SQL-01..05, P3-TX-01 | M |
 | [ ] | P3-APPLY-01 | `infrastructure/postgres/applier.py` | backend-engineer | P0 | P3-OUT-01 | M |
@@ -127,13 +129,10 @@
 | [ ] | P4-TUI-07 | HistoryView reading the migration manifest store | tui-engineer | P1 | P3-OUT-01 | M |
 | [ ] | P4-TUI-08 | SettingsView with live config.toml preview | tui-engineer | P2 | P4-TUI-01 | M |
 
-> **Note (P4-TUI-02…08):** all seven views are now **implemented and fully
-> interactive against `presentation/tui/_mock.py`** (see `docs/ui-design.md` §10)
-> — they render the complete design and respond to clicks/chords. These boxes
-> stay unchecked because the task scope is *wiring to real `application/` use
-> cases*, which is still blocked on the Phase 1-3 data each row depends on. The
-> remaining work per view is the single mock→use-case import swap described in
-> `docs/ui-design.md` §8.
+> **Note (P4-TUI-02…08):** all seven views are implemented and interactive on
+> `presentation/tui/_mock.py` (see `docs/ui-design.md` §10). These boxes stay
+> unchecked because their task scope is wiring views to real use cases; the
+> required Phase 1-3 data is not fully available yet. The design is provided.
 
 ## Phase 5 — Production readiness
 
@@ -166,7 +165,7 @@ P0 baseline ─┐
 
 ## Hard "do not do yet"
 
-- ❌ TUI screens before user provides UI design (Phase 4 blocked)
+- ❌ Wire TUI views to real use cases before their task dependencies are ready
 - ❌ MVP-B object types before MVP-A round-trip test green
 - ❌ Heuristic rename detection (ADR-0007)
 - ❌ Multi-connection snapshot (P1-INFRA-07) unless single-connection benchmark fails
