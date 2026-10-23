@@ -29,8 +29,8 @@ _DROP = DropSchema(target=_DROP_REF, pg_schema=Schema(ref=_DROP_REF))
 
 def _emit_create(delta: DeltaBase) -> tuple[SqlStatement, ...]:
     return (
-        SqlStatement(sql="statement-a", transactional=True, delta=delta),
-        SqlStatement(sql="statement-b", transactional=False, delta=delta),
+        SqlStatement(sql="statement-z", transactional=True, delta=delta),
+        SqlStatement(sql="statement-a", transactional=False, delta=delta),
     )
 
 
@@ -47,20 +47,20 @@ def _emit_wrong_provenance(_delta: DeltaBase) -> tuple[SqlStatement, ...]:
 
 
 def test_emitter_preserves_delta_and_statement_order() -> None:
-    deltas = DeltaSet.from_iterable((_CREATE, _DROP))
+    deltas = DeltaSet.from_iterable((_DROP, _CREATE))
     emitter = SqlEmitter({CreateSchema: _emit_create, DropSchema: _emit_drop})
 
     statements = emitter.emit(deltas)
 
     assert tuple(statement.sql for statement in statements) == (
-        "statement-a",
-        "statement-b",
         "statement-c",
+        "statement-z",
+        "statement-a",
     )
-    assert tuple(statement.transactional for statement in statements) == (True, False, True)
-    assert tuple(statement.delta for statement in statements) == (_CREATE, _CREATE, _DROP)
-    assert statements[0].delta is _CREATE
-    assert deltas.deltas == (_CREATE, _DROP)
+    assert tuple(statement.transactional for statement in statements) == (True, True, False)
+    assert tuple(statement.delta for statement in statements) == (_DROP, _CREATE, _CREATE)
+    assert statements[0].delta is _DROP
+    assert deltas.deltas == (_DROP, _CREATE)
 
 
 def test_empty_delta_set_emits_no_statements() -> None:

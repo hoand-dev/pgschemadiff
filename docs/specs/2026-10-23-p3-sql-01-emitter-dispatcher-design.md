@@ -1,6 +1,6 @@
 # P3-SQL-01 — SQL emitter dispatcher design
 
-**Status:** Design sections approved in chat; written spec pending user review.
+**Status:** Approved by user; implementation complete.
 **Date:** 2026-10-23
 
 ## Goal
