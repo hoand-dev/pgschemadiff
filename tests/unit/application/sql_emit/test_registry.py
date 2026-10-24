@@ -7,6 +7,7 @@ from syrupy.assertion import SnapshotAssertion
 from pgschemadiff.application.diff.dependencies import order_deltas
 from pgschemadiff.application.sql_emit import default_handlers, schema_emitter
 from pgschemadiff.application.sql_emit.emitter import SqlEmitter, SqlHandler
+from pgschemadiff.application.sql_emit.transaction import split_units
 from pgschemadiff.domain.column import Column
 from pgschemadiff.domain.constraint import ForeignKeyConstraint, PrimaryKeyConstraint
 from pgschemadiff.domain.delta import (
@@ -209,3 +210,13 @@ def test_ordered_delta_set_emits_valid_migration_order(snapshot: SnapshotAsserti
         )
         == snapshot
     )
+
+    units = split_units(statements)
+    assert tuple((unit.transactional, len(unit.statements)) for unit in units) == (
+        (True, 6),
+        (False, 1),
+        (True, 1),
+        (True, 1),
+    )
+    assert units[1].statements == (concurrent_index,)
+    assert units[3].statements == (statements[fk_validate_index],)
