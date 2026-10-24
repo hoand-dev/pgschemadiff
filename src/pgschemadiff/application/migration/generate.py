@@ -1,0 +1,142 @@
+"""Generate a deterministic, risk-gated migration plan from a DeltaSet."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
+from uuid import uuid4
+
+from pgschemadiff.application.diff.dependencies import order_deltas
+from pgschemadiff.application.migration.model import (
+    MigrationDeltaAssessment,
+    MigrationPlan,
+    MigrationPlanUnit,
+    validate_slug,
+)
+from pgschemadiff.application.sql_emit.emitter import SqlEmitter
+from pgschemadiff.application.sql_emit.registry import default_handlers
+from pgschemadiff.application.sql_emit.risk import (
+    RiskLevel,
+    classify_risk,
+    passes_risk_limit,
+)
+from pgschemadiff.application.sql_emit.transaction import split_units
+from pgschemadiff.shared.errors import MigrationError
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from pgschemadiff.domain.delta import DeltaBase, DeltaSet
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _new_plan_id() -> str:
+    return str(uuid4())
+
+
+def _target_label(delta: DeltaBase) -> str:
+    target = delta.target
+    if target.parent is None:
+        return target.qname.fqn
+    return f"{target.parent.qname.fqn}.{target.qname.name}"
+
+
+def _clock_utc(clock: Callable[[], datetime]) -> datetime:
+    created_at = clock()
+    if not isinstance(created_at, datetime):
+        raise MigrationError("clock must return an aware UTC datetime")
+    if created_at.tzinfo is None or created_at.utcoffset() is None:
+        raise MigrationError("clock must return an aware UTC datetime")
+    return created_at.astimezone(UTC)
+
+
+def generate_migration(
+    delta_set: DeltaSet,
+    *,
+    max_risk: RiskLevel = RiskLevel.DANGEROUS,
+    source_fingerprint: str | None = None,
+    target_fingerprint: str | None = None,
+    slug: str = "diff",
+    clock: Callable[[], datetime] = _utc_now,
+    id_factory: Callable[[], str] = _new_plan_id,
+) -> MigrationPlan:
+    """Order, risk-gate, emit, and group SQL for a new migration plan."""
+    if not isinstance(max_risk, RiskLevel):
+        raise MigrationError("max_risk must be a RiskLevel")
+    try:
+        validate_slug(slug)
+    except ValueError as error:
+        raise MigrationError(str(error)) from error
+
+    ordered_deltas = order_deltas(delta_set)
+    delta_ids = tuple(f"d{index:04d}" for index in range(1, len(ordered_deltas) + 1))
+    risk_assessments = tuple(classify_risk(delta) for delta in ordered_deltas)
+
+    if not passes_risk_limit(risk_assessments, max_risk=max_risk):
+        offending = tuple(
+            (delta_id, assessment)
+            for delta_id, assessment in zip(delta_ids, risk_assessments, strict=True)
+            if not passes_risk_limit((assessment,), max_risk=max_risk)
+        )
+        details = "\n".join(
+            f"- {delta_id} kind={assessment.delta.model_dump()['kind']} "
+            f"target={_target_label(assessment.delta)} "
+            f"level={assessment.level.value} reason={assessment.reason}"
+            for delta_id, assessment in offending
+        )
+        raise MigrationError(f"Migration risk gate failed (max_risk={max_risk.value}):\n{details}")
+
+    statements = SqlEmitter(default_handlers()).emit(ordered_deltas)
+    transaction_units = split_units(statements)
+
+    records = tuple(
+        MigrationDeltaAssessment(delta_id=delta_id, assessment=assessment)
+        for delta_id, assessment in zip(delta_ids, risk_assessments, strict=True)
+    )
+    delta_id_by_identity = {
+        id(assessment.delta): record.delta_id
+        for assessment, record in zip(risk_assessments, records, strict=True)
+    }
+    assessments_by_delta = {assessment.delta: assessment for assessment in risk_assessments}
+
+    planned_units: list[MigrationPlanUnit] = []
+    for index, transaction_unit in enumerate(transaction_units):
+        unit_delta_ids: list[str] = []
+        for statement in transaction_unit.statements:
+            delta_id = delta_id_by_identity.get(id(statement.delta))
+            if delta_id is None:
+                raise MigrationError("SQL statement provenance does not match an ordered delta.")
+            if delta_id not in unit_delta_ids:
+                unit_delta_ids.append(delta_id)
+        planned_units.append(
+            MigrationPlanUnit(
+                index=index,
+                transaction_unit=transaction_unit,
+                max_risk=transaction_unit.max_risk_level(assessments_by_delta),
+                delta_ids=tuple(unit_delta_ids),
+            )
+        )
+
+    plan_id = id_factory()
+    if not isinstance(plan_id, str) or not plan_id.strip():
+        raise MigrationError("id_factory must return a non-blank string")
+
+    overall_max_risk = max(
+        (assessment.level for assessment in risk_assessments),
+        key=tuple(RiskLevel).index,
+        default=None,
+    )
+    return MigrationPlan(
+        id=plan_id,
+        slug=slug,
+        created_at=_clock_utc(clock),
+        delta_set=ordered_deltas,
+        source_fingerprint=source_fingerprint,
+        target_fingerprint=target_fingerprint,
+        assessments=records,
+        units=tuple(planned_units),
+        overall_max_risk=overall_max_risk,
+    )
