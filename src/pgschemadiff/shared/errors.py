@@ -31,5 +31,13 @@ class RiskGateError(MigrationError):
     """Migration generation was rejected because deltas exceed the allowed risk."""
 
 
+class ApplyMigrationError(MigrationError):
+    """A migration apply request was refused or a unit failed."""
+
+    def __init__(self, message: str, *, result: object | None = None) -> None:
+        super().__init__(message)
+        self.result = result
+
+
 class BlockedMigrationError(MigrationError):
     """A change is blocked because PostgreSQL cannot express it safely."""
