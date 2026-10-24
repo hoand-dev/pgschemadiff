@@ -294,3 +294,25 @@ pgschemadiff [--config PATH]              # after `uv sync` / pip install
 3. `./config/profiles.yaml` (local dev directory layout)
 4. `$XDG_CONFIG_HOME/pgschemadiff/profiles.yaml`
 5. `~/.config/pgschemadiff/profiles.yaml`
+
+---
+
+## Application port — `MigrationWriter`
+
+`MigrationWriter` is the synchronous output port in
+`application/migration/ports.py`.
+
+```python
+from pathlib import Path
+from typing import Protocol
+
+from pgschemadiff.application.migration.model import MigrationPlan
+
+
+class MigrationWriter(Protocol):
+    def write(self, plan: MigrationPlan, output_dir: Path) -> Path: ...
+```
+
+The writer returns the created bundle directory. Implementations publish the
+bundle atomically, never overwrite an existing bundle, and raise
+`MigrationError` when an I/O operation fails.

@@ -92,10 +92,9 @@ must cover:
 P3-SQL-01 is complete when the dispatcher contract and tests pass, without
 introducing concrete DDL or changing existing domain deltas.
 
-## Open downstream contract
+## Downstream contract status
 
 ADR-0008 requires `down.sql`, but the current delta API lacks old values for
-some alterations. Before implementing P3-OUT-01, decide whether rollback
-generation receives source state or records unavailable/irreversible changes
-in the migration bundle. `MigrationWriter` currently accepts one SQL string and
-will also need a separate contract update in P3-OUT-01.
+some alterations. P3-OUT-01 resolves this with a non-executable rollback file
+and explicit irreversible annotations. It also defines the synchronous,
+application-owned `MigrationWriter` port for writing `MigrationPlan` bundles.

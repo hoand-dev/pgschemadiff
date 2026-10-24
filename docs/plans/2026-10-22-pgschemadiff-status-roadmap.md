@@ -55,7 +55,7 @@ Dự án đã có nền tảng domain, PostgreSQL introspection, typed deltas, t
 
 ### Rủi ro kiến trúc và vận hành
 
-- `MigrationWriter` trong `domain/ports.py` nhận một `migration_sql: str`, chưa khớp ADR-0008 yêu cầu `up.sql`, `down.sql`, `manifest.json`, `deltas.json`, `README.md` và transaction units. Chốt contract trước khi viết filesystem adapter.
+- `MigrationWriter` hiện thuộc `application/migration/ports.py`, ghi `MigrationPlan` bundle atomically và không overwrite; contract khớp ADR-0008 trước khi viết filesystem adapter.
 - ADR-0009 yêu cầu risk theo delta và default chặn `DESTRUCTIVE`/`BLOCKED`; cần quyết định risk nằm trong Delta hay assessment/manifest trước khi thiết kế JSON/CLI.
 - Prototype modules còn nằm cạnh TUI hiện tại; Ruff/mypy loại một số module cũ, pytest bỏ `tests/test_screens.py`. Chọn canonical code/test path; không xóa file khi chưa xác nhận còn được dùng.
 - Hướng dẫn package cũ đã obsolete; `docs/architecture.md` mô tả cấu trúc hiện tại.

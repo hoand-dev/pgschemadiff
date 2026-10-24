@@ -18,7 +18,7 @@ behind individual choices, see [`adr/`](adr/).
 │   Use cases (compare_schemas, generate_migration, apply_migration)       │
 │   Diff engine + per-type Comparators + topo sort                         │
 │   SQL emitters + risk classifier + transaction unit splitter             │
-│   Depends only on `domain.ports.*` Protocols.                            │
+│   Depends on domain ports and application-owned output ports.             │
 └────────────────┬─────────────────────────────────┬───────────────────────┘
                  │                                 │
                  ▼                                 ▼
@@ -34,7 +34,7 @@ behind individual choices, see [`adr/`](adr/).
 │   Pure Pydantic v2 frozen models. Zero IO. Zero async.                   │
 │   QualifiedName, ObjectRef, Schema, Table, Column, Index, …, Database    │
 │   Delta hierarchy (40+ discriminated subclasses).                        │
-│   ports.py: SchemaInspector, MigrationWriter (Protocols).                │
+│   ports.py: SchemaInspector (Protocol).                                   │
 └──────────────────────────────────────────────────────────────────────────┘
 
 shared/  — logging, errors. Importable from any layer.
@@ -66,7 +66,7 @@ src_url ─┐                                ┌─→ deltas.json
                                           ▼
                                   list[TransactionUnit]
                                           │
-                                  migration_writer.write()
+                                   MigrationWriter.write(plan, output_dir)
                                           │
         ┌─────────────────────────────────┴───────────────────────────┐
         ▼               ▼               ▼               ▼             ▼

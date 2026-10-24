@@ -28,7 +28,7 @@ from pgschemadiff.domain.index import (
     NullsOrder,
     SortOrder,
 )
-from pgschemadiff.domain.ports import MigrationWriter, SchemaInspector
+from pgschemadiff.domain.ports import SchemaInspector
 from pgschemadiff.domain.schema import Schema
 from pgschemadiff.domain.table import (
     PartitionInfo,
@@ -55,7 +55,6 @@ __all__ = [
     "Index",
     "IndexKeyColumn",
     "IndexMethod",
-    "MigrationWriter",
     "NullsOrder",
     "ObjectKind",
     "ObjectRef",

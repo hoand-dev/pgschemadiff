@@ -46,7 +46,7 @@
 | [x] | P1-DOM-05 | `domain/index.py` — Index (method, columns, INCLUDE, predicate, opclass) | backend-engineer | P0 | P1-DOM-01 | M |
 | [x] | P1-DOM-06 | `domain/schema.py` + `domain/extension.py` | backend-engineer | P0 | P1-DOM-01 | S |
 | [x] | P1-DOM-07 | `domain/database.py` — top-level aggregate | backend-engineer | P0 | P1-DOM-04..06 | S |
-| [x] | P1-DOM-08 | `domain/ports.py` — SchemaInspector, MigrationWriter Protocols | backend-engineer | P0 | P1-DOM-07 | S |
+| [x] | P1-DOM-08 | `domain/ports.py` — SchemaInspector Protocol | backend-engineer | P0 | P1-DOM-07 | S |
 | [x] | P1-DOM-09 | Unit tests for all domain models | qa-engineer | P0 | P1-DOM-07 | M |
 | [x] | P1-INFRA-01 | `infrastructure/postgres/pool.py` — AsyncConnectionPool wrapper | backend-engineer | P0 | P0-ENV-01 | M |
 | [x] | P1-INFRA-02 | `catalog/tables.sql` + `columns.sql` | backend-engineer | P0 | — | M |

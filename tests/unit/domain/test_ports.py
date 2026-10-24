@@ -9,7 +9,7 @@ import pytest
 
 import pgschemadiff.domain.ports as ports_module
 from pgschemadiff.domain.database import Database
-from pgschemadiff.domain.ports import MigrationWriter, SchemaInspector
+from pgschemadiff.domain.ports import SchemaInspector
 
 # ---------------------------------------------------------------------------
 # SchemaInspector Protocol
@@ -53,46 +53,6 @@ def test_concrete_inspector_satisfies_protocol() -> None:
 
     stub = StubInspector()
     assert isinstance(stub, SchemaInspector)
-
-
-# ---------------------------------------------------------------------------
-# MigrationWriter Protocol
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-def test_migration_writer_is_runtime_checkable() -> None:
-    assert hasattr(MigrationWriter, "__protocol_attrs__")
-
-
-@pytest.mark.unit
-def test_migration_writer_has_write_method() -> None:
-    assert "write" in MigrationWriter.__protocol_attrs__  # type: ignore[attr-defined]
-
-
-@pytest.mark.unit
-def test_migration_writer_write_is_coroutine_function() -> None:
-    method = MigrationWriter.write
-    assert inspect.iscoroutinefunction(method)
-
-
-@pytest.mark.unit
-def test_non_writer_fails_isinstance_check() -> None:
-    class NotAWriter:
-        pass
-
-    obj = NotAWriter()
-    assert not isinstance(obj, MigrationWriter)
-
-
-@pytest.mark.unit
-def test_concrete_writer_satisfies_protocol() -> None:
-    class StubWriter:
-        async def write(self, migration_sql: str, *, label: str) -> str:
-            return f"/migrations/{label}.sql"
-
-    stub = StubWriter()
-    assert isinstance(stub, MigrationWriter)
 
 
 # ---------------------------------------------------------------------------

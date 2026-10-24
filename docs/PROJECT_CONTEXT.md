@@ -85,7 +85,7 @@ to real use cases remains pending.
 - `P0-DOC-03` — `docs/adr/0000-template.md`
 - `P0-QUAL-01` — smoke tests passing (5/5)
 - `P1-DOM-01` — `domain/identity.py` with QualifiedName / ObjectRef / ObjectKind; 29 unit tests, domain coverage 100%. Note: field renamed `schema` → `namespace` to avoid `BaseModel.schema` shadow (rationale in module docstring).
-- `P1-DOM-02..09` — full domain model layer: `column.py` (Column / IdentitySpec / generated cols), `constraint.py` (Pydantic discriminated union over PK / Unique / Check / FK / Exclusion, `kind` discriminator), `table.py` (Table aggregate + partition info, column-name + constraint-reference validation), `index.py` (Index + key columns / opclass / INCLUDE / predicate), `schema.py` + `extension.py`, `database.py` (top-level aggregate with ObjectRef/QualifiedName lookup helpers), `ports.py` (`SchemaInspector` / `MigrationWriter` runtime-checkable Protocols; `Database` import under `TYPE_CHECKING` to keep domain pure). 181 new unit tests (268 total). Domain re-exported from `domain/__init__.py`. `pyproject.toml`: domain per-file-ignore extended with `TC001-TC003` (Pydantic needs field-type imports at runtime).
+- `P1-DOM-02..09` — full domain model layer: `column.py` (Column / IdentitySpec / generated cols), `constraint.py` (Pydantic discriminated union over PK / Unique / Check / FK / Exclusion, `kind` discriminator), `table.py` (Table aggregate + partition info, column-name + constraint-reference validation), `index.py` (Index + key columns / opclass / INCLUDE / predicate), `schema.py` + `extension.py`, `database.py` (top-level aggregate with ObjectRef/QualifiedName lookup helpers), `ports.py` (`SchemaInspector` runtime-checkable Protocol; `Database` import under `TYPE_CHECKING` to keep domain pure). 181 new unit tests (268 total). Domain re-exported from `domain/__init__.py`. `pyproject.toml`: domain per-file-ignore extended with `TC001-TC003` (Pydantic needs field-type imports at runtime).
 - `P4-UX-01` — imported the user's claude.ai/design bundle into `docs/ui-design/reference/`; authored `docs/ui-design.md` as the Textual implementation contract (layout, theme tokens, vim bindings, screen specs).
 - `P4-TUI-01` — TUI app shell: `PgsdApp` (`presentation/tui/app.py`), Catppuccin Mocha ↔ Latte switching, vim chord dispatcher (`gc/go/gd/gm/ga/gh/gs`, `gT`, `ZZ`), vim `:` command palette with stub parser, `?` help modal, 7 placeholder views, `pgsd tui` CLI command (also `pgsd` with no sub-command). 8 Pilot-driven unit tests passing.
 
@@ -94,7 +94,6 @@ to real use cases remains pending.
 - P1-TEST-02 remains needs-human (PR #3 was closed; do not recreate without direction).
 - P0-CI-03 coverage gate remains open; P1-INFRA-07 is deferred.
 - M1's 1000-object benchmark is unmeasured.
-- `MigrationWriter` in `domain/ports.py` accepts one SQL string. P3-OUT-01 must change the port; rollback generation needs source state or an explicit irreversible annotation.
 - Four local commits are ahead of `origin/main`; not pushed in this run. Commit `5f34d3f` appeared from concurrent CI work during this run.
 
 ## Known limitations / debt (running list)
