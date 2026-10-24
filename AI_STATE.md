@@ -19,7 +19,7 @@ Goal: inspect two Postgres DBs, show schema diff, generate safe migration SQL.
 - Phase 0 done except open P0-CI-03 coverage gate.
 - Phase 1 domain/infrastructure done; `pgsd inspect` shipped. M1 caveat: P1-TEST-02 needs-human; 1000-object benchmark not measured; P1-INFRA-07 deferred.
 - Phase 2 complete: `pgsd diff`, comparators, rename/ignore rules, dependencies, topo-sort, and tests done. M2 reached at unit level; Docker integration not run locally.
-- P3-RISK-01 and P3-SQL-01 done. Next: P3-SQL-02 table emitter.
+- P3-RISK-01, P3-SQL-01..06, P3-TX-01, P3-OUT-01 done; `pgsd generate` shipped. Next: P3-APPLY-01 (spec approved, 5 slices; slice 1 bundle validator done).
 - Phase 4 TUI shell and seven views run on mock data; not wired to real use cases.
 
 ---
@@ -27,23 +27,22 @@ Goal: inspect two Postgres DBs, show schema diff, generate safe migration SQL.
 ## CI / PR Status
 - `main` pushed; CI run on `9527452` green (unit, lint, mypy, import-linter, integration via Testcontainers).
 - `5f34d3f` (step 1 CI fix): integration job uses Testcontainers only and fails closed; the ANSI-colored `--help` unit assertion is fixed. The unit job on `origin/main` was red before it; remote CI re-check pending push.
-- Local gate: ruff, ruff format, mypy strict, import-linter (4/4 KEPT), and 1,338 unit tests pass. Docker integration not run locally.
+- Local gate: ruff, ruff format, mypy strict, import-linter (4/4 KEPT), and 1,688 unit tests pass. Docker integration not run locally.
 - P1-TEST-02 remains `needs-human` (PR #3 human-closed; do NOT recreate).
 
 ### Local gate status (this run, `uv run`)
-`ruff check .` ✅ · `ruff format --check .` ✅ · `mypy src/ tests/` ✅ · `lint-imports` ✅ (4/4 contracts KEPT) · `pytest tests/unit` ✅ (1,338 passed). Docker integration not run locally.
+`ruff check .` ✅ · `ruff format --check .` ✅ · `mypy src/ tests/` ✅ · `lint-imports` ✅ (4/4 contracts KEPT) · `pytest -m "not integration"` ✅ (1,688 passed, 2026-10-24). Docker integration not run locally.
 
 ---
 
 ## Execution Queue
-1. **P3-OUT-01** — migration plan + multi-file bundle writer; design spec in progress (`docs/specs/2026-10-24-p3-out-01-migration-bundle-design.md`), then implementation slices.
-2. **P3-APPLY-01** — PostgreSQL applier (must `SET standard_conforming_strings = on`, lock/statement timeouts, per-unit transactions, CONCURRENTLY units outside transactions).
-3. **P3-CLI-01** — `pgsd generate` / `pgsd apply`.
-4. **P3-TEST-01** — PG18 round-trip integration (M3 gate); **P3-TEST-02** — extend emitter snapshot corpus.
-5. Tech debt: TD-INSPECT-01 (UNLOGGED), TD-INSPECT-02 (virtual generated columns), TD-EMIT-01 (indexes on partitioned tables).
+1. **P3-APPLY-01** — bundle applier per `docs/specs/2026-10-24-p3-apply-01-applier-design.md`: slice 1 bundle validator done; slice 2 use case (fake executor) in progress; then slice 3 psycopg adapter + history schema, slice 4 fs reader + `pgsd apply`, slice 5 PG18 round-trip.
+2. **P3-CLI-01** — `pgsd generate` done; `pgsd apply` lands with APPLY slice 4.
+3. **P3-TEST-01** — PG18 round-trip integration (M3 gate); **P3-TEST-02** — extend emitter snapshot corpus.
+4. Tech debt: TD-INSPECT-01 (UNLOGGED), TD-INSPECT-02 (virtual generated columns), TD-EMIT-01 (indexes on partitioned tables), TD-RISK-01 (new-table constraints rated DANGEROUS).
 
 ## Next Actions
-- Review P3-OUT-01 spec, then dispatch its implementation slices.
+- Review APPLY slice 2, then dispatch slices 3–5.
 
 ## Ready To Merge
 - None.

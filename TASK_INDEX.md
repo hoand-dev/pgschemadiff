@@ -133,9 +133,9 @@ per-type comparators per ADR-0006; explicit-annotation renames per ADR-0007.
 | P3-SQL-05 | Constraint emitter (NOT VALID + VALIDATE) | done | P3-SQL-01 | src/pgschemadiff/application/sql_emit/constraint_emitter.py | 0 | high |
 | P3-SQL-06 | Schema/extension emitter + `default_handlers()` registry | done | P3-SQL-01 | src/pgschemadiff/application/sql_emit/schema_emitter.py, src/pgschemadiff/application/sql_emit/registry.py | 0 | high |
 | P3-TX-01 | Transaction unit splitter | done | P3-SQL-04, P3-RISK-01 | src/pgschemadiff/application/sql_emit/transaction.py | 0 | high |
-| P3-OUT-01 | Multi-file migration writer; resolve rollback source-state / irreversible annotation and replace single-string `MigrationWriter` contract | todo | P3-SQL-01..05, P3-TX-01 | src/pgschemadiff/domain/ports.py | 0 | high |
-| P3-APPLY-01 | PostgreSQL applier | todo | P3-OUT-01 | src/pgschemadiff/infrastructure/postgres/applier.py | 0 | high |
-| P3-CLI-01 | `pgsd generate` + `pgsd apply` | todo | P3-OUT-01, P3-APPLY-01 | — | 0 | high |
+| P3-OUT-01 | Multi-file migration writer (plan, renderer, atomic writer; `MigrationWriter` moved to application) | done | P3-SQL-01..05, P3-TX-01 | src/pgschemadiff/application/migration/, src/pgschemadiff/infrastructure/fs/migration_writer.py | 0 | high |
+| P3-APPLY-01 | Bundle applier (slice 1/5 done: bundle validator) | in-progress | P3-OUT-01 | src/pgschemadiff/infrastructure/postgres/applier.py | 0 | high |
+| P3-CLI-01 | `pgsd generate` (done) + `pgsd apply` | in-progress | P3-OUT-01, P3-APPLY-01 | — | 0 | high |
 | P3-TEST-01 | Round-trip integration test (M3 gate) | todo | P3-APPLY-01 | — | 0 | high |
 | P3-TEST-02 | Emitter snapshot tests | todo | P3-SQL-02..05 | — | 0 | high |
 
@@ -151,4 +151,4 @@ P4-UX-01 and P4-TUI-01 DONE. The shell and all seven views are implemented on mo
 | M0 | CI green; layered arch enforced | Phase 0 done except open P0-CI-03 coverage gate; CI fixes committed locally as `5f34d3f`, remote CI not rechecked |
 | M1 | `pgsd inspect` dumps schema JSON | Feature shipped; exit caveat: P1-TEST-02 needs-human and 1000-object benchmark unmeasured |
 | M2 | `pgsd diff` emits typed DeltaSet | ✅ Phase 2 complete; 1,338 unit tests pass; Docker integration not run locally |
-| M3 | round-trip integration test green | In progress; P3-RISK-01, P3-SQL-01..06, P3-TX-01 done; next P3-OUT-01 |
+| M3 | round-trip integration test green | In progress; P3-RISK-01, P3-SQL-01..06, P3-TX-01, P3-OUT-01, `pgsd generate` done; next P3-APPLY-01 |
