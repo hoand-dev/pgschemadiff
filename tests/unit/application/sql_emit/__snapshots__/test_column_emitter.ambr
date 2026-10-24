@@ -1,0 +1,51 @@
+# serializer version: 1
+# name: test_add_column_renders_shared_definition
+  tuple(
+    'ALTER TABLE "Sales"."Order""Items" ADD COLUMN "Display ""name" character varying(50) COLLATE "C" DEFAULT \'it\'\'s\' NOT NULL',
+  )
+# ---
+# name: test_add_identity_column_omits_implicit_not_null_and_default_options
+  tuple(
+    'ALTER TABLE "Sales"."Order""Items" ADD COLUMN "generated_id" bigint GENERATED ALWAYS AS IDENTITY',
+  )
+# ---
+# name: test_alter_column_type[collation-and-using]
+  tuple(
+    'ALTER TABLE "Sales"."Order""Items" ALTER COLUMN "display" TYPE bigint COLLATE "C" USING "display"::bigint',
+  )
+# ---
+# name: test_alter_column_type[implicit-cast]
+  tuple(
+    'ALTER TABLE "Sales"."Order""Items" ALTER COLUMN "display" TYPE bigint',
+  )
+# ---
+# name: test_drop_column
+  tuple(
+    'ALTER TABLE "Sales"."Order""Items" DROP COLUMN "display"',
+  )
+# ---
+# name: test_rename_column
+  tuple(
+    'ALTER TABLE "Sales"."Order""Items" RENAME COLUMN "old""name" TO "new""name"',
+  )
+# ---
+# name: test_set_column_default[drop-default]
+  tuple(
+    'ALTER TABLE "Sales"."Order""Items" ALTER COLUMN "display" DROP DEFAULT',
+  )
+# ---
+# name: test_set_column_default[set-default]
+  tuple(
+    'ALTER TABLE "Sales"."Order""Items" ALTER COLUMN "display" SET DEFAULT \'it\'\'s ready\'::text',
+  )
+# ---
+# name: test_set_column_nullability[drop-not-null]
+  tuple(
+    'ALTER TABLE "Sales"."Order""Items" ALTER COLUMN "display" DROP NOT NULL',
+  )
+# ---
+# name: test_set_column_nullability[set-not-null]
+  tuple(
+    'ALTER TABLE "Sales"."Order""Items" ALTER COLUMN "display" SET NOT NULL',
+  )
+# ---

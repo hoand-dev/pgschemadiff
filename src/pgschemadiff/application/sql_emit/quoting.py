@@ -33,6 +33,13 @@ def quote_qualified(name: QualifiedName) -> str:
     return f"{quote_ident(name.namespace)}.{quote_ident(name.name)}"
 
 
+def catalog_fragment(value: str, description: str) -> str:
+    """Return usable catalog SQL verbatim; reject blank text and parser sentinels."""
+    if not value.strip() or value.strip() == "?":
+        raise MigrationError(f"{description} must be a usable SQL fragment.")
+    return value
+
+
 def quote_literal(value: str) -> str:
     """Quote a string literal, assuming PostgreSQL ``standard_conforming_strings=on``.
 

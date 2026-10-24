@@ -1,12 +1,27 @@
 import pytest
 
 from pgschemadiff.application.sql_emit.quoting import (
+    catalog_fragment,
     quote_ident,
     quote_literal,
     quote_qualified,
 )
 from pgschemadiff.domain.identity import QualifiedName
 from pgschemadiff.shared.errors import MigrationError
+
+
+def test_catalog_fragment_returns_usable_sql_verbatim() -> None:
+    expression = "  lower(name)  "
+
+    assert catalog_fragment(expression, "Check expression") == expression
+
+
+@pytest.mark.parametrize(
+    "value", ["", "  ", "?", " ? "], ids=["empty", "blank", "sentinel", "padded-sentinel"]
+)
+def test_catalog_fragment_rejects_blank_or_placeholder(value: str) -> None:
+    with pytest.raises(MigrationError):
+        catalog_fragment(value, "Check expression")
 
 
 def test_quote_ident_always_quotes_and_preserves_case_and_keywords() -> None:
