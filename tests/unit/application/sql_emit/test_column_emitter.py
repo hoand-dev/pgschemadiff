@@ -87,7 +87,7 @@ def test_add_column_renders_shared_definition(snapshot: SnapshotAssertion) -> No
         data_type="character varying(50)",
         nullable=False,
         default_expr="'it''s'",
-        collation="C",
+        collation='"C"',
     )
     delta = AddColumn(target=_column_ref(column.name), column=column)
 
@@ -123,7 +123,7 @@ def test_drop_column(snapshot: SnapshotAssertion) -> None:
 
 @pytest.mark.parametrize(
     ("new_collation", "using_expression"),
-    [("C", '"display"::bigint'), (None, None)],
+    [('"C"', '"display"::bigint'), (None, None)],
     ids=["collation-and-using", "implicit-cast"],
 )
 def test_alter_column_type(
@@ -295,8 +295,8 @@ def test_column_handler_rejects_invalid_identifier() -> None:
         handlers()[AddColumn](delta)
 
 
-def test_column_handler_rejects_invalid_collation_identifier() -> None:
-    column = _column(collation="bad\x00collation")
+def test_column_handler_rejects_blank_collation_fragment() -> None:
+    column = _column(collation=" ")
     delta = AddColumn(target=_column_ref(), column=column)
 
     with pytest.raises(MigrationError):

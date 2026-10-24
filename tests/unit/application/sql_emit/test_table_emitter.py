@@ -96,7 +96,7 @@ def test_create_table_sorts_columns_ignores_constraints_and_emits_followups(
             position=1,
             data_type="text",
             nullable=False,
-            collation="C",
+            collation='"C"',
         ),
     )
     table = _table(

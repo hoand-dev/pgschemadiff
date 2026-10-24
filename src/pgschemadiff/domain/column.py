@@ -112,7 +112,8 @@ class Column(BaseModel):
     """
 
     collation: str | None = None
-    """Collation name (e.g. ``"en_US.utf8"``).  ``None`` → database default."""
+    """Collation as a quoted SQL identifier fragment (e.g. ``"en_US.utf8"`` or
+    ``"app"."ci"`` outside ``pg_catalog``).  ``None`` → type default."""
 
     identity: IdentitySpec | None = None
     """Present if the column is an identity column; ``None`` otherwise."""

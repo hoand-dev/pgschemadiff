@@ -65,7 +65,7 @@ def render_column_definition(column: Column) -> str:
         catalog_fragment(column.data_type, "Column data type"),
     ]
     if column.collation is not None:
-        definition.extend(("COLLATE", quote_ident(column.collation)))
+        definition.extend(("COLLATE", catalog_fragment(column.collation, "Collation")))
 
     if column.identity is not None:
         definition.append(_render_identity(column.identity))
@@ -120,7 +120,7 @@ def emit_alter_column_type(delta: DeltaBase) -> tuple[SqlStatement, ...]:
     new_type = catalog_fragment(delta.new_data_type, "Column data type")
     sql = f"ALTER TABLE {table} ALTER COLUMN {column} TYPE {new_type}"
     if delta.new_collation is not None:
-        sql += f" COLLATE {quote_ident(delta.new_collation)}"
+        sql += f" COLLATE {catalog_fragment(delta.new_collation, 'Collation')}"
     if delta.using_expression is not None:
         using = catalog_fragment(delta.using_expression, "USING expression")
         sql += f" USING {using}"
