@@ -1,4 +1,4 @@
-"""Output ports for migration application use cases."""
+"""Ports for migration application use cases."""
 
 from __future__ import annotations
 
@@ -8,6 +8,15 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from pgschemadiff.application.migration.model import MigrationPlan
+
+
+@runtime_checkable
+class BundleReader(Protocol):
+    """Application port for reading the two files needed to validate a bundle."""
+
+    def read(self, bundle_dir: Path) -> tuple[bytes, bytes]:
+        """Return ``manifest.json`` and ``up.sql`` bytes, in that order."""
+        ...
 
 
 @runtime_checkable
