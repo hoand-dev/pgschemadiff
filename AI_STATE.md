@@ -1,5 +1,5 @@
 # AI_STATE.md
-_Last updated: 2026-10-23_
+_Last updated: 2026-10-24_
 
 RUN_ID: 2026-10-23-1
 STATE: ACTIVE
@@ -10,7 +10,7 @@ STALL_COUNTER: 0
 Goal: inspect two Postgres DBs, show schema diff, generate safe migration SQL.
 
 ## Active Branch
-`main` — local branch is 4 commits ahead of `origin/main`: `fc46210`, `a1c9596`, `2da7603` (P3-SQL-01) and `5f34d3f` (CI fix). Not pushed.
+`main` — in sync with `origin/main` (pushed 2026-10-24 on user request).
 
 ---
 
@@ -25,7 +25,7 @@ Goal: inspect two Postgres DBs, show schema diff, generate safe migration SQL.
 ---
 
 ## CI / PR Status
-- `main` is 4 commits ahead of `origin/main` (`fc46210`, `a1c9596`, `2da7603`, `5f34d3f`); do not push in this run.
+- `main` pushed; CI run on `9527452` green (unit, lint, mypy, import-linter, integration via Testcontainers).
 - `5f34d3f` (step 1 CI fix): integration job uses Testcontainers only and fails closed; the ANSI-colored `--help` unit assertion is fixed. The unit job on `origin/main` was red before it; remote CI re-check pending push.
 - Local gate: ruff, ruff format, mypy strict, import-linter (4/4 KEPT), and 1,338 unit tests pass. Docker integration not run locally.
 - P1-TEST-02 remains `needs-human` (PR #3 human-closed; do NOT recreate).
@@ -36,18 +36,14 @@ Goal: inspect two Postgres DBs, show schema diff, generate safe migration SQL.
 ---
 
 ## Execution Queue
-0. Emitter prerequisites per `docs/specs/2026-10-23-p3-sql-02-06-ddl-emitters-design.md` slices 1–5: preserve raw index/constraint definitions + ownership/inherited metadata in inspector/domain, new-table `AddConstraint` deltas, dependency edges (FK cycles, partition parent, constraint replacement), `quoting.py`.
-1. **P3-SQL-02** — table emitter (spec slice 6).
-2. **P3-SQL-03** — column emitter; depends on P3-SQL-01.
-3. **P3-SQL-04** — index emitter; depends on P3-SQL-01.
-4. **P3-SQL-05** — constraint emitter; depends on P3-SQL-01.
-5. **P3-TX-01** — transaction splitter; depends on P3-SQL-04 and P3-RISK-01.
-6. **P3-OUT-01** — multi-file writer; depends on P3-SQL-01..05 and P3-TX-01.
-7. **P3-APPLY-01**, then **P3-CLI-01** and **P3-TEST-01**; P3-TEST-02 follows P3-SQL-02..05.
+1. **P3-OUT-01** — migration plan + multi-file bundle writer; design spec in progress (`docs/specs/2026-10-24-p3-out-01-migration-bundle-design.md`), then implementation slices.
+2. **P3-APPLY-01** — PostgreSQL applier (must `SET standard_conforming_strings = on`, lock/statement timeouts, per-unit transactions, CONCURRENTLY units outside transactions).
+3. **P3-CLI-01** — `pgsd generate` / `pgsd apply`.
+4. **P3-TEST-01** — PG18 round-trip integration (M3 gate); **P3-TEST-02** — extend emitter snapshot corpus.
+5. Tech debt: TD-INSPECT-01 (UNLOGGED), TD-INSPECT-02 (virtual generated columns), TD-EMIT-01 (indexes on partitioned tables).
 
 ## Next Actions
-- Start spec slice 1 (preserve raw index definitions) and slice 5 (`quoting.py`) — independent.
-- Resolve the `down.sql` contract in P3-OUT-01: rollback needs source state or an explicit irreversible annotation; `MigrationWriter` currently accepts one SQL string.
+- Review P3-OUT-01 spec, then dispatch its implementation slices.
 
 ## Ready To Merge
 - None.
@@ -56,7 +52,6 @@ Goal: inspect two Postgres DBs, show schema diff, generate safe migration SQL.
 - [ ] P1-TEST-02 | Inspector integration tests: PR #3 was closed by human; do not recreate without direction. | options: authorize a new attempt / leave M1 caveat open | since: 2026-06-22
 - [ ] repo-branch-protection | GitHub branch protection not confirmed (linear history / merge-commit policy). | options: confirm settings / leave unconfirmed | since: 2026-06-20 (non-blocking)
 - [ ] repo-file-acl | Tracked files are owned by another SID; the working account has `RX,W` only, so delete/rename fail (`git mv`, `git checkout`, `uv sync` on `.venv`). Blocks archiving `PROGRESS.md`, `REVIEW.md`, `docs/migration.md` into `docs/archive/`. | options: fix ownership/ACL / keep files in place | since: 2026-10-23-1
-- [ ] push-local-commits | `main` is 4 commits ahead of `origin/main` (`fc46210`, `a1c9596`, `2da7603`, `5f34d3f`); not pushed per task instructions. | options: authorize push / keep local | since: 2026-10-23-1
 
 ## Resolved
 - Phase 1 complete; `pgsd inspect` shipped. P1-TEST-02 remains needs-human.

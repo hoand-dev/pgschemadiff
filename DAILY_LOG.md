@@ -410,3 +410,12 @@ NEEDS_HUMAN (open): 3 — P1-TEST-02 (PR #3 human-closed; do not recreate); bran
 - P1-TEST-02, branch protection, and push of local commits remain human decisions.
 
 ---
+
+## RUN 2026-10-24-1 — 2026-10-24 (P3 SQL emitters + transaction units)
+- Delegated to opencode (`openai/gpt-6-luna#max`), each slice reviewed, gated and committed by Claude, pushed to `origin/main`.
+- Done: emitter spec slices 1–10 (raw index/constraint definitions, comparator + dependency changes, quoting, table/column/index/constraint/schema emitters, `default_handlers()` registry), P3-TX-01 transaction units, TD-INSPECT-03 (`SET LOCAL search_path = pg_catalog`, qualified collations, virtual generated columns fail closed).
+- Review catches fixed: VALIDATE CONSTRAINT needs its own unit (`SqlStatement.new_unit`); FK must follow referenced PK/UNIQUE add; index/constraint ownership-flip ordering; sub-partitioned children lost `PARTITION BY`; unqualified `pg_get_indexdef` for `public` tables; double-quoted collations.
+- Ops: concurrent opencode runs sometimes hang before creating a session; now run each via `--standalone` with a startup-stall retry wrapper. Shared uv env got corrupted by concurrent installs; use a single pre-synced env with `uv run --no-sync`.
+- Gate: ruff, format, mypy strict, import-linter 4/4, 1,560 unit tests. Docker integration not run locally; CI integration job now fails closed.
+- Next: P3-OUT-01 spec review.
+

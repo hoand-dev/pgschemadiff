@@ -86,14 +86,17 @@
 | Status | ID | Title | Owner | Pri | Deps | Cx |
 |---|---|---|---|---|---|---|
 | [x] | P3-SQL-01 | `sql_emit/emitter.py` — dispatcher | backend-engineer | P0 | P2-DOM-01 | M |
-| [ ] | P3-SQL-02 | `table_emitter.py` | backend-engineer | P0 | P3-SQL-01 | L |
-| [ ] | P3-SQL-03 | `column_emitter.py` | backend-engineer | P0 | P3-SQL-01 | L |
-| [ ] | P3-SQL-04 | `index_emitter.py` (CONCURRENTLY default) | backend-engineer | P0 | P3-SQL-01 | M |
-| [ ] | P3-SQL-05 | `constraint_emitter.py` (NOT VALID + VALIDATE) | backend-engineer | P0 | P3-SQL-01 | M |
-| [ ] | P3-SQL-06 | `schema_emitter.py` + `registry.py` (schema/extension DDL, `default_handlers()`) | backend-engineer | P0 | P3-SQL-01 | M |
+| [x] | P3-SQL-02 | `table_emitter.py` | backend-engineer | P0 | P3-SQL-01 | L |
+| [x] | P3-SQL-03 | `column_emitter.py` | backend-engineer | P0 | P3-SQL-01 | L |
+| [x] | P3-SQL-04 | `index_emitter.py` (CONCURRENTLY default) | backend-engineer | P0 | P3-SQL-01 | M |
+| [x] | P3-SQL-05 | `constraint_emitter.py` (NOT VALID + VALIDATE) | backend-engineer | P0 | P3-SQL-01 | M |
+| [x] | P3-SQL-06 | `schema_emitter.py` + `registry.py` (schema/extension DDL, `default_handlers()`) | backend-engineer | P0 | P3-SQL-01 | M |
 | [ ] | TD-INSPECT-01 | Capture `relpersistence` (UNLOGGED) in inspector/domain | backend-engineer | P2 | P3-SQL-02 | S |
+| [x] | TD-INSPECT-03 | Inspector `SET LOCAL search_path = pg_catalog` (qualified deparser output), qualified collations, fail closed on PG18 virtual generated columns | backend-engineer | P0 | P3-SQL-04 | S |
+| [ ] | TD-INSPECT-02 | Support PG18 virtual generated columns (inspector + column emitter) | backend-engineer | P2 | TD-INSPECT-03 | S |
+| [ ] | TD-EMIT-01 | Indexes on partitioned tables (`ON ONLY`, no CONCURRENTLY) — emitter currently fails closed | backend-engineer | P2 | P3-SQL-04 | M |
 | [x] | P3-RISK-01 | Risk classifier (5 levels) | backend-engineer | P0 | P2-DOM-01 | M |
-| [ ] | P3-TX-01 | Transaction unit splitter | backend-engineer | P0 | P3-SQL-04, P3-RISK-01 | M |
+| [x] | P3-TX-01 | Transaction unit splitter | backend-engineer | P0 | P3-SQL-04, P3-RISK-01 | M |
 | [ ] | P3-OUT-01 | Multi-file migration writer | backend-engineer | P0 | P3-SQL-01..05, P3-TX-01 | M |
 | [ ] | P3-APPLY-01 | `infrastructure/postgres/applier.py` | backend-engineer | P0 | P3-OUT-01 | M |
 | [ ] | P3-CLI-01 | `pgsd generate` + `pgsd apply` | backend-engineer | P0 | P3-OUT-01, P3-APPLY-01 | M |
