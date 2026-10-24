@@ -4,7 +4,15 @@ import pytest
 
 from pgschemadiff.application.diff.dependencies import order_deltas
 from pgschemadiff.domain.column import Column
-from pgschemadiff.domain.constraint import Constraint, ForeignKeyConstraint, PrimaryKeyConstraint
+from pgschemadiff.domain.constraint import (
+    CheckConstraint,
+    Constraint,
+    ExclusionConstraint,
+    ExclusionElement,
+    ForeignKeyConstraint,
+    PrimaryKeyConstraint,
+    UniqueConstraint,
+)
 from pgschemadiff.domain.delta.base import DeltaSet
 from pgschemadiff.domain.delta.column import AddColumn, DropColumn, RenameColumn
 from pgschemadiff.domain.delta.constraint import AddConstraint, DropConstraint
@@ -21,8 +29,7 @@ from pgschemadiff.domain.extension import Extension
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index, IndexKeyColumn
 from pgschemadiff.domain.schema import Schema
-from pgschemadiff.domain.table import Table
-from pgschemadiff.shared.errors import CyclicDependencyError
+from pgschemadiff.domain.table import PartitionOf, Table
 
 
 def _ref(kind: ObjectKind, name: str, *, namespace: str = "public") -> ObjectRef:
@@ -63,6 +70,34 @@ def _index(name: str, table_ref: ObjectRef, *columns: str) -> Index:
         ref=_ref(ObjectKind.INDEX, name, namespace=table_ref.qname.namespace),
         table_ref=table_ref,
         key_columns=tuple(IndexKeyColumn(column_name=column) for column in columns),
+    )
+
+
+def _add_constraint(table: Table, constraint: Constraint) -> AddConstraint:
+    return AddConstraint(
+        target=ObjectRef(
+            kind=ObjectKind.CONSTRAINT,
+            qname=QualifiedName(
+                namespace=table.ref.qname.namespace,
+                name=constraint.name,
+            ),
+            parent=table.ref,
+        ),
+        constraint=constraint,
+    )
+
+
+def _drop_constraint(table: Table, constraint: Constraint) -> DropConstraint:
+    return DropConstraint(
+        target=ObjectRef(
+            kind=ObjectKind.CONSTRAINT,
+            qname=QualifiedName(
+                namespace=table.ref.qname.namespace,
+                name=constraint.name,
+            ),
+            parent=table.ref,
+        ),
+        constraint=constraint,
     )
 
 
@@ -143,7 +178,7 @@ def test_fk_addition_waits_for_owning_and_referenced_tables_and_columns() -> Non
     _assert_precedes(ordered, create_remote, add_remote_column, add_fk)
 
 
-def test_fk_embedded_in_create_table_waits_for_referenced_table() -> None:
+def test_fk_in_create_table_payload_does_not_add_prerequisite_edges() -> None:
     parent = _table("parents", columns=("id",))
     fk = ForeignKeyConstraint(
         name="children_parent_fk",
@@ -158,7 +193,7 @@ def test_fk_embedded_in_create_table_waits_for_referenced_table() -> None:
 
     ordered = order_deltas(DeltaSet.from_iterable((create_child, create_parent))).deltas
 
-    _assert_precedes(ordered, create_parent, create_child)
+    assert ordered == (create_child, create_parent)
 
 
 def test_fk_embedded_in_drop_table_drops_dependent_before_referenced_table() -> None:
@@ -199,10 +234,116 @@ def test_self_referencing_table_delta_has_no_self_edge() -> None:
     )
     table = _table("employees", columns=("id", "manager_id"), constraints=(fk,))
     create_table = CreateTable(target=table.ref, table=table)
+    add_fk = _add_constraint(table, fk)
     drop_table = DropTable(target=table.ref, table=table)
 
-    assert order_deltas(DeltaSet.from_iterable((create_table,))).deltas == (create_table,)
+    created = order_deltas(DeltaSet.from_iterable((add_fk, create_table))).deltas
+    assert created == (create_table, add_fk)
     assert order_deltas(DeltaSet.from_iterable((drop_table,))).deltas == (drop_table,)
+
+
+def test_partition_child_waits_for_new_parent_table() -> None:
+    parent = _table("z_parent")
+    child_ref = _ref(ObjectKind.TABLE, "a_child")
+    child = Table(
+        ref=child_ref,
+        partition_of=PartitionOf(parent_namespace="public", parent_name="z_parent"),
+    )
+    create_parent = CreateTable(target=parent.ref, table=parent)
+    create_child = CreateTable(target=child.ref, table=child)
+
+    ordered = order_deltas(DeltaSet.from_iterable((create_child, create_parent))).deltas
+
+    _assert_precedes(ordered, create_parent, create_child)
+
+
+def test_same_name_constraint_replacement_drops_before_add_even_when_sort_key_reverses() -> None:
+    table = _table("items", columns=("id", "sku"))
+    old_constraint = PrimaryKeyConstraint(name="items_key", columns=("id",))
+    new_constraint = PrimaryKeyConstraint(name="items_key", columns=("sku",))
+    drop_constraint = _drop_constraint(table, old_constraint)
+    add_constraint = _add_constraint(table, new_constraint)
+
+    assert add_constraint.sort_key < drop_constraint.sort_key
+    ordered = order_deltas(DeltaSet.from_iterable((add_constraint, drop_constraint))).deltas
+
+    assert ordered == (drop_constraint, add_constraint)
+
+
+@pytest.mark.parametrize(
+    "referenced_constraint",
+    [
+        PrimaryKeyConstraint(name="parent_pk", columns=("id", "tenant_id")),
+        UniqueConstraint(name="parent_uq", columns=("id", "tenant_id")),
+    ],
+)
+def test_fk_waits_for_referenced_pk_or_unique_added_in_same_migration(
+    referenced_constraint: PrimaryKeyConstraint | UniqueConstraint,
+) -> None:
+    child = _table("a_child", columns=("tenant_id", "parent_id"))
+    parent = _table("z_parent", columns=("id", "tenant_id"))
+    fk = ForeignKeyConstraint(
+        name="child_parent_fk",
+        columns=("tenant_id", "parent_id"),
+        ref_namespace="public",
+        ref_table="z_parent",
+        ref_columns=("tenant_id", "id"),
+    )
+    add_fk = _add_constraint(child, fk)
+    add_referenced_constraint = _add_constraint(parent, referenced_constraint)
+
+    ordered = order_deltas(DeltaSet.from_iterable((add_fk, add_referenced_constraint))).deltas
+
+    _assert_precedes(ordered, add_referenced_constraint, add_fk)
+
+
+def test_create_index_waits_for_drop_of_same_name_constraint_backing_index() -> None:
+    table = _table("z_table", columns=("id",))
+    primary_key = PrimaryKeyConstraint(name="a_index", columns=("id",))
+    drop_constraint = _drop_constraint(table, primary_key)
+    index = _index("a_index", table.ref, "id")
+    create_index = CreateIndex(target=index.ref, index=index)
+
+    ordered = order_deltas(DeltaSet.from_iterable((create_index, drop_constraint))).deltas
+
+    _assert_precedes(ordered, drop_constraint, create_index)
+
+
+def test_check_constraint_does_not_claim_same_name_standalone_index() -> None:
+    table = _table("a_table", columns=("id",))
+    check = CheckConstraint(name="z_index", expression="id > 0")
+    add_check = _add_constraint(table, check)
+    index = _index("z_index", table.ref, "id")
+    drop_index = DropIndex(target=index.ref, index=index)
+
+    ordered = order_deltas(DeltaSet.from_iterable((add_check, drop_index))).deltas
+
+    assert ordered == (add_check, drop_index)
+
+
+@pytest.mark.parametrize(
+    "constraint",
+    [
+        PrimaryKeyConstraint(name="z_index", columns=("id",)),
+        UniqueConstraint(name="z_index", columns=("id",)),
+        ExclusionConstraint(
+            name="z_index",
+            index_method="gist",
+            elements=(ExclusionElement(column_or_expr="id", operator="="),),
+        ),
+    ],
+)
+def test_add_index_backed_constraint_waits_for_drop_of_same_name_index(
+    constraint: Constraint,
+) -> None:
+    table = _table("a_table", columns=("id",))
+    add_constraint = _add_constraint(table, constraint)
+    index = _index("z_index", table.ref, "id")
+    drop_index = DropIndex(target=index.ref, index=index)
+
+    ordered = order_deltas(DeltaSet.from_iterable((add_constraint, drop_index))).deltas
+
+    _assert_precedes(ordered, drop_index, add_constraint)
 
 
 def test_index_drop_and_replacement_order_before_dropping_owned_columns() -> None:
@@ -298,7 +439,7 @@ def test_unrelated_deltas_have_deterministic_sort_key_order() -> None:
     assert tuple(delta.target.qname.name for delta in ordered) == ("alpha", "mu", "zeta")
 
 
-def test_mutually_referencing_table_cycle_propagates() -> None:
+def test_mutually_referencing_new_tables_create_before_fk_constraints() -> None:
     a_fk = ForeignKeyConstraint(
         name="a_b_fk",
         columns=("b_id",),
@@ -315,10 +456,11 @@ def test_mutually_referencing_table_cycle_propagates() -> None:
     )
     a = _table("a", columns=("id", "b_id"), constraints=(a_fk,))
     b = _table("b", columns=("id", "a_id"), constraints=(b_fk,))
+    create_a = CreateTable(target=a.ref, table=a)
+    create_b = CreateTable(target=b.ref, table=b)
+    add_a_fk = _add_constraint(a, a_fk)
+    add_b_fk = _add_constraint(b, b_fk)
 
-    with pytest.raises(CyclicDependencyError):
-        order_deltas(
-            DeltaSet.from_iterable(
-                (CreateTable(target=a.ref, table=a), CreateTable(target=b.ref, table=b))
-            )
-        )
+    ordered = order_deltas(DeltaSet.from_iterable((add_b_fk, create_b, add_a_fk, create_a))).deltas
+
+    assert ordered == (create_a, create_b, add_a_fk, add_b_fk)

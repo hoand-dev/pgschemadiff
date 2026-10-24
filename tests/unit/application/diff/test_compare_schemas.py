@@ -215,7 +215,7 @@ async def test_compare_schemas_forwards_rename_annotations() -> None:
     assert isinstance(result.deltas[0], RenameTable)
 
 
-async def test_compare_schemas_orders_typed_deltas_by_foreign_key_dependency() -> None:
+async def test_compare_schemas_creates_fk_tables_before_separate_constraint() -> None:
     parent_ref = _ref(ObjectKind.TABLE, "z_parent")
     child_ref = _ref(ObjectKind.TABLE, "a_child")
     parent = Table(
@@ -253,8 +253,8 @@ async def test_compare_schemas_orders_typed_deltas_by_foreign_key_dependency() -
     ]
     assert [delta.target for delta in result.deltas[:3]] == [
         _schema().ref,
-        parent_ref,
         child_ref,
+        parent_ref,
     ]
     constraint_delta = result.deltas[3]
     assert isinstance(constraint_delta, AddConstraint)

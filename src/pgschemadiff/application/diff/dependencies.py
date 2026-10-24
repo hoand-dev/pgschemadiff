@@ -6,7 +6,13 @@ from collections import defaultdict
 from typing import TYPE_CHECKING
 
 from pgschemadiff.application.diff.topo_sort import topological_sort
-from pgschemadiff.domain.constraint import ForeignKeyConstraint
+from pgschemadiff.domain.constraint import (
+    Constraint,
+    ExclusionConstraint,
+    ForeignKeyConstraint,
+    PrimaryKeyConstraint,
+    UniqueConstraint,
+)
 from pgschemadiff.domain.delta.base import DeltaBase, DeltaOp, DeltaSet
 from pgschemadiff.domain.delta.column import AddColumn, DropColumn, RenameColumn
 from pgschemadiff.domain.delta.constraint import AddConstraint, DropConstraint
@@ -86,13 +92,20 @@ def _add_create_dependencies(
         elif isinstance(delta, AddConstraint):
             _add_constraint_create_dependencies(delta, creates, add)
         elif isinstance(delta, CreateTable):
-            for constraint in delta.table.constraints:
-                if isinstance(constraint, ForeignKeyConstraint):
-                    _add_create_prerequisites(
-                        delta, _fk_refs(constraint, delta.table.ref), creates, add
-                    )
+            partition_of = delta.table.partition_of
+            if partition_of is not None:
+                parent_ref = ObjectRef(
+                    kind=ObjectKind.TABLE,
+                    qname=QualifiedName(
+                        namespace=partition_of.parent_namespace,
+                        name=partition_of.parent_name,
+                    ),
+                )
+                _add_create_prerequisites(delta, (parent_ref,), creates, add)
 
     _add_index_create_dependencies(nodes, creates, add)
+    _add_fk_unique_dependencies(nodes, add)
+    _add_constraint_identity_dependencies(nodes, add)
 
     for delta in nodes:
         if delta.op is DeltaOp.CREATE and delta.target.kind not in {
@@ -122,6 +135,104 @@ def _add_index_create_dependencies(
             _add_create_prerequisites(delta, _index_refs(delta.index), creates, add)
         elif isinstance(delta, ReplaceIndex):
             _add_create_prerequisites(delta, _index_refs(delta.new_index), creates, add)
+
+
+def _add_fk_unique_dependencies(
+    nodes: tuple[DeltaBase, ...],
+    add: Callable[[DeltaBase, DeltaBase], None],
+) -> None:
+    unique_creates: dict[tuple[ObjectRef, frozenset[str]], list[AddConstraint]] = defaultdict(list)
+    for delta in nodes:
+        if not isinstance(delta, AddConstraint):
+            continue
+        owner = delta.target.parent
+        if owner is None:
+            continue
+        if isinstance(delta.constraint, (PrimaryKeyConstraint, UniqueConstraint)):
+            unique_creates[(owner, frozenset(delta.constraint.columns))].append(delta)
+
+    for delta in nodes:
+        if not isinstance(delta, AddConstraint) or not isinstance(
+            delta.constraint, ForeignKeyConstraint
+        ):
+            continue
+        # A FK can reference the same unique column set in a different order.
+        key = (_fk_table_ref(delta.constraint), frozenset(delta.constraint.ref_columns))
+        for unique_create in unique_creates.get(key, ()):
+            add(unique_create, delta)
+
+
+def _add_constraint_identity_dependencies(
+    nodes: tuple[DeltaBase, ...],
+    add: Callable[[DeltaBase, DeltaBase], None],
+) -> None:
+    additions: list[AddConstraint] = []
+    drops_by_ref: dict[ObjectRef, list[DropConstraint]] = defaultdict(list)
+    create_indexes: dict[ObjectRef, list[CreateIndex]] = defaultdict(list)
+    drop_indexes: dict[ObjectRef, list[DropIndex]] = defaultdict(list)
+
+    for delta in nodes:
+        if isinstance(delta, AddConstraint):
+            additions.append(delta)
+        elif isinstance(delta, DropConstraint):
+            drops_by_ref[delta.target].append(delta)
+        elif isinstance(delta, CreateIndex):
+            create_indexes[delta.target].append(delta)
+        elif isinstance(delta, DropIndex):
+            drop_indexes[delta.target].append(delta)
+
+    _add_constraint_add_identity_dependencies(additions, drops_by_ref, drop_indexes, add)
+    _add_drop_constraint_index_dependencies(drops_by_ref, create_indexes, add)
+
+
+def _add_constraint_add_identity_dependencies(
+    additions: list[AddConstraint],
+    drops_by_ref: dict[ObjectRef, list[DropConstraint]],
+    drop_indexes: dict[ObjectRef, list[DropIndex]],
+    add: Callable[[DeltaBase, DeltaBase], None],
+) -> None:
+    for delta in additions:
+        for dropped_constraint in drops_by_ref.get(delta.target, ()):
+            add(dropped_constraint, delta)
+
+        backing_index_ref = _constraint_backing_index_ref(delta.constraint, delta.target.parent)
+        if backing_index_ref is not None:
+            for dropped_index in drop_indexes.get(backing_index_ref, ()):
+                add(dropped_index, delta)
+
+
+def _add_drop_constraint_index_dependencies(
+    drops_by_ref: dict[ObjectRef, list[DropConstraint]],
+    create_indexes: dict[ObjectRef, list[CreateIndex]],
+    add: Callable[[DeltaBase, DeltaBase], None],
+) -> None:
+    for dropped_constraints in drops_by_ref.values():
+        for dropped_constraint in dropped_constraints:
+            backing_index_ref = _constraint_backing_index_ref(
+                dropped_constraint.constraint, dropped_constraint.target.parent
+            )
+            if backing_index_ref is not None:
+                for created_index in create_indexes.get(backing_index_ref, ()):
+                    add(dropped_constraint, created_index)
+
+
+def _constraint_backing_index_ref(
+    constraint: Constraint,
+    owner: ObjectRef | None,
+) -> ObjectRef | None:
+    """Return backing-index identity.
+
+    PostgreSQL names indexes backing PK/UNIQUE/EXCLUSION constraints after the
+    constraint.
+    """
+    if owner is None or not isinstance(
+        constraint, (PrimaryKeyConstraint, UniqueConstraint, ExclusionConstraint)
+    ):
+        return None
+    return ObjectRef(
+        kind=ObjectKind.INDEX,
+        qname=QualifiedName(namespace=owner.qname.namespace, name=constraint.name),
+    )
 
 
 def _add_constraint_create_dependencies(
