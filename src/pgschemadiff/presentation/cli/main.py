@@ -1,9 +1,9 @@
 """``pgsd`` CLI entry point.
 
-Phase 0 stub — ``inspect``, ``diff``, ``generate``, ``apply`` sub-commands
-arrive in later phases.  ``pgsd tui`` (and ``pgsd`` with no sub-command)
-launches the interactive Textual TUI implemented in
-``pgschemadiff.presentation.tui``.
+The ``inspect``, ``diff``, and ``generate`` sub-commands handle database
+operations. ``pgsd apply`` arrives in a later phase. ``pgsd tui`` (and
+``pgsd`` with no sub-command) launches the interactive Textual TUI implemented
+in ``pgschemadiff.presentation.tui``.
 """
 
 from __future__ import annotations
@@ -13,7 +13,9 @@ from pathlib import Path  # noqa: TC003 - Typer resolves Path at runtime
 import typer
 
 from pgschemadiff import __version__
+from pgschemadiff.application.sql_emit.risk import RiskLevel
 from pgschemadiff.presentation.cli.commands.diff import diff_cmd
+from pgschemadiff.presentation.cli.commands.generate import generate_cmd
 from pgschemadiff.presentation.cli.commands.inspect import inspect_cmd
 from pgschemadiff.presentation.cli.commands.tui import launch as launch_tui
 from pgschemadiff.shared.logging import configure_logging
@@ -97,6 +99,45 @@ def diff(
         target_url=target_url,
         schemas=schemas,
         renames_path=renames,
+    )
+
+
+@app.command("generate")
+def generate(
+    source_url: str = typer.Argument(..., help="Source PostgreSQL connection URL."),
+    target_url: str = typer.Argument(..., help="Target PostgreSQL connection URL."),
+    out_dir: Path = typer.Option(  # noqa: B008
+        ...,
+        "--out",
+        help="Existing directory in which to write the migration bundle.",
+    ),
+    schemas: list[str] | None = typer.Option(  # noqa: B008
+        None,
+        "--schema",
+        "-s",
+        help="Schema(s) to inspect (repeatable). Default: all user schemas.",
+    ),
+    renames: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--renames",
+        help="YAML or TOML file with explicit rename annotations.",
+    ),
+    max_risk: RiskLevel = typer.Option(  # noqa: B008
+        RiskLevel.DANGEROUS,
+        "--max-risk",
+        help="Maximum allowed migration risk.",
+    ),
+    name: str = typer.Option("diff", "--name", help="Migration bundle slug."),
+) -> None:
+    """Generate and write a risk-gated migration bundle."""
+    generate_cmd(
+        source_url=source_url,
+        target_url=target_url,
+        out_dir=out_dir,
+        schemas=schemas,
+        renames_path=renames,
+        max_risk=max_risk,
+        name=name,
     )
 
 

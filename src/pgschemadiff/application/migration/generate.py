@@ -21,7 +21,7 @@ from pgschemadiff.application.sql_emit.risk import (
     passes_risk_limit,
 )
 from pgschemadiff.application.sql_emit.transaction import split_units
-from pgschemadiff.shared.errors import MigrationError
+from pgschemadiff.shared.errors import MigrationError, RiskGateError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -87,7 +87,7 @@ def generate_migration(
             f"level={assessment.level.value} reason={assessment.reason}"
             for delta_id, assessment in offending
         )
-        raise MigrationError(f"Migration risk gate failed (max_risk={max_risk.value}):\n{details}")
+        raise RiskGateError(f"Migration risk gate failed (max_risk={max_risk.value}):\n{details}")
 
     statements = SqlEmitter(default_handlers()).emit(ordered_deltas)
     transaction_units = split_units(statements)

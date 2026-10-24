@@ -27,5 +27,9 @@ class MigrationError(PgSchemaDiffError):
     """Raised by the SQL emitter or applier when a migration cannot proceed."""
 
 
+class RiskGateError(MigrationError):
+    """Migration generation was rejected because deltas exceed the allowed risk."""
+
+
 class BlockedMigrationError(MigrationError):
     """A change is blocked because PostgreSQL cannot express it safely."""

@@ -8,7 +8,7 @@ from pgschemadiff.application.sql_emit.risk import RiskAssessment, RiskLevel, cl
 from pgschemadiff.domain.delta import CreateSchema, DeltaBase, DeltaSet, DropSchema
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.schema import Schema
-from pgschemadiff.shared.errors import MigrationError
+from pgschemadiff.shared.errors import MigrationError, RiskGateError
 
 
 def _schema_ref(name: str) -> ObjectRef:
@@ -152,7 +152,7 @@ def test_risk_gate_lists_every_offending_delta_without_emitting(
         MustNotEmit,
     )
 
-    with pytest.raises(MigrationError) as raised:
+    with pytest.raises(RiskGateError) as raised:
         generate_migration(
             DeltaSet.from_iterable((beta, alpha)),
             clock=_clock,

@@ -24,6 +24,25 @@ if TYPE_CHECKING:
 _POOL_OPEN_TIMEOUT: float = 5.0
 
 
+async def compare_urls(
+    source_url: str,
+    target_url: str,
+    schemas: list[str] | None,
+    *,
+    renames: RenameAnnotations | None = None,
+) -> DeltaSet:
+    """Open both databases and compare their inspected schemas."""
+    async with Pool(source_url, open_timeout=_POOL_OPEN_TIMEOUT) as source_pool:
+        source_inspector = PgCatalogInspector(source_pool, schemas=schemas)
+        async with Pool(target_url, open_timeout=_POOL_OPEN_TIMEOUT) as target_pool:
+            target_inspector = PgCatalogInspector(target_pool, schemas=schemas)
+            return await compare_schemas(
+                source_inspector,
+                target_inspector,
+                renames=renames,
+            )
+
+
 def diff_cmd(
     source_url: str,
     target_url: str,
@@ -36,20 +55,11 @@ def diff_cmd(
     output or logs.
     """
 
-    async def _run(renames: RenameAnnotations | None) -> DeltaSet:
-        async with Pool(source_url, open_timeout=_POOL_OPEN_TIMEOUT) as source_pool:
-            source_inspector = PgCatalogInspector(source_pool, schemas=schemas)
-            async with Pool(target_url, open_timeout=_POOL_OPEN_TIMEOUT) as target_pool:
-                target_inspector = PgCatalogInspector(target_pool, schemas=schemas)
-                return await compare_schemas(
-                    source_inspector,
-                    target_inspector,
-                    renames=renames,
-                )
-
     try:
         rename_annotations = load_renames(renames_path) if renames_path is not None else None
-        delta_set = asyncio.run(_run(rename_annotations))
+        delta_set = asyncio.run(
+            compare_urls(source_url, target_url, schemas, renames=rename_annotations)
+        )
     except (psycopg.Error, psycopg_pool.PoolTimeout):
         typer.echo("Error: Database connection failed.", err=True)
         raise typer.Exit(code=1) from None
