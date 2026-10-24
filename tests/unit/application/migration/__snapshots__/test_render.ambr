@@ -1,0 +1,455 @@
+# serializer version: 1
+# name: test_render_bundle_snapshots_all_five_artifacts[empty]
+  tuple(
+    tuple(
+      'up.sql',
+      '''
+        -- pgschemadiff migration: empty-plan
+        -- created_at: 2026-10-24T12:30:45Z
+        -- max_risk: none
+        SET standard_conforming_strings = on;
+  
+      ''',
+    ),
+    tuple(
+      'down.sql',
+      '''
+        -- pgschemadiff rollback unavailable: empty-plan
+        -- MVP-A emits no inverse SQL; following entries are annotations only.
+  
+      ''',
+    ),
+    tuple(
+      'manifest.json',
+      '''
+        {
+          "format_version": 1,
+          "tool_version": "0.0.0",
+          "id": "empty-plan",
+          "slug": "diff",
+          "created_at": "2026-10-24T12:30:45Z",
+          "source_fingerprint": null,
+          "target_fingerprint": null,
+          "delta_count": 0,
+          "overall_max_risk": null,
+          "assessments": [],
+          "units": [],
+          "checksums": {
+            "up_sql_sha256": "0eb5058ab4b1dc96629142de35512a802ceabb4d5c82e7b8d8ce06b099fb3999"
+          }
+        }
+  
+      ''',
+    ),
+    tuple(
+      'deltas.json',
+      '''
+        {
+          "deltas": []
+        }
+  
+      ''',
+    ),
+    tuple(
+      'README.md',
+      '''
+        # Migration empty-plan
+        
+        - Created at: 2026-10-24T12:30:45Z
+        - Delta count: 0
+        - Overall max risk: none
+        
+        ## Execution units
+        
+        | Unit | Transactional | Max risk | Delta IDs |
+        |---:|:---:|---|---|
+        | — | — | — | — |
+        
+        ## Files
+        
+        - `up.sql`
+        - `down.sql`
+        - `manifest.json`
+        - `deltas.json`
+        - `README.md`
+        
+        ## SHA-256
+        
+        - `up.sql`: `0eb5058ab4b1dc96629142de35512a802ceabb4d5c82e7b8d8ce06b099fb3999`
+        - `down.sql`: `f77f041ac786eec0f610920280436fdb7c91045e7f91e0d0d06388ea254916b8`
+        - `manifest.json`: `705364b2acf30587e61caf56e8861119978ba90db3e5467613523e159d972da4`
+        - `deltas.json`: `4438bfb5b0df4f54606ffec1f2ec725dbd574cec0b6df311d0769ed55344ca9f`
+        
+        ## Warnings
+        
+        - Rollback SQL is unavailable; `down.sql` contains annotations only.
+        - A failed `CREATE INDEX CONCURRENTLY` leaves an INVALID index; drop it before retrying.
+        - Non-transactional units cannot be rolled back.
+  
+      ''',
+    ),
+  )
+# ---
+# name: test_render_bundle_snapshots_all_five_artifacts[realistic]
+  tuple(
+    tuple(
+      'up.sql',
+      '''
+        -- pgschemadiff migration: render-plan
+        -- created_at: 2026-10-24T12:30:45Z
+        -- max_risk: dangerous
+        SET standard_conforming_strings = on;
+        -- pgschemadiff unit: 0 transactional=true max_risk=dangerous
+        BEGIN;
+        -- delta: d0001
+        CREATE SCHEMA "app"
+        ;
+        -- delta: d0002
+        CREATE TABLE "app"."accounts" ("id" integer NOT NULL, "email" text NOT NULL)
+        ;
+        -- delta: d0003
+        ALTER TABLE "app"."accounts" ADD CONSTRAINT "accounts_pkey" PRIMARY KEY ("id")
+        ;
+        COMMIT;
+        
+        -- pgschemadiff unit: 1 transactional=false max_risk=warning
+        -- delta: d0004
+        CREATE INDEX CONCURRENTLY "accounts_email_idx" ON "app"."accounts" USING btree ("email")
+        ;
+  
+      ''',
+    ),
+    tuple(
+      'down.sql',
+      '''
+        -- pgschemadiff rollback unavailable: render-plan
+        -- MVP-A emits no inverse SQL; following entries are annotations only.
+        -- d0001 IRREVERSIBLE: MVP-A does not derive inverse SQL from DeltaSet; complete prior state may be missing.
+        -- d0002 IRREVERSIBLE: MVP-A does not derive inverse SQL from DeltaSet; complete prior state may be missing.
+        -- d0003 IRREVERSIBLE: MVP-A does not derive inverse SQL from DeltaSet; complete prior state may be missing.
+        -- d0004 IRREVERSIBLE: MVP-A does not derive inverse SQL from DeltaSet; complete prior state may be missing.
+  
+      ''',
+    ),
+    tuple(
+      'manifest.json',
+      '''
+        {
+          "format_version": 1,
+          "tool_version": "0.0.0",
+          "id": "render-plan",
+          "slug": "diff",
+          "created_at": "2026-10-24T12:30:45Z",
+          "source_fingerprint": "source-hash",
+          "target_fingerprint": "target-hash",
+          "delta_count": 4,
+          "overall_max_risk": "dangerous",
+          "assessments": [
+            {
+              "delta_id": "d0001",
+              "kind": "create_schema",
+              "target": "\"public\".\"app\"",
+              "level": "safe",
+              "reason": "Creates an empty schema.",
+              "reversible": false,
+              "reversibility_reason": "MVP-A does not derive inverse SQL from DeltaSet; complete prior state may be missing."
+            },
+            {
+              "delta_id": "d0002",
+              "kind": "create_table",
+              "target": "\"app\".\"accounts\"",
+              "level": "safe",
+              "reason": "Creates an empty table.",
+              "reversible": false,
+              "reversibility_reason": "MVP-A does not derive inverse SQL from DeltaSet; complete prior state may be missing."
+            },
+            {
+              "delta_id": "d0003",
+              "kind": "add_constraint",
+              "target": "\"app\".\"accounts\".accounts_pkey",
+              "level": "dangerous",
+              "reason": "Adding a constraint may scan or validate rows, block, or fail on existing data.",
+              "reversible": false,
+              "reversibility_reason": "MVP-A does not derive inverse SQL from DeltaSet; complete prior state may be missing."
+            },
+            {
+              "delta_id": "d0004",
+              "kind": "create_index",
+              "target": "\"app\".\"accounts_email_idx\"",
+              "level": "warning",
+              "reason": "Index creation may block because execution mode is not specified.",
+              "reversible": false,
+              "reversibility_reason": "MVP-A does not derive inverse SQL from DeltaSet; complete prior state may be missing."
+            }
+          ],
+          "units": [
+            {
+              "index": 0,
+              "transactional": true,
+              "start_line": 8,
+              "end_line": 14,
+              "max_risk": "dangerous",
+              "delta_ids": [
+                "d0001",
+                "d0002",
+                "d0003"
+              ],
+              "statements": [
+                {
+                  "delta_id": "d0001",
+                  "start_line": 8,
+                  "end_line": 8
+                },
+                {
+                  "delta_id": "d0002",
+                  "start_line": 11,
+                  "end_line": 11
+                },
+                {
+                  "delta_id": "d0003",
+                  "start_line": 14,
+                  "end_line": 14
+                }
+              ],
+              "sql_sha256": "96e5dd941bc984a88de59c0be88942501800e97da66a608c4340dc95c2aefea3"
+            },
+            {
+              "index": 1,
+              "transactional": false,
+              "start_line": 20,
+              "end_line": 20,
+              "max_risk": "warning",
+              "delta_ids": [
+                "d0004"
+              ],
+              "statements": [
+                {
+                  "delta_id": "d0004",
+                  "start_line": 20,
+                  "end_line": 20
+                }
+              ],
+              "sql_sha256": "ef66c1bd5c27ba33f53f64443c3e81268638642d624c1bb2707f179c8fb5aedd"
+            }
+          ],
+          "checksums": {
+            "up_sql_sha256": "242b5aff311b4647a9dcefd0bf310fca322ba3b3d579e91de311133c0b413edb"
+          }
+        }
+  
+      ''',
+    ),
+    tuple(
+      'deltas.json',
+      '''
+        {
+          "deltas": [
+            {
+              "op": "create",
+              "target": {
+                "kind": "schema",
+                "qname": {
+                  "namespace": "public",
+                  "name": "app"
+                },
+                "parent": null,
+                "arg_signature": null
+              },
+              "kind": "create_schema",
+              "pg_schema": {
+                "ref": {
+                  "kind": "schema",
+                  "qname": {
+                    "namespace": "public",
+                    "name": "app"
+                  },
+                  "parent": null,
+                  "arg_signature": null
+                },
+                "owner": null,
+                "tables": [],
+                "indexes": [],
+                "comment": null
+              }
+            },
+            {
+              "op": "create",
+              "target": {
+                "kind": "table",
+                "qname": {
+                  "namespace": "app",
+                  "name": "accounts"
+                },
+                "parent": null,
+                "arg_signature": null
+              },
+              "kind": "create_table",
+              "table": {
+                "ref": {
+                  "kind": "table",
+                  "qname": {
+                    "namespace": "app",
+                    "name": "accounts"
+                  },
+                  "parent": null,
+                  "arg_signature": null
+                },
+                "columns": [
+                  {
+                    "name": "id",
+                    "position": 1,
+                    "data_type": "integer",
+                    "nullable": false,
+                    "default_expr": null,
+                    "collation": null,
+                    "identity": null,
+                    "generated_expression": null
+                  },
+                  {
+                    "name": "email",
+                    "position": 2,
+                    "data_type": "text",
+                    "nullable": false,
+                    "default_expr": null,
+                    "collation": null,
+                    "identity": null,
+                    "generated_expression": null
+                  }
+                ],
+                "constraints": [],
+                "owner": null,
+                "tablespace": null,
+                "partition_info": null,
+                "partition_of": null,
+                "comment": null
+              }
+            },
+            {
+              "op": "create",
+              "target": {
+                "kind": "constraint",
+                "qname": {
+                  "namespace": "app",
+                  "name": "accounts_pkey"
+                },
+                "parent": {
+                  "kind": "table",
+                  "qname": {
+                    "namespace": "app",
+                    "name": "accounts"
+                  },
+                  "parent": null,
+                  "arg_signature": null
+                },
+                "arg_signature": null
+              },
+              "kind": "add_constraint",
+              "constraint": {
+                "name": "accounts_pkey",
+                "definition": "PRIMARY KEY (\"id\")",
+                "inherited": false,
+                "deferrability": "not_deferrable",
+                "kind": "primary_key",
+                "columns": [
+                  "id"
+                ],
+                "index_method": "btree"
+              }
+            },
+            {
+              "op": "create",
+              "target": {
+                "kind": "index",
+                "qname": {
+                  "namespace": "app",
+                  "name": "accounts_email_idx"
+                },
+                "parent": null,
+                "arg_signature": null
+              },
+              "kind": "create_index",
+              "index": {
+                "ref": {
+                  "kind": "index",
+                  "qname": {
+                    "namespace": "app",
+                    "name": "accounts_email_idx"
+                  },
+                  "parent": null,
+                  "arg_signature": null
+                },
+                "table_ref": {
+                  "kind": "table",
+                  "qname": {
+                    "namespace": "app",
+                    "name": "accounts"
+                  },
+                  "parent": null,
+                  "arg_signature": null
+                },
+                "method": "btree",
+                "key_columns": [
+                  {
+                    "column_name": "email",
+                    "expression": null,
+                    "opclass": null,
+                    "sort_order": "asc",
+                    "nulls_order": null
+                  }
+                ],
+                "include_columns": [],
+                "unique": false,
+                "predicate": null,
+                "definition": "CREATE INDEX \"accounts_email_idx\" ON \"app\".\"accounts\" USING btree (\"email\")",
+                "constraint_name": null,
+                "comment": null
+              }
+            }
+          ]
+        }
+  
+      ''',
+    ),
+    tuple(
+      'README.md',
+      '''
+        # Migration render-plan
+        
+        - Created at: 2026-10-24T12:30:45Z
+        - Source fingerprint: `source-hash`
+        - Target fingerprint: `target-hash`
+        - Delta count: 4
+        - Overall max risk: dangerous
+        
+        ## Execution units
+        
+        | Unit | Transactional | Max risk | Delta IDs |
+        |---:|:---:|---|---|
+        | 0 | true | dangerous | d0001, d0002, d0003 |
+        | 1 | false | warning | d0004 |
+        
+        ## Files
+        
+        - `up.sql`
+        - `down.sql`
+        - `manifest.json`
+        - `deltas.json`
+        - `README.md`
+        
+        ## SHA-256
+        
+        - `up.sql`: `242b5aff311b4647a9dcefd0bf310fca322ba3b3d579e91de311133c0b413edb`
+        - `down.sql`: `e87201d8d4470825bb2bea1bd7a4503e7152abd3a22dbd70418d51cfa851166e`
+        - `manifest.json`: `c7459bda50db5fa8a5cdaa722327769bc4eff7905ce00fd615466c85de50deba`
+        - `deltas.json`: `bc7effbceb5f74c247b2bc8aa1ebac0d850c12b16f11495685acdd8d3029962b`
+        
+        ## Warnings
+        
+        - Rollback SQL is unavailable; `down.sql` contains annotations only.
+        - A failed `CREATE INDEX CONCURRENTLY` leaves an INVALID index; drop it before retrying.
+        - Non-transactional units cannot be rolled back.
+  
+      ''',
+    ),
+  )
+# ---
