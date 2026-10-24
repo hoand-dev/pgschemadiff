@@ -1,0 +1,50 @@
+# serializer version: 1
+# name: test_ordered_delta_set_emits_valid_migration_order
+  tuple(
+    tuple(
+      'CREATE SCHEMA "app"',
+      True,
+      False,
+    ),
+    tuple(
+      'ALTER TABLE "public"."legacy" ADD COLUMN "display_name" text DEFAULT \'Guest\'::text',
+      True,
+      False,
+    ),
+    tuple(
+      'CREATE TABLE "app"."accounts" ("id" integer NOT NULL, "email" text)',
+      True,
+      False,
+    ),
+    tuple(
+      'CREATE TABLE "app"."orders" ("id" integer NOT NULL, "account_id" integer NOT NULL, "status" text)',
+      True,
+      False,
+    ),
+    tuple(
+      'ALTER TABLE "app"."accounts" ADD CONSTRAINT "accounts_pkey" PRIMARY KEY ("id")',
+      True,
+      False,
+    ),
+    tuple(
+      'ALTER TABLE "app"."orders" ADD CONSTRAINT "orders_pkey" PRIMARY KEY ("id")',
+      True,
+      False,
+    ),
+    tuple(
+      'CREATE INDEX CONCURRENTLY "orders_account_id_idx" ON "app"."orders" USING btree ("account_id")',
+      False,
+      False,
+    ),
+    tuple(
+      'ALTER TABLE "app"."orders" ADD CONSTRAINT "orders_account_fkey" FOREIGN KEY ("account_id") REFERENCES "app"."accounts" ("id") MATCH SIMPLE ON UPDATE NO ACTION ON DELETE NO ACTION NOT DEFERRABLE NOT VALID',
+      True,
+      False,
+    ),
+    tuple(
+      'ALTER TABLE "app"."orders" VALIDATE CONSTRAINT "orders_account_fkey"',
+      True,
+      True,
+    ),
+  )
+# ---

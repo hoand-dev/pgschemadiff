@@ -1,0 +1,13 @@
+# serializer version: 1
+# name: test_schema_and_extension_statements
+  tuple(
+    'CREATE SCHEMA "Accounting Data" AUTHORIZATION "Migration Owner"',
+    'COMMENT ON SCHEMA "Accounting Data" IS \'Owner\'\'s namespace\'',
+    'DROP SCHEMA "old" RESTRICT',
+    'CREATE EXTENSION "Geo""Tools" WITH SCHEMA "Extensions" VERSION \'3.4\'\'beta\'',
+    'COMMENT ON EXTENSION "Geo""Tools" IS \'Coordinate\'\'s system\'',
+    'DROP EXTENSION "unused" RESTRICT',
+    'ALTER EXTENSION "Ext""Name" UPDATE TO \'2.0\'',
+    'ALTER EXTENSION "Ext""Name" SET SCHEMA "app"',
+  )
+# ---
