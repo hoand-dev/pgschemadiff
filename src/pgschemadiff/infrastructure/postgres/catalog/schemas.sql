@@ -11,4 +11,5 @@ SELECT
 FROM pg_catalog.pg_namespace AS n
 WHERE n.nspname NOT LIKE 'pg_%'
   AND n.nspname != 'information_schema'
+  AND n.nspname != 'pgschemadiff'
 ORDER BY n.nspname

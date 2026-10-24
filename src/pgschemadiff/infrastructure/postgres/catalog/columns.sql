@@ -71,4 +71,5 @@ WHERE c.relkind IN ('r', 'p')
   AND NOT a.attisdropped
   AND n.nspname NOT LIKE 'pg_%'
   AND n.nspname != 'information_schema'
+  AND n.nspname != 'pgschemadiff'
 ORDER BY n.nspname, c.relname, a.attnum

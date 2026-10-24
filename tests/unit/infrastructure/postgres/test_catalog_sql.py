@@ -322,6 +322,23 @@ def test_schemas_sql_selects_owner_and_comment() -> None:
     assert "pg_catalog.obj_description(n.oid, 'pg_namespace') AS comment" in sql
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "filename",
+    [
+        pytest.param("schemas.sql"),
+        pytest.param("tables.sql"),
+        pytest.param("columns.sql"),
+        pytest.param("constraints.sql"),
+        pytest.param("indexes.sql"),
+    ],
+)
+def test_catalog_sql_excludes_reserved_history_schema(filename: str) -> None:
+    sql = _load_sql(filename)
+    assert "n.nspname != 'information_schema'" in sql
+    assert "n.nspname != 'pgschemadiff'" in sql
+
+
 # ---------------------------------------------------------------------------
 # Snapshot tests — catch unintended query drift
 # ---------------------------------------------------------------------------
