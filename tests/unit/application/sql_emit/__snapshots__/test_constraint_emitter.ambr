@@ -1,0 +1,71 @@
+# serializer version: 1
+# name: test_add_check_no_inherit_and_validate
+  tuple(
+    'ALTER TABLE "Sales"."Order""Items" ADD CONSTRAINT "check_positive" CHECK (value > 0) NO INHERIT NOT VALID',
+    'ALTER TABLE "Sales"."Order""Items" VALIDATE CONSTRAINT "check_positive"',
+  )
+# ---
+# name: test_add_check_without_no_inherit
+  tuple(
+    'ALTER TABLE "Sales"."Order""Items" ADD CONSTRAINT "check_positive" CHECK (value > 0) NOT VALID',
+    'ALTER TABLE "Sales"."Order""Items" VALIDATE CONSTRAINT "check_positive"',
+  )
+# ---
+# name: test_add_exclusion_constraint
+  tuple(
+    'ALTER TABLE "Sales"."Order""Items" ADD CONSTRAINT "excl_order_range" EXCLUDE USING gist ("during" WITH &&, "region" WITH =) WHERE ("during" IS NOT NULL)',
+  )
+# ---
+# name: test_add_foreign_key_uses_structured_options[cascade-set-null]
+  tuple(
+    'ALTER TABLE "Sales"."Order""Items" ADD CONSTRAINT "fk_order_customer" FOREIGN KEY ("customer_id") REFERENCES "CRM"."Customer""Record" ("id") MATCH FULL ON UPDATE CASCADE ON DELETE SET NULL DEFERRABLE INITIALLY IMMEDIATE NOT VALID',
+    'ALTER TABLE "Sales"."Order""Items" VALIDATE CONSTRAINT "fk_order_customer"',
+  )
+# ---
+# name: test_add_foreign_key_uses_structured_options[defaults]
+  tuple(
+    'ALTER TABLE "Sales"."Order""Items" ADD CONSTRAINT "fk_order_customer" FOREIGN KEY ("customer_id") REFERENCES "CRM"."Customer""Record" ("id") MATCH SIMPLE ON UPDATE NO ACTION ON DELETE RESTRICT NOT DEFERRABLE NOT VALID',
+    'ALTER TABLE "Sales"."Order""Items" VALIDATE CONSTRAINT "fk_order_customer"',
+  )
+# ---
+# name: test_add_foreign_key_uses_structured_options[set-default-deferred]
+  tuple(
+    'ALTER TABLE "Sales"."Order""Items" ADD CONSTRAINT "fk_order_customer" FOREIGN KEY ("customer_id") REFERENCES "CRM"."Customer""Record" ("id") MATCH FULL ON UPDATE SET DEFAULT ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED NOT VALID',
+    'ALTER TABLE "Sales"."Order""Items" VALIDATE CONSTRAINT "fk_order_customer"',
+  )
+# ---
+# name: test_add_primary_key
+  tuple(
+    'ALTER TABLE "Sales"."Order""Items" ADD CONSTRAINT "pk_orders" PRIMARY KEY ("id")',
+  )
+# ---
+# name: test_add_unique_constraint
+  tuple(
+    'ALTER TABLE "Sales"."Order""Items" ADD CONSTRAINT "uq_orders_email" UNIQUE NULLS NOT DISTINCT ("email") DEFERRABLE INITIALLY DEFERRED',
+  )
+# ---
+# name: test_drop_constraint_for_each_kind[check]
+  tuple(
+    'ALTER TABLE "Sales"."Order""Items" DROP CONSTRAINT "constraint"',
+  )
+# ---
+# name: test_drop_constraint_for_each_kind[exclusion]
+  tuple(
+    'ALTER TABLE "Sales"."Order""Items" DROP CONSTRAINT "constraint"',
+  )
+# ---
+# name: test_drop_constraint_for_each_kind[fk]
+  tuple(
+    'ALTER TABLE "Sales"."Order""Items" DROP CONSTRAINT "constraint"',
+  )
+# ---
+# name: test_drop_constraint_for_each_kind[pk]
+  tuple(
+    'ALTER TABLE "Sales"."Order""Items" DROP CONSTRAINT "constraint"',
+  )
+# ---
+# name: test_drop_constraint_for_each_kind[unique]
+  tuple(
+    'ALTER TABLE "Sales"."Order""Items" DROP CONSTRAINT "constraint"',
+  )
+# ---

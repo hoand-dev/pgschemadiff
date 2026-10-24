@@ -101,3 +101,19 @@ def test_statement_rejects_blank_sql_and_is_frozen() -> None:
     statement = SqlStatement(sql="SELECT 1;", transactional=True, delta=_CREATE)
     with pytest.raises(FrozenInstanceError):
         statement.sql = "SELECT 2;"  # type: ignore[misc]
+
+
+def test_statement_new_unit_defaults_false_and_survives_dispatch() -> None:
+    default_statement = SqlStatement(sql="SELECT 1;", transactional=True, delta=_CREATE)
+    assert default_statement.new_unit is False
+
+    def emit_new_unit(delta: DeltaBase) -> tuple[SqlStatement, ...]:
+        return (
+            SqlStatement(sql="VALIDATE CONSTRAINT", transactional=True, delta=delta, new_unit=True),
+        )
+
+    statement = SqlEmitter({CreateSchema: emit_new_unit}).emit(DeltaSet.from_iterable((_CREATE,)))[
+        0
+    ]
+
+    assert statement.new_unit is True

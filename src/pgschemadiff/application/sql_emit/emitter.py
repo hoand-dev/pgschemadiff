@@ -11,11 +11,16 @@ from pgschemadiff.shared.errors import MigrationError
 
 @dataclass(frozen=True)
 class SqlStatement:
-    """One forward SQL statement and its execution/provenance metadata."""
+    """One forward SQL statement and its execution/provenance metadata.
+
+    ``new_unit`` tells the transaction splitter to start a new transaction unit
+    at this statement, even when the statement itself is transactional.
+    """
 
     sql: str
     transactional: bool
     delta: DeltaBase
+    new_unit: bool = False
 
     def __post_init__(self) -> None:
         if not self.sql.strip():

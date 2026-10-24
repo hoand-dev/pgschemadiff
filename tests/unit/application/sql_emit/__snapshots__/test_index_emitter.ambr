@@ -1,0 +1,24 @@
+# serializer version: 1
+# name: test_create_partial_include_index_and_comment
+  tuple(
+    'CREATE INDEX CONCURRENTLY "Search""Idx" ON "Sales"."Order""Items" USING btree ("display" DESC NULLS FIRST) INCLUDE ("cover") WHERE (active = true)',
+    'COMMENT ON INDEX "Sales"."Search""Idx" IS \'it\'\'s ready\'',
+  )
+# ---
+# name: test_create_unique_index
+  tuple(
+    'CREATE UNIQUE INDEX CONCURRENTLY "UniqueEmail" ON "Sales"."Order""Items" USING btree ("email")',
+  )
+# ---
+# name: test_drop_index
+  tuple(
+    'DROP INDEX CONCURRENTLY "Sales"."Search""Idx"',
+  )
+# ---
+# name: test_replace_index
+  tuple(
+    'DROP INDEX CONCURRENTLY "Sales"."Search""Idx"',
+    'CREATE INDEX CONCURRENTLY "Search""Idx" ON "Sales"."Order""Items" USING btree ("display" DESC)',
+    'COMMENT ON INDEX "Sales"."Search""Idx" IS \'rebuilt\'',
+  )
+# ---
