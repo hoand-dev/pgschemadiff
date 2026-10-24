@@ -96,6 +96,7 @@ _ColumnRow = namedtuple(
         "is_identity",
         "identity_generated",
         "is_generated",
+        "is_virtual_generated",
         "generated_expr",
     ],
 )
@@ -174,6 +175,7 @@ def _make_column_row(
     is_identity: bool = False,
     identity_generated: str | None = None,
     is_generated: bool = False,
+    is_virtual_generated: bool = False,
     generated_expr: str | None = None,
 ) -> Any:
     return _ColumnRow(
@@ -188,6 +190,7 @@ def _make_column_row(
         is_identity=is_identity,
         identity_generated=identity_generated,
         is_generated=is_generated,
+        is_virtual_generated=is_virtual_generated,
         generated_expr=generated_expr,
     )
 
@@ -293,6 +296,7 @@ def _build_mock_pool(
     conn.set_autocommit = AsyncMock()
     conn.execute = AsyncMock()
     conn.cursor = MagicMock(return_value=cur)
+    conn.attach_mock(cur, "catalog_cursor")
     conn.__aenter__ = AsyncMock(return_value=conn)
     conn.__aexit__ = AsyncMock(return_value=False)
 
@@ -358,6 +362,29 @@ async def test_inspect_starts_repeatable_read_transaction() -> None:
 
     conn = pool.acquire.return_value.__aenter__.return_value
     conn.execute.assert_any_call("BEGIN ISOLATION LEVEL REPEATABLE READ")
+
+
+@pytest.mark.unit
+async def test_inspect_sets_local_search_path_before_catalog_queries() -> None:
+    pool = _build_mock_pool()
+    inspector = PgCatalogInspector(pool)
+
+    await inspector.inspect()
+
+    conn = pool.acquire.return_value.__aenter__.return_value
+    statements = [
+        mock_call
+        for mock_call in conn.mock_calls
+        if mock_call[0] in {"execute", "catalog_cursor.execute"}
+    ]
+    assert [mock_call[0] for mock_call in statements] == [
+        "execute",
+        "execute",
+        *("catalog_cursor.execute" for _ in range(6)),
+        "execute",
+    ]
+    assert statements[0].args == ("BEGIN ISOLATION LEVEL REPEATABLE READ",)
+    assert statements[1].args == ("SET LOCAL search_path = pg_catalog",)
 
 
 @pytest.mark.unit
@@ -484,6 +511,20 @@ def test_map_column_with_default() -> None:
 
 
 @pytest.mark.unit
+def test_map_column_preserves_schema_qualified_default_expression() -> None:
+    row = _make_column_row(default_expr="nextval('public.s'::regclass)")
+
+    assert _map_column(row).default_expr == "nextval('public.s'::regclass)"
+
+
+@pytest.mark.unit
+def test_map_column_preserves_schema_qualified_user_type() -> None:
+    row = _make_column_row(data_type="public.mood")
+
+    assert _map_column(row).data_type == "public.mood"
+
+
+@pytest.mark.unit
 def test_map_column_identity_always() -> None:
     """An IDENTITY ALWAYS column should have an IdentitySpec with ALWAYS."""
     row = _make_column_row(
@@ -527,10 +568,18 @@ def test_map_column_generated() -> None:
 
 @pytest.mark.unit
 def test_map_column_with_collation() -> None:
-    """A column with a non-default collation should set collation."""
-    row = _make_column_row(column="name", collation="en_US.utf8")
+    """A non-default collation remains a quoted SQL identifier fragment."""
+    row = _make_column_row(column="name", collation='"public"."my_coll"')
     col = _map_column(row)
-    assert col.collation == "en_US.utf8"
+    assert col.collation == '"public"."my_coll"'
+
+
+@pytest.mark.unit
+def test_map_column_rejects_virtual_generated_column() -> None:
+    row = _make_column_row(is_virtual_generated=True)
+
+    with pytest.raises(InspectionError, match="Virtual generated columns are unsupported in MVP-A"):
+        _map_column(row)
 
 
 # ===========================================================================
@@ -613,6 +662,17 @@ def test_map_constraint_check() -> None:
 
 
 @pytest.mark.unit
+def test_map_constraint_check_preserves_schema_qualified_function() -> None:
+    ct = _map_check_constraint(
+        "users_check",
+        "CHECK (public.is_valid(value))",
+        ConstraintDeferrability.NOT_DEFERRABLE,
+    )
+
+    assert ct.expression == "public.is_valid(value)"
+
+
+@pytest.mark.unit
 def test_map_constraint_check_no_inherit() -> None:
     """NO INHERIT in CHECK definition should set the flag."""
     ct = _map_check_constraint(
@@ -642,6 +702,23 @@ def test_map_constraint_foreign_key() -> None:
     assert ct.ref_columns == ("id",)
     assert ct.definition == "FOREIGN KEY (user_id) REFERENCES public.users (id)"
     assert ct.inherited is True
+
+
+@pytest.mark.unit
+def test_map_foreign_key_parses_schema_qualified_reference() -> None:
+    row = SimpleNamespace(ref_schema=None, ref_table=None)
+
+    ct = _map_fk_constraint(
+        "fk",
+        "FOREIGN KEY (a) REFERENCES public.p (id)",
+        ConstraintDeferrability.NOT_DEFERRABLE,
+        row,
+    )
+
+    assert ct.columns == ("a",)
+    assert ct.ref_namespace == "public"
+    assert ct.ref_table == "p"
+    assert ct.ref_columns == ("id",)
 
 
 @pytest.mark.unit
@@ -795,6 +872,13 @@ def test_parse_index_key_columns_simple() -> None:
 
 
 @pytest.mark.unit
+def test_parse_index_key_columns_with_schema_qualified_table() -> None:
+    keys = _parse_index_key_columns("CREATE INDEX i ON public.t USING btree (a)")
+
+    assert tuple(key.column_name for key in keys) == ("a",)
+
+
+@pytest.mark.unit
 def test_parse_index_key_columns_multi() -> None:
     """Multi-column index."""
     defn = "CREATE INDEX i ON t USING btree (last_name, first_name)"
@@ -834,6 +918,7 @@ def test_map_index_preserves_definition_include_columns_and_constraint_name() ->
     index = _map_index(row)
 
     assert index.definition == definition
+    assert tuple(key.column_name for key in index.key_columns) == ("email",)
     assert index.include_columns == ("display_name",)
     assert index.constraint_name == "users_email_key"
 
@@ -940,6 +1025,13 @@ def test_parse_exclusion_elements_single() -> None:
 def test_parse_exclusion_elements_multiple() -> None:
     elements = _parse_exclusion_elements("room WITH =, during WITH &&")
     assert len(elements) == 2
+
+
+@pytest.mark.unit
+def test_parse_exclusion_element_with_schema_qualified_expression() -> None:
+    elements = _parse_exclusion_elements("(public.normalized(value)) WITH =")
+
+    assert elements[0].column_or_expr == "(public.normalized(value))"
 
 
 @pytest.mark.unit

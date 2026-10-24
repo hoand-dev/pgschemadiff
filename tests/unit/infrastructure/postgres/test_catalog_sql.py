@@ -144,6 +144,21 @@ def test_columns_sql_includes_generated_columns() -> None:
     assert "generated_expr" in sql
 
 
+@pytest.mark.unit
+def test_columns_sql_qualifies_non_catalog_collations() -> None:
+    sql = _load_sql("columns.sql")
+    assert "collation_namespace.nspname" in sql
+    assert "format('%I.%I', collation_namespace.nspname, col.collname)" in sql
+    assert "format('%I', col.collname)" in sql
+
+
+@pytest.mark.unit
+def test_columns_sql_exposes_virtual_generated_columns_for_fail_closed_mapping() -> None:
+    sql = _load_sql("columns.sql")
+    assert "a.attgenerated = 'v'" in sql
+    assert "AS is_virtual_generated" in sql
+
+
 # ---------------------------------------------------------------------------
 # indexes.sql specific checks
 # ---------------------------------------------------------------------------

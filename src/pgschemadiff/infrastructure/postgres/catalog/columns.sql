@@ -10,10 +10,11 @@
 --   data_type          text       -- format_type(atttypid, atttypmod)
 --   is_nullable        bool       -- true if column allows NULL (NOT attnotnull)
 --   default_expr       text|null  -- pg_get_expr(adbin, adrelid) for DEFAULT, null otherwise
---   collation          text|null  -- collation name if non-default, null otherwise
+--   collation          text|null  -- SQL identifier fragment, qualified outside pg_catalog
 --   is_identity        bool       -- true when attidentity != ''
 --   identity_generated text|null  -- 'ALWAYS' or 'BY DEFAULT' (when is_identity), null otherwise
 --   is_generated       bool       -- true when attgenerated = 's' (stored generated)
+--   is_virtual_generated bool     -- true when attgenerated = 'v' (unsupported)
 --   generated_expr     text|null  -- pg_get_expr(adbin, adrelid) for generated cols, null otherwise
 SELECT
     n.nspname                                            AS schema_name,
@@ -23,7 +24,7 @@ SELECT
     format_type(a.atttypid, a.atttypmod)                AS data_type,
     NOT a.attnotnull                                     AS is_nullable,
     CASE
-        WHEN a.attgenerated = 's' THEN NULL
+        WHEN a.attgenerated <> '' THEN NULL
         WHEN ad.adbin IS NOT NULL
             THEN pg_get_expr(ad.adbin, ad.adrelid)
         ELSE NULL
@@ -31,7 +32,11 @@ SELECT
     CASE
         WHEN a.attcollation <> 0
              AND a.attcollation <> t.typcollation
-            THEN col.collname
+            THEN CASE
+                WHEN collation_namespace.nspname = 'pg_catalog'
+                    THEN format('%I', col.collname)
+                ELSE format('%I.%I', collation_namespace.nspname, col.collname)
+            END
         ELSE NULL
     END                                                  AS collation,
     a.attidentity != ''                                  AS is_identity,
@@ -41,6 +46,7 @@ SELECT
         ELSE NULL
     END                                                  AS identity_generated,
     a.attgenerated = 's'                                 AS is_generated,
+    a.attgenerated = 'v'                                 AS is_virtual_generated,
     CASE
         WHEN a.attgenerated = 's' AND ad.adbin IS NOT NULL
             THEN pg_get_expr(ad.adbin, ad.adrelid)
@@ -58,6 +64,8 @@ LEFT JOIN pg_catalog.pg_attrdef ad
    AND ad.adnum   = a.attnum
 LEFT JOIN pg_catalog.pg_collation col
     ON col.oid = a.attcollation
+LEFT JOIN pg_catalog.pg_namespace collation_namespace
+    ON collation_namespace.oid = col.collnamespace
 WHERE c.relkind IN ('r', 'p')
   AND a.attnum > 0
   AND NOT a.attisdropped

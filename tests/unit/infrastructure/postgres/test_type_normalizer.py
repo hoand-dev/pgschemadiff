@@ -192,6 +192,9 @@ def test_quoted_char_with_surrounding_whitespace() -> None:
     "raw",
     [
         "myschema.mytype",
+        "public.mood",
+        '"public"."Mood"',
+        "public.mood[]",
         "hstore",
         "ltree",
         "citext",

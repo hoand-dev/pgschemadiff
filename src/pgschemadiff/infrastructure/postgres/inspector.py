@@ -287,6 +287,9 @@ def _parse_exclusion_elements(body: str) -> tuple[ExclusionElement, ...]:
 
 def _map_column(row: Any) -> Column:
     """Map a columns.sql result row to a :class:`Column` domain object."""
+    if bool(row.is_virtual_generated):
+        raise InspectionError("Virtual generated columns are unsupported in MVP-A")
+
     is_identity: bool = bool(row.is_identity)
     is_generated: bool = bool(row.is_generated)
 
@@ -569,6 +572,9 @@ class PgCatalogInspector:
             # Use REPEATABLE READ for snapshot consistency (ADR-0012)
             await conn.set_autocommit(False)
             await conn.execute("BEGIN ISOLATION LEVEL REPEATABLE READ")
+            # Deparsers qualify user objects outside pg_catalog. LOCAL keeps pooled
+            # sessions clean.
+            await conn.execute("SET LOCAL search_path = pg_catalog")
             try:
                 async with conn.cursor(row_factory=psycopg.rows.namedtuple_row) as cur:
                     await cur.execute(_SQL_SCHEMAS)
