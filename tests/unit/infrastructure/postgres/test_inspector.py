@@ -25,6 +25,7 @@ import pytest
 from pydantic import ValidationError
 
 from pgschemadiff.domain.column import GeneratedTiming, IdentitySpec
+from pgschemadiff.domain.composite_type import CompositeAttribute
 from pgschemadiff.domain.constraint import (
     CheckConstraint,
     ConstraintDeferrability,
@@ -142,8 +143,28 @@ _ExtensionRow = namedtuple(
     defaults=[None, None],
 )
 _EnumRow = namedtuple("_EnumRow", ["schema_name", "enum_name", "labels", "owner"], defaults=[None])
+_CompositeTypeRow = namedtuple(
+    "_CompositeTypeRow",
+    [
+        "schema_name",
+        "type_name",
+        "attribute_position",
+        "attribute_name",
+        "data_type",
+        "collation",
+        "owner",
+    ],
+)
 _TypePrerequisiteRow = namedtuple(
-    "_TypePrerequisiteRow", ["table_schema", "table_name", "type_schema", "type_name"]
+    "_TypePrerequisiteRow",
+    [
+        "dependent_kind",
+        "dependent_schema",
+        "dependent_name",
+        "type_kind",
+        "type_schema",
+        "type_name",
+    ],
 )
 
 
@@ -285,8 +306,34 @@ def _make_type_prerequisite_row(
     table: str = "users",
     type_schema: str = "public",
     type_name: str = "mood",
+    *,
+    dependent_kind: str = "table",
+    dependent_schema: str | None = None,
+    dependent_name: str | None = None,
+    type_kind: str = "enum",
 ) -> Any:
-    return _TypePrerequisiteRow(table_schema, table, type_schema, type_name)
+    return _TypePrerequisiteRow(
+        dependent_kind,
+        dependent_schema or table_schema,
+        dependent_name or table,
+        type_kind,
+        type_schema,
+        type_name,
+    )
+
+
+def _make_composite_type_row(
+    schema: str = "public",
+    name: str = "address",
+    attribute_position: int | None = 1,
+    attribute: str | None = "street",
+    data_type: str | None = "text",
+    collation: str | None = None,
+    owner: str | None = "postgres",
+) -> Any:
+    return _CompositeTypeRow(
+        schema, name, attribute_position, attribute, data_type, collation, owner
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -302,6 +349,7 @@ def _build_mock_pool(
     constraints_rows: list[Any] | None = None,
     extensions_rows: list[Any] | None = None,
     enums_rows: list[Any] | None = None,
+    composite_types_rows: list[Any] | None = None,
     type_prerequisites_rows: list[Any] | None = None,
 ) -> MagicMock:
     """Build a mock Pool that yields a mocked psycopg connection.
@@ -316,6 +364,7 @@ def _build_mock_pool(
         constraints_rows or [],
         extensions_rows or [],
         enums_rows or [],
+        composite_types_rows or [],
         type_prerequisites_rows or [],
     ]
 
@@ -367,7 +416,7 @@ def test_inspector_is_importable() -> None:
 
 
 @pytest.mark.unit
-async def test_inspect_calls_all_eight_queries() -> None:
+async def test_inspect_calls_all_nine_queries() -> None:
     """inspect() must execute one query per catalog file."""
     pool = _build_mock_pool(
         schemas_rows=[_SchemaRow("public")],
@@ -382,7 +431,7 @@ async def test_inspect_calls_all_eight_queries() -> None:
 
     # fetchall should have been called once per catalog SQL file.
     cur = pool.acquire.return_value.__aenter__.return_value.cursor.return_value
-    assert cur.fetchall.call_count == 8
+    assert cur.fetchall.call_count == 9
     assert isinstance(result, Database)
 
 
@@ -424,7 +473,7 @@ async def test_inspect_sets_local_search_path_before_catalog_queries() -> None:
     assert [mock_call[0] for mock_call in statements] == [
         "execute",
         "execute",
-        *("catalog_cursor.execute" for _ in range(8)),
+        *("catalog_cursor.execute" for _ in range(9)),
         "execute",
     ]
     assert statements[0].args == ("BEGIN ISOLATION LEVEL REPEATABLE READ",)
@@ -507,6 +556,7 @@ def test_assemble_maps_schema_and_extension_metadata() -> None:
         constraints_rows=[],
         extensions_rows=[_ExtensionRow("pgcrypto", "1.3", "extensions", "extension note")],
         enums_rows=[],
+        composite_types_rows=[],
         type_prerequisites_rows=[],
     )
 
@@ -531,6 +581,7 @@ def test_assemble_keeps_extensions_database_wide_with_schema_filter() -> None:
             _ExtensionRow("hstore", "1.8", "extensions", None),
         ],
         enums_rows=[],
+        composite_types_rows=[],
         type_prerequisites_rows=[],
     )
 
@@ -563,6 +614,56 @@ async def test_inspect_maps_enum_and_cross_schema_type_prerequisite() -> None:
 
 
 @pytest.mark.unit
+async def test_inspect_maps_composite_attributes_and_type_prerequisites() -> None:
+    pool = _build_mock_pool(
+        schemas_rows=[_SchemaRow("public"), _SchemaRow("types")],
+        tables_rows=[_make_table_row("public", "users")],
+        columns_rows=[
+            _make_column_row("public", "users", "address", data_type="types.address"),
+            _make_column_row(
+                "public", "users", "addresses", data_type="types.address[]", position=2
+            ),
+        ],
+        enums_rows=[_make_enum_row("types", "mood", ("sad", "happy"))],
+        composite_types_rows=[
+            _make_composite_type_row(
+                "types", "address", 2, "mood", "types.mood", '"C"', "type_owner"
+            ),
+            _make_composite_type_row("types", "address", 1, "street", "text", None, "type_owner"),
+        ],
+        type_prerequisites_rows=[
+            _make_type_prerequisite_row(
+                "public",
+                "users",
+                "types",
+                "address",
+                type_kind="composite_type",
+            ),
+            _make_type_prerequisite_row(
+                "types",
+                "address",
+                "types",
+                "mood",
+                dependent_kind="composite_type",
+                type_kind="enum",
+            ),
+        ],
+    )
+
+    database = await PgCatalogInspector(pool).inspect()
+
+    composite = database.all_composite_types()[0]
+    assert tuple(attribute.name for attribute in composite.attributes) == ("street", "mood")
+    assert composite.attributes[1] == CompositeAttribute(
+        name="mood", data_type="types.mood", collation='"C"'
+    )
+    assert composite.type_prerequisites[0].qname == QualifiedName(namespace="types", name="mood")
+    table = database.table_by_qname(QualifiedName(namespace="public", name="users"))
+    assert table is not None
+    assert table.type_prerequisites == (composite.ref,)
+
+
+@pytest.mark.unit
 def test_assemble_retains_unselected_cross_schema_type_prerequisite() -> None:
     database = PgCatalogInspector(MagicMock(), schemas=["public"])._assemble(
         schemas_rows=[_SchemaRow("public"), _SchemaRow("types")],
@@ -572,6 +673,7 @@ def test_assemble_retains_unselected_cross_schema_type_prerequisite() -> None:
         constraints_rows=[],
         extensions_rows=[],
         enums_rows=[_make_enum_row("types")],
+        composite_types_rows=[],
         type_prerequisites_rows=[_make_type_prerequisite_row(type_schema="types")],
     )
 

@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from pgschemadiff.domain.column import Column
+from pgschemadiff.domain.composite_type import CompositeType
 from pgschemadiff.domain.database import Database
 from pgschemadiff.domain.enum_type import EnumType
 from pgschemadiff.domain.extension import Extension
@@ -63,6 +64,14 @@ def _make_extension(name: str, version: str = "1.0") -> Extension:
 def _make_enum(schema: str, name: str, labels: tuple[str, ...]) -> EnumType:
     ref = ObjectRef(kind=ObjectKind.ENUM, qname=QualifiedName(namespace=schema, name=name))
     return EnumType(ref=ref, labels=labels)
+
+
+def _make_composite(schema: str, name: str) -> CompositeType:
+    ref = ObjectRef(
+        kind=ObjectKind.COMPOSITE_TYPE,
+        qname=QualifiedName(namespace=schema, name=name),
+    )
+    return CompositeType(ref=ref)
 
 
 # ---------------------------------------------------------------------------
@@ -306,6 +315,26 @@ def test_database_all_enums_empty() -> None:
 
 
 @pytest.mark.unit
+def test_database_all_composite_types() -> None:
+    public_type = _make_composite("public", "address")
+    private_type = _make_composite("private", "location")
+    db = Database(
+        name="db",
+        schemas=(
+            Schema(ref=_schema_ref("public"), composite_types=(public_type,)),
+            Schema(ref=_schema_ref("private"), composite_types=(private_type,)),
+        ),
+    )
+
+    assert db.all_composite_types() == (public_type, private_type)
+
+
+@pytest.mark.unit
+def test_database_all_composite_types_empty() -> None:
+    assert Database(name="db").all_composite_types() == ()
+
+
+@pytest.mark.unit
 def test_database_all_indexes() -> None:
     idx_a = _make_index("public", "users_pkey", "users")
     idx_b = _make_index("public", "orders_idx", "orders")
@@ -343,10 +372,11 @@ def test_database_is_frozen() -> None:
 @pytest.mark.unit
 def test_database_json_round_trip() -> None:
     enum = _make_enum("types", "mood", ("sad", "happy"))
+    composite = _make_composite("types", "address")
     tbl = Table(ref=_table_ref("public", "users"), type_prerequisites=(enum.ref,))
     idx = _make_index("public", "users_id_idx", "users")
     pub = _make_schema("public", tables=(tbl,), indexes=(idx,))
-    types = Schema(ref=_schema_ref("types"), enums=(enum,))
+    types = Schema(ref=_schema_ref("types"), enums=(enum,), composite_types=(composite,))
     ext = _make_extension("pgcrypto", "1.3")
     db = Database(name="testdb", schemas=(pub, types), extensions=(ext,), server_version="18.0")
     restored = Database.model_validate_json(db.model_dump_json())

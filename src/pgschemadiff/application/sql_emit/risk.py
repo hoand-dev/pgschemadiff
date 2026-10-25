@@ -10,9 +10,14 @@ from pgschemadiff.domain.delta import (
     AddConstraint,
     AddEnumValue,
     AlterColumnType,
+    AlterCompositeAddAttribute,
+    AlterCompositeAttributeType,
+    AlterCompositeDropAttribute,
+    AlterCompositeTypeAttrs,
     AlterEnumAttrs,
     AlterExtension,
     AlterTableAttrs,
+    CreateCompositeType,
     CreateEnum,
     CreateExtension,
     CreateIndex,
@@ -20,6 +25,7 @@ from pgschemadiff.domain.delta import (
     CreateTable,
     DeltaBase,
     DropColumn,
+    DropCompositeType,
     DropConstraint,
     DropEnum,
     DropExtension,
@@ -28,6 +34,7 @@ from pgschemadiff.domain.delta import (
     DropTable,
     RenameColumn,
     RenameTable,
+    ReplaceCompositeType,
     ReplaceEnumLabels,
     ReplaceIndex,
     SetColumnDefault,
@@ -95,6 +102,13 @@ _SUPPORTED_DELTA_TYPES: tuple[type[DeltaBase], ...] = (
     AddEnumValue,
     AlterEnumAttrs,
     ReplaceEnumLabels,
+    CreateCompositeType,
+    DropCompositeType,
+    AlterCompositeAddAttribute,
+    AlterCompositeDropAttribute,
+    AlterCompositeAttributeType,
+    AlterCompositeTypeAttrs,
+    ReplaceCompositeType,
 )
 
 
@@ -338,6 +352,26 @@ def classify_risk(  # noqa: PLR0912, PLR0915
         level, reason = (
             RiskLevel.BLOCKED,
             "Enum label removal, rename, or reorder has no safe in-place DDL.",
+        )
+    elif isinstance(delta, CreateCompositeType):
+        level, reason = RiskLevel.SAFE, "Creates a composite type."
+    elif isinstance(delta, DropCompositeType):
+        level, reason = RiskLevel.DESTRUCTIVE, "Removes a composite type."
+    elif isinstance(delta, AlterCompositeAddAttribute):
+        level, reason = RiskLevel.SAFE, "Adds an attribute to a composite type."
+    elif isinstance(delta, AlterCompositeDropAttribute):
+        level, reason = RiskLevel.DESTRUCTIVE, "Removes an attribute from a composite type."
+    elif isinstance(delta, AlterCompositeAttributeType):
+        level, reason = RiskLevel.DANGEROUS, "Changes a composite attribute's data type."
+    elif isinstance(delta, AlterCompositeTypeAttrs):
+        level, reason = (
+            RiskLevel.DANGEROUS,
+            "Changes composite type owner, which can change effective access.",
+        )
+    elif isinstance(delta, ReplaceCompositeType):
+        level, reason = (
+            RiskLevel.BLOCKED,
+            "Composite attribute reorder or middle insertion has no safe in-place DDL.",
         )
     else:
         level, reason = RiskLevel.BLOCKED, "No risk policy exists for this delta type."

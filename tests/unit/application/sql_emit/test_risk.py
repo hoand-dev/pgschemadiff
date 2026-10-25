@@ -10,6 +10,7 @@ from pgschemadiff.application.sql_emit.risk import (
     passes_risk_limit,
 )
 from pgschemadiff.domain.column import Column, GeneratedTiming, IdentitySpec
+from pgschemadiff.domain.composite_type import CompositeAttribute, CompositeType
 from pgschemadiff.domain.constraint import (
     CheckConstraint,
     Constraint,
@@ -24,9 +25,14 @@ from pgschemadiff.domain.delta import (
     AddConstraint,
     AddEnumValue,
     AlterColumnType,
+    AlterCompositeAddAttribute,
+    AlterCompositeAttributeType,
+    AlterCompositeDropAttribute,
+    AlterCompositeTypeAttrs,
     AlterEnumAttrs,
     AlterExtension,
     AlterTableAttrs,
+    CreateCompositeType,
     CreateEnum,
     CreateExtension,
     CreateIndex,
@@ -35,6 +41,7 @@ from pgschemadiff.domain.delta import (
     DeltaBase,
     DeltaOp,
     DropColumn,
+    DropCompositeType,
     DropConstraint,
     DropEnum,
     DropExtension,
@@ -43,6 +50,7 @@ from pgschemadiff.domain.delta import (
     DropTable,
     RenameColumn,
     RenameTable,
+    ReplaceCompositeType,
     ReplaceEnumLabels,
     ReplaceIndex,
     SetColumnDefault,
@@ -81,6 +89,10 @@ _ENUM_REF = ObjectRef(
     kind=ObjectKind.ENUM,
     qname=QualifiedName(namespace="public", name="state"),
 )
+_COMPOSITE_REF = ObjectRef(
+    kind=ObjectKind.COMPOSITE_TYPE,
+    qname=QualifiedName(namespace="public", name="record"),
+)
 
 
 def _table(*, partition_of: PartitionOf | None = None, unlogged: bool = False) -> Table:
@@ -89,6 +101,14 @@ def _table(*, partition_of: PartitionOf | None = None, unlogged: bool = False) -
 
 def _enum() -> EnumType:
     return EnumType(ref=_ENUM_REF, labels=("ready", "done"), owner="app_owner")
+
+
+def _composite() -> CompositeType:
+    return CompositeType(
+        ref=_COMPOSITE_REF,
+        attributes=(CompositeAttribute(name="value", data_type="integer"),),
+        owner="app_owner",
+    )
 
 
 def _add_constraint(table_ref: ObjectRef, constraint: Constraint) -> AddConstraint:
@@ -472,6 +492,52 @@ RISK_CASES = (
         RiskLevel.BLOCKED,
         id="replace-enum-labels",
     ),
+    pytest.param(
+        CreateCompositeType(target=_COMPOSITE_REF, composite=_composite()),
+        RiskLevel.SAFE,
+        id="create-composite-type",
+    ),
+    pytest.param(
+        DropCompositeType(target=_COMPOSITE_REF, composite=_composite()),
+        RiskLevel.DESTRUCTIVE,
+        id="drop-composite-type",
+    ),
+    pytest.param(
+        AlterCompositeAddAttribute(
+            target=_COMPOSITE_REF,
+            attribute=CompositeAttribute(name="label", data_type="text"),
+        ),
+        RiskLevel.SAFE,
+        id="add-composite-attribute",
+    ),
+    pytest.param(
+        AlterCompositeDropAttribute(target=_COMPOSITE_REF, attribute_name="value"),
+        RiskLevel.DESTRUCTIVE,
+        id="drop-composite-attribute",
+    ),
+    pytest.param(
+        AlterCompositeAttributeType(
+            target=_COMPOSITE_REF,
+            attribute_name="value",
+            new_data_type="bigint",
+        ),
+        RiskLevel.DANGEROUS,
+        id="alter-composite-attribute-type",
+    ),
+    pytest.param(
+        AlterCompositeTypeAttrs(target=_COMPOSITE_REF, new_owner="other_owner"),
+        RiskLevel.DANGEROUS,
+        id="composite-type-owner",
+    ),
+    pytest.param(
+        ReplaceCompositeType(
+            target=_COMPOSITE_REF,
+            old_attributes=(CompositeAttribute(name="a", data_type="integer"),),
+            new_attributes=(CompositeAttribute(name="b", data_type="integer"),),
+        ),
+        RiskLevel.BLOCKED,
+        id="replace-composite-type-blocked",
+    ),
 )
 
 
@@ -499,6 +565,21 @@ def test_replacing_enum_labels_has_precise_blocked_reason() -> None:
 
     assert assessment.level is RiskLevel.BLOCKED
     assert assessment.reason == ("Enum label removal, rename, or reorder has no safe in-place DDL.")
+
+
+def test_replacing_composite_layout_has_precise_blocked_reason() -> None:
+    delta = ReplaceCompositeType(
+        target=_COMPOSITE_REF,
+        old_attributes=(CompositeAttribute(name="a", data_type="integer"),),
+        new_attributes=(CompositeAttribute(name="b", data_type="integer"),),
+    )
+
+    assessment = classify_risk(delta)
+
+    assert assessment.level is RiskLevel.BLOCKED
+    assert assessment.reason == (
+        "Composite attribute reorder or middle insertion has no safe in-place DDL."
+    )
 
 
 def test_virtual_generated_column_addition_has_precise_safe_reason() -> None:

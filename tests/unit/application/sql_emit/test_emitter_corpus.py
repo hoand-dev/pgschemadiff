@@ -10,6 +10,7 @@ from pgschemadiff.application.sql_emit.registry import default_handlers
 from pgschemadiff.application.sql_emit.risk import _SUPPORTED_DELTA_TYPES
 from pgschemadiff.application.sql_emit.transaction import split_units
 from pgschemadiff.domain.column import Column, GeneratedTiming, IdentitySpec
+from pgschemadiff.domain.composite_type import CompositeAttribute, CompositeType
 from pgschemadiff.domain.constraint import (
     CheckConstraint,
     ConstraintDeferrability,
@@ -26,9 +27,14 @@ from pgschemadiff.domain.delta import (
     AddConstraint,
     AddEnumValue,
     AlterColumnType,
+    AlterCompositeAddAttribute,
+    AlterCompositeAttributeType,
+    AlterCompositeDropAttribute,
+    AlterCompositeTypeAttrs,
     AlterEnumAttrs,
     AlterExtension,
     AlterTableAttrs,
+    CreateCompositeType,
     CreateEnum,
     CreateExtension,
     CreateIndex,
@@ -38,6 +44,7 @@ from pgschemadiff.domain.delta import (
     DeltaBase,
     DeltaSet,
     DropColumn,
+    DropCompositeType,
     DropConstraint,
     DropEnum,
     DropExtension,
@@ -46,6 +53,7 @@ from pgschemadiff.domain.delta import (
     DropTable,
     RenameColumn,
     RenameTable,
+    ReplaceCompositeType,
     ReplaceEnumLabels,
     ReplaceIndex,
     SetColumnDefault,
@@ -148,6 +156,22 @@ def _emitter_cases() -> tuple[tuple[str, Delta], ...]:
             kind=ObjectKind.ENUM,
             qname=QualifiedName(namespace="App Schema", name="EmptyMood"),
         ),
+    )
+    composite_ref = ObjectRef(
+        kind=ObjectKind.COMPOSITE_TYPE,
+        qname=QualifiedName(namespace='App "Schema', name='Record"Type'),
+    )
+    composite = CompositeType(
+        ref=composite_ref,
+        attributes=(
+            CompositeAttribute(name='Key"Value', data_type="integer"),
+            CompositeAttribute(
+                name="label",
+                data_type="text",
+                collation='"App ""Schema""".case_insensitive',
+            ),
+        ),
+        owner='Role "Owner',
     )
 
     plain_table = Table(
@@ -294,6 +318,40 @@ def _emitter_cases() -> tuple[tuple[str, Delta], ...]:
                 target=enum_ref,
                 old_labels=("open", "owner's choice"),
                 new_labels=("open",),
+            ),
+        ),
+        ("create composite type", CreateCompositeType(target=composite_ref, composite=composite)),
+        ("drop composite type", DropCompositeType(target=composite_ref, composite=composite)),
+        (
+            "add composite attribute",
+            AlterCompositeAddAttribute(
+                target=composite_ref,
+                attribute=CompositeAttribute(name="extra", data_type="numeric(12, 2)"),
+            ),
+        ),
+        (
+            "drop composite attribute",
+            AlterCompositeDropAttribute(target=composite_ref, attribute_name="obsolete"),
+        ),
+        (
+            "alter composite attribute type",
+            AlterCompositeAttributeType(
+                target=composite_ref,
+                attribute_name="label",
+                new_data_type="varchar(255)",
+                new_collation='"C"',
+            ),
+        ),
+        (
+            "alter composite owner",
+            AlterCompositeTypeAttrs(target=composite_ref, new_owner="new_owner"),
+        ),
+        (
+            "replace composite type blocked",
+            ReplaceCompositeType(
+                target=composite_ref,
+                old_attributes=composite.attributes,
+                new_attributes=tuple(reversed(composite.attributes)),
             ),
         ),
         (
@@ -635,7 +693,7 @@ def _render_emitter_corpus() -> str:
     lines: list[str] = []
     for label, delta in _EMITTER_CASES:
         lines.append(f"{label}: {_delta_kind(delta)} target={_target_text(delta.target)}")
-        if isinstance(delta, ReplaceEnumLabels):
+        if isinstance(delta, (ReplaceEnumLabels, ReplaceCompositeType)):
             with pytest.raises(MigrationError):
                 emitter.emit(DeltaSet.from_iterable((delta,)))
             lines.append("  raises MigrationError")
@@ -758,7 +816,7 @@ def _render_pipeline_snapshot() -> str:
 
 def test_supported_delta_types_have_handlers_and_corpus_cases() -> None:
     supported = set(_SUPPORTED_DELTA_TYPES)
-    no_emitter = {ReplaceEnumLabels}
+    no_emitter = {ReplaceEnumLabels, ReplaceCompositeType}
     emitter_supported = supported - no_emitter
     handler_types = set(default_handlers())
     corpus_types = {type(delta) for _, delta in _EMITTER_CASES}

@@ -270,6 +270,7 @@
                 "tables": [],
                 "indexes": [],
                 "enums": [],
+                "composite_types": [],
                 "comment": null
               }
             },
@@ -448,7 +449,7 @@
         - `up.sql`: `a6e992690fd58b789759956c7ec05f9c01aa1694ab140f106d2a915c6f8bd526`
         - `down.sql`: `e87201d8d4470825bb2bea1bd7a4503e7152abd3a22dbd70418d51cfa851166e`
         - `manifest.json`: `04fa4ef4e470362e9755d7177a7988b21c8d956dd3254c962b5702bb05a8deb8`
-        - `deltas.json`: `e77fce8bc9ff10d3f75d685a2f35a1d81b47514bfe72ddbfca5e54158420e343`
+        - `deltas.json`: `c141c45490e7343a65b06d084f65bca3115f7d40a97207cc7a35e02ba51f469f`
         
         ## Warnings
         

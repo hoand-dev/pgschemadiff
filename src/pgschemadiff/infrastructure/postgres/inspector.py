@@ -22,6 +22,7 @@ import psycopg
 import psycopg.rows
 
 from pgschemadiff.domain.column import Column, GeneratedTiming, IdentitySpec
+from pgschemadiff.domain.composite_type import CompositeAttribute, CompositeType
 from pgschemadiff.domain.constraint import (
     CheckConstraint,
     ConstraintDeferrability,
@@ -80,6 +81,7 @@ _SQL_INDEXES: str = _load_sql("indexes.sql")
 _SQL_CONSTRAINTS: str = _load_sql("constraints.sql")
 _SQL_EXTENSIONS: str = _load_sql("extensions.sql")
 _SQL_ENUMS: str = _load_sql("enums.sql")
+_SQL_COMPOSITE_TYPES: str = _load_sql("composite_types.sql")
 _SQL_TYPE_PREREQUISITES: str = _load_sql("type_prerequisites.sql")
 
 # ---------------------------------------------------------------------------
@@ -609,6 +611,9 @@ class PgCatalogInspector:
                     await cur.execute(_SQL_ENUMS)
                     enums_rows = await cur.fetchall()
 
+                    await cur.execute(_SQL_COMPOSITE_TYPES)
+                    composite_types_rows = await cur.fetchall()
+
                     await cur.execute(_SQL_TYPE_PREREQUISITES)
                     type_prerequisites_rows = await cur.fetchall()
             finally:
@@ -622,6 +627,7 @@ class PgCatalogInspector:
             constraints_rows=constraints_rows,
             extensions_rows=extensions_rows,
             enums_rows=enums_rows,
+            composite_types_rows=composite_types_rows,
             type_prerequisites_rows=type_prerequisites_rows,
         )
 
@@ -635,6 +641,7 @@ class PgCatalogInspector:
         constraints_rows: list[Any],
         extensions_rows: list[Any],
         enums_rows: list[Any],
+        composite_types_rows: list[Any],
         type_prerequisites_rows: list[Any],
     ) -> Database:
         """Assemble domain objects from raw catalog rows."""
@@ -650,7 +657,15 @@ class PgCatalogInspector:
         idxs_by_table = self._group_indexes(indexes_rows, allowed)
         cons_by_table = self._group_constraints(constraints_rows, allowed)
         enums_by_schema = self._group_enums(enums_rows, allowed)
-        prerequisites_by_table = self._group_type_prerequisites(type_prerequisites_rows, allowed)
+        prerequisites_by_object = self._group_type_prerequisites(type_prerequisites_rows, allowed)
+        prerequisites_by_table = {
+            (schema_name, object_name): refs
+            for (kind, schema_name, object_name), refs in prerequisites_by_object.items()
+            if kind is ObjectKind.TABLE
+        }
+        composite_types_by_schema = self._group_composite_types(
+            composite_types_rows, allowed, prerequisites_by_object
+        )
 
         tables_by_schema, idxs_by_schema = self._build_tables(
             tables_rows,
@@ -670,6 +685,7 @@ class PgCatalogInspector:
                     idxs_by_schema,
                     schemas_by_name,
                     enums_by_schema,
+                    composite_types_by_schema,
                 )
             ),
             extensions=tuple(extensions),
@@ -735,19 +751,85 @@ class PgCatalogInspector:
         return result
 
     @staticmethod
+    def _group_composite_types(
+        rows: list[Any],
+        allowed: set[str] | None,
+        prerequisites: dict[tuple[ObjectKind, str, str], list[ObjectRef]],
+    ) -> dict[str, list[CompositeType]]:
+        grouped: dict[tuple[str, str], list[tuple[int, CompositeAttribute]]] = {}
+        owners: dict[tuple[str, str], str | None] = {}
+        for row in rows:
+            schema_name = row.schema_name
+            if allowed is not None and schema_name not in allowed:
+                continue
+            key = (schema_name, row.type_name)
+            grouped.setdefault(key, [])
+            owners[key] = row.owner
+            if row.attribute_name is None:
+                continue
+            if row.attribute_position is None or row.data_type is None:
+                raise InspectionError(
+                    f"Composite attribute {schema_name}.{row.type_name}."
+                    f"{row.attribute_name} is missing catalog metadata"
+                )
+            grouped[key].append(
+                (
+                    int(row.attribute_position),
+                    CompositeAttribute(
+                        name=row.attribute_name,
+                        data_type=row.data_type,
+                        collation=row.collation or None,
+                    ),
+                )
+            )
+
+        result: dict[str, list[CompositeType]] = {}
+        for (schema_name, type_name), attributes in grouped.items():
+            attributes.sort(key=lambda item: item[0])
+            positions = [position for position, _ in attributes]
+            if len(positions) != len(set(positions)):
+                raise InspectionError(
+                    f"Duplicate attribute position in composite type {schema_name}.{type_name}"
+                )
+            ref = ObjectRef(
+                kind=ObjectKind.COMPOSITE_TYPE,
+                qname=QualifiedName(namespace=schema_name, name=type_name),
+            )
+            composite = CompositeType(
+                ref=ref,
+                attributes=tuple(attribute for _, attribute in attributes),
+                type_prerequisites=tuple(
+                    prerequisites.get((ObjectKind.COMPOSITE_TYPE, schema_name, type_name), [])
+                ),
+                owner=owners[(schema_name, type_name)],
+            )
+            result.setdefault(schema_name, []).append(composite)
+        for composites in result.values():
+            composites.sort(key=lambda composite: composite.ref.qname.name)
+        return result
+
+    @staticmethod
     def _group_type_prerequisites(
         rows: list[Any],
         allowed: set[str] | None,
-    ) -> dict[tuple[str, str], list[ObjectRef]]:
-        result: dict[tuple[str, str], set[ObjectRef]] = {}
+    ) -> dict[tuple[ObjectKind, str, str], list[ObjectRef]]:
+        result: dict[tuple[ObjectKind, str, str], set[ObjectRef]] = {}
         for row in rows:
-            if allowed is not None and row.table_schema not in allowed:
+            if allowed is not None and row.dependent_schema not in allowed:
                 continue
+            dependent_kind = ObjectKind(row.dependent_kind)
+            if dependent_kind not in {ObjectKind.TABLE, ObjectKind.COMPOSITE_TYPE}:
+                raise InspectionError(f"Unsupported type prerequisite dependent {dependent_kind!r}")
+            type_kind = ObjectKind(row.type_kind)
+            if type_kind not in {ObjectKind.ENUM, ObjectKind.COMPOSITE_TYPE}:
+                raise InspectionError(f"Unsupported type prerequisite kind {type_kind!r}")
             ref = ObjectRef(
-                kind=ObjectKind.ENUM,
+                kind=type_kind,
                 qname=QualifiedName(namespace=row.type_schema, name=row.type_name),
             )
-            result.setdefault((row.table_schema, row.table_name), set()).add(ref)
+            result.setdefault(
+                (dependent_kind, row.dependent_schema, row.dependent_name), set()
+            ).add(ref)
         return {
             key: sorted(refs, key=lambda ref: (ref.qname.namespace, ref.qname.name))
             for key, refs in result.items()
@@ -809,6 +891,7 @@ class PgCatalogInspector:
         idxs_by_schema: dict[str, list[Index]],
         schemas_by_name: dict[str, Any],
         enums_by_schema: dict[str, list[EnumType]],
+        composite_types_by_schema: dict[str, list[CompositeType]],
     ) -> list[Schema]:
         result: list[Schema] = []
         for name in schema_names:
@@ -823,6 +906,7 @@ class PgCatalogInspector:
                     tables=tuple(tables_by_schema.get(name, [])),
                     indexes=tuple(idxs_by_schema.get(name, [])),
                     enums=tuple(enums_by_schema.get(name, [])),
+                    composite_types=tuple(composite_types_by_schema.get(name, [])),
                     comment=row.comment,
                 )
             )

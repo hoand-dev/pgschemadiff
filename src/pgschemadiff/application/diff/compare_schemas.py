@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, cast
 
 from pgschemadiff.application.diff.comparators import (
     ColumnComparator,
+    CompositeTypeComparator,
     ConstraintComparator,
     EnumComparator,
     ExtensionComparator,
@@ -38,6 +39,7 @@ async def compare_schemas(
         SchemaComparator(),
         ExtensionComparator(),
         EnumComparator(),
+        CompositeTypeComparator(),
         TableComparator(
             column_comparator=ColumnComparator(),
             constraint_comparator=ConstraintComparator(),

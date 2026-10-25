@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from pgschemadiff.domain.column import Column
+from pgschemadiff.domain.composite_type import CompositeType
 from pgschemadiff.domain.enum_type import EnumType
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index, IndexKeyColumn
@@ -32,6 +33,14 @@ def _index_ref(schema: str, name: str) -> ObjectRef:
 def _make_enum(schema: str, name: str) -> EnumType:
     ref = ObjectRef(kind=ObjectKind.ENUM, qname=QualifiedName(namespace=schema, name=name))
     return EnumType(ref=ref, labels=("sad", "happy"))
+
+
+def _make_composite(schema: str, name: str) -> CompositeType:
+    ref = ObjectRef(
+        kind=ObjectKind.COMPOSITE_TYPE,
+        qname=QualifiedName(namespace=schema, name=name),
+    )
+    return CompositeType(ref=ref)
 
 
 def _make_table(schema: str, name: str) -> Table:
@@ -96,6 +105,15 @@ def test_schema_with_enums() -> None:
 
 
 @pytest.mark.unit
+def test_schema_with_composite_types() -> None:
+    composite = _make_composite("public", "address")
+
+    schema = Schema(ref=_schema_ref("public"), composite_types=(composite,))
+
+    assert schema.composite_types == (composite,)
+
+
+@pytest.mark.unit
 def test_schema_name_property() -> None:
     ref = _schema_ref("reporting")
     schema = Schema(ref=ref)
@@ -142,6 +160,20 @@ def test_schema_rejects_duplicate_enum_refs() -> None:
 
     with pytest.raises(ValidationError, match="Duplicate enum ref"):
         Schema(ref=_schema_ref("public"), enums=(first, duplicate))
+
+
+@pytest.mark.unit
+def test_schema_rejects_composite_type_from_different_namespace() -> None:
+    with pytest.raises(ValidationError, match="belongs to namespace"):
+        Schema(ref=_schema_ref("public"), composite_types=(_make_composite("private", "address"),))
+
+
+@pytest.mark.unit
+def test_schema_rejects_duplicate_composite_type_refs() -> None:
+    composite = _make_composite("public", "address")
+
+    with pytest.raises(ValidationError, match="Duplicate composite type ref"):
+        Schema(ref=_schema_ref("public"), composite_types=(composite, composite))
 
 
 @pytest.mark.unit

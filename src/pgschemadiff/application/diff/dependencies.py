@@ -22,6 +22,13 @@ from pgschemadiff.domain.delta.column import (
     RenameColumn,
     SetColumnDefault,
 )
+from pgschemadiff.domain.delta.composite_type import (
+    AlterCompositeAddAttribute,
+    AlterCompositeAttributeType,
+    AlterCompositeDropAttribute,
+    CreateCompositeType,
+    DropCompositeType,
+)
 from pgschemadiff.domain.delta.constraint import AddConstraint, DropConstraint
 from pgschemadiff.domain.delta.enum import AddEnumValue, CreateEnum, DropEnum
 from pgschemadiff.domain.delta.index import CreateIndex, DropIndex, ReplaceIndex
@@ -79,6 +86,9 @@ def _add_enum_dependencies(
                 AddConstraint,
                 CreateIndex,
                 ReplaceIndex,
+                CreateCompositeType,
+                AlterCompositeAddAttribute,
+                AlterCompositeAttributeType,
             ),
         )
     )
@@ -144,13 +154,13 @@ def _collect_resources(
             creates[delta.table.ref].append(delta)
             for column in delta.table.columns:
                 creates[_column_ref(delta.table.ref, column.name)].append(delta)
-        elif isinstance(delta, (AddColumn, AddConstraint)):
+        elif isinstance(delta, (CreateEnum, CreateCompositeType, AddColumn, AddConstraint)):
             creates[delta.target].append(delta)
         elif isinstance(delta, DropTable):
             drops[delta.table.ref].append(delta)
             for column in delta.table.columns:
                 drops[_column_ref(delta.table.ref, column.name)].append(delta)
-        elif isinstance(delta, (DropColumn, DropConstraint)):
+        elif isinstance(delta, (DropColumn, DropConstraint, DropEnum, DropCompositeType)):
             drops[delta.target].append(delta)
     return creates, drops, schema_creates
 
@@ -167,6 +177,7 @@ def _add_create_dependencies(
         elif isinstance(delta, AddConstraint):
             _add_constraint_create_dependencies(delta, creates, add)
         elif isinstance(delta, CreateTable):
+            _add_create_prerequisites(delta, delta.table.type_prerequisites, creates, add)
             partition_of = delta.table.partition_of
             if partition_of is not None:
                 parent_ref = ObjectRef(
@@ -178,6 +189,7 @@ def _add_create_dependencies(
                 )
                 _add_create_prerequisites(delta, (parent_ref,), creates, add)
 
+    _add_composite_create_dependencies(nodes, creates, add)
     _add_index_create_dependencies(nodes, creates, add)
     _add_fk_unique_dependencies(nodes, add)
     _add_constraint_identity_dependencies(nodes, add)
@@ -198,6 +210,20 @@ def _add_create_dependencies(
             if schema_name is not None:
                 for schema_create in schema_creates.get(schema_name, ()):
                     add(schema_create, delta)
+
+
+def _add_composite_create_dependencies(
+    nodes: tuple[DeltaBase, ...],
+    creates: dict[ObjectRef, list[DeltaBase]],
+    add: Callable[[DeltaBase, DeltaBase], None],
+) -> None:
+    for delta in nodes:
+        if isinstance(delta, CreateCompositeType):
+            _add_create_prerequisites(delta, delta.composite.type_prerequisites, creates, add)
+        elif isinstance(delta, AlterCompositeAddAttribute):
+            _add_create_prerequisites(delta, delta.type_prerequisites, creates, add)
+        elif isinstance(delta, AlterCompositeAttributeType):
+            _add_create_prerequisites(delta, delta.new_type_prerequisites, creates, add)
 
 
 def _add_index_create_dependencies(
@@ -332,6 +358,12 @@ def _add_drop_dependencies(
     for delta in nodes:
         if isinstance(delta, DropColumn) and delta.target.parent is not None:
             _add_drop_prerequisites(delta, (delta.target.parent,), drops, add)
+        elif isinstance(delta, AlterCompositeDropAttribute):
+            _add_drop_prerequisites(delta, delta.type_prerequisites, drops, add)
+        elif isinstance(delta, AlterCompositeAttributeType):
+            _add_drop_prerequisites(delta, delta.old_type_prerequisites, drops, add)
+        elif isinstance(delta, DropCompositeType):
+            _add_drop_prerequisites(delta, delta.composite.type_prerequisites, drops, add)
         elif isinstance(delta, DropConstraint):
             _add_constraint_drop_dependencies(delta, drops, add)
         elif isinstance(delta, DropIndex):
@@ -339,6 +371,7 @@ def _add_drop_dependencies(
         elif isinstance(delta, ReplaceIndex):
             _add_drop_prerequisites(delta, _index_refs(delta.old_index), drops, add)
         elif isinstance(delta, DropTable):
+            _add_drop_prerequisites(delta, delta.table.type_prerequisites, drops, add)
             for constraint in delta.table.constraints:
                 if isinstance(constraint, ForeignKeyConstraint):
                     _add_drop_prerequisites(delta, _fk_remote_refs(constraint), drops, add)

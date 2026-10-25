@@ -4,6 +4,7 @@ import pytest
 
 from pgschemadiff.application.diff.dependencies import order_deltas
 from pgschemadiff.domain.column import Column
+from pgschemadiff.domain.composite_type import CompositeAttribute, CompositeType
 from pgschemadiff.domain.constraint import (
     CheckConstraint,
     Constraint,
@@ -20,6 +21,13 @@ from pgschemadiff.domain.delta.column import (
     DropColumn,
     RenameColumn,
     SetColumnDefault,
+)
+from pgschemadiff.domain.delta.composite_type import (
+    AlterCompositeAddAttribute,
+    AlterCompositeAttributeType,
+    AlterCompositeDropAttribute,
+    CreateCompositeType,
+    DropCompositeType,
 )
 from pgschemadiff.domain.delta.constraint import AddConstraint, DropConstraint
 from pgschemadiff.domain.delta.enum import AddEnumValue, CreateEnum, DropEnum
@@ -185,6 +193,84 @@ def test_enum_creation_and_additions_precede_table_and_index_changes() -> None:
     _assert_precedes(ordered, create_enum, add_review, add_done)
     for dependent in dependents:
         _assert_precedes(ordered, add_done, dependent)
+
+
+def test_type_prerequisites_order_enum_nested_composite_table_creates_and_reverse_drops() -> None:
+    enum_ref = _ref(ObjectKind.ENUM, "state")
+    enum = EnumType(ref=enum_ref, labels=("ready",))
+    create_enum = CreateEnum(target=enum_ref, enum=enum)
+    drop_enum = DropEnum(target=enum_ref, enum=enum)
+
+    inner_ref = _ref(ObjectKind.COMPOSITE_TYPE, "inner")
+    inner = CompositeType(
+        ref=inner_ref,
+        attributes=(CompositeAttribute(name="state", data_type="public.state"),),
+        type_prerequisites=(enum_ref,),
+    )
+    create_inner = CreateCompositeType(target=inner_ref, composite=inner)
+    drop_inner = DropCompositeType(target=inner_ref, composite=inner)
+
+    outer_ref = _ref(ObjectKind.COMPOSITE_TYPE, "outer")
+    outer = CompositeType(
+        ref=outer_ref,
+        attributes=(CompositeAttribute(name="inner", data_type="public.inner"),),
+        type_prerequisites=(inner_ref,),
+    )
+    create_outer = CreateCompositeType(target=outer_ref, composite=outer)
+    drop_outer = DropCompositeType(target=outer_ref, composite=outer)
+
+    table = _table("events").model_copy(update={"type_prerequisites": (outer_ref,)})
+    create_table = CreateTable(target=table.ref, table=table)
+    drop_table = DropTable(target=table.ref, table=table)
+
+    created = order_deltas(
+        DeltaSet.from_iterable((create_table, create_outer, create_inner, create_enum))
+    ).deltas
+    dropped = order_deltas(
+        DeltaSet.from_iterable((drop_enum, drop_inner, drop_outer, drop_table))
+    ).deltas
+
+    _assert_precedes(created, create_enum, create_inner, create_outer, create_table)
+    _assert_precedes(dropped, drop_table, drop_outer, drop_inner, drop_enum)
+
+
+def test_composite_attribute_changes_order_new_and_old_type_prerequisites() -> None:
+    old_ref = _ref(ObjectKind.ENUM, "old_state")
+    old_enum = EnumType(ref=old_ref, labels=("ready",))
+    drop_old_enum = DropEnum(target=old_ref, enum=old_enum)
+
+    new_ref = _ref(ObjectKind.COMPOSITE_TYPE, "new_state")
+    new_type = CompositeType(ref=new_ref)
+    create_new_type = CreateCompositeType(target=new_ref, composite=new_type)
+
+    composite_ref = _ref(ObjectKind.COMPOSITE_TYPE, "record")
+    add_attribute = AlterCompositeAddAttribute(
+        target=composite_ref,
+        attribute=CompositeAttribute(name="state", data_type="public.new_state"),
+        type_prerequisites=(new_ref,),
+    )
+    change_attribute_type = AlterCompositeAttributeType(
+        target=composite_ref,
+        attribute_name="state",
+        new_data_type="public.new_state",
+        old_type_prerequisites=(old_ref,),
+        new_type_prerequisites=(new_ref,),
+    )
+    drop_attribute = AlterCompositeDropAttribute(
+        target=composite_ref,
+        attribute_name="state",
+        type_prerequisites=(old_ref,),
+    )
+
+    added = order_deltas(DeltaSet.from_iterable((add_attribute, create_new_type))).deltas
+    changed = order_deltas(
+        DeltaSet.from_iterable((drop_old_enum, change_attribute_type, create_new_type))
+    ).deltas
+    dropped = order_deltas(DeltaSet.from_iterable((drop_old_enum, drop_attribute))).deltas
+
+    _assert_precedes(added, create_new_type, add_attribute)
+    _assert_precedes(changed, create_new_type, change_attribute_type, drop_old_enum)
+    _assert_precedes(dropped, drop_attribute, drop_old_enum)
 
 
 def test_enum_drop_waits_for_table_column_type_default_constraint_and_index_drops() -> None:

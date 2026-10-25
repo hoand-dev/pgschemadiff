@@ -1,6 +1,7 @@
 """Domain layer — pure Pydantic models. No IO, no async, no third-party drivers."""
 
 from pgschemadiff.domain.column import Column, GeneratedTiming, IdentitySpec
+from pgschemadiff.domain.composite_type import CompositeAttribute, CompositeType
 from pgschemadiff.domain.constraint import (
     CheckConstraint,
     Constraint,
@@ -42,6 +43,8 @@ __all__ = [
     "SUB_OBJECT_KINDS",
     "CheckConstraint",
     "Column",
+    "CompositeAttribute",
+    "CompositeType",
     "Constraint",
     "ConstraintDeferrability",
     "Database",

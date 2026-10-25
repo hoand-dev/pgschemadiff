@@ -18,6 +18,21 @@
     transactional=true new_unit=false isolated=false sql=ALTER TYPE "App ""Schema"."Mood""Type" OWNER TO "other_owner"
   replace enum labels blocked: replace_enum_labels target=enum "App ""Schema"."Mood""Type"
     raises MigrationError
+  create composite type: create_composite_type target=composite_type "App ""Schema"."Record""Type"
+    transactional=true new_unit=false isolated=false sql=CREATE TYPE "App ""Schema"."Record""Type" AS ("Key""Value" integer, "label" text COLLATE "App ""Schema""".case_insensitive)
+    transactional=true new_unit=false isolated=false sql=ALTER TYPE "App ""Schema"."Record""Type" OWNER TO "Role ""Owner"
+  drop composite type: drop_composite_type target=composite_type "App ""Schema"."Record""Type"
+    transactional=true new_unit=false isolated=false sql=DROP TYPE "App ""Schema"."Record""Type" RESTRICT
+  add composite attribute: alter_composite_add_attribute target=composite_type "App ""Schema"."Record""Type"
+    transactional=true new_unit=false isolated=false sql=ALTER TYPE "App ""Schema"."Record""Type" ADD ATTRIBUTE "extra" numeric(12, 2) RESTRICT
+  drop composite attribute: alter_composite_drop_attribute target=composite_type "App ""Schema"."Record""Type"
+    transactional=true new_unit=false isolated=false sql=ALTER TYPE "App ""Schema"."Record""Type" DROP ATTRIBUTE "obsolete" RESTRICT
+  alter composite attribute type: alter_composite_attribute_type target=composite_type "App ""Schema"."Record""Type"
+    transactional=true new_unit=false isolated=false sql=ALTER TYPE "App ""Schema"."Record""Type" ALTER ATTRIBUTE "label" SET DATA TYPE varchar(255) COLLATE "C" RESTRICT
+  alter composite owner: alter_composite_type_attrs target=composite_type "App ""Schema"."Record""Type"
+    transactional=true new_unit=false isolated=false sql=ALTER TYPE "App ""Schema"."Record""Type" OWNER TO "new_owner"
+  replace composite type blocked: replace_composite_type target=composite_type "App ""Schema"."Record""Type"
+    raises MigrationError
   create schema: create_schema target=schema "public"."Billing"
     transactional=true new_unit=false isolated=false sql=CREATE SCHEMA "Billing" AUTHORIZATION "Role ""Owner"
     transactional=true new_unit=false isolated=false sql=COMMENT ON SCHEMA "Billing" IS 'Billing schema'

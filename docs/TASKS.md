@@ -116,7 +116,7 @@
 | [x] | P3-MVPB-06 | Enums (ADD VALUE positioning) | backend-engineer | P1 | P3-CLI-01 | M |
 | [ ] | P3-MVPB-07 | Triggers | backend-engineer | P1 | P3-CLI-01 | L |
 | [ ] | P3-MVPB-08 | RLS policies | backend-engineer | P1 | P3-CLI-01 | M |
-| [ ] | P3-MVPB-09 | Composite types | backend-engineer | P1 | P3-CLI-01 | M |
+| [x] | P3-MVPB-09 | Composite types | backend-engineer | P1 | P3-CLI-01 | M |
 | [ ] | P3-MVPB-10 | Domain types | backend-engineer | P1 | P3-CLI-01 | M |
 
 ## Phase 4 — TUI

@@ -15,6 +15,7 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from pgschemadiff.domain.composite_type import CompositeType
 from pgschemadiff.domain.enum_type import EnumType
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index
@@ -55,6 +56,9 @@ class Schema(BaseModel):
     enums: tuple[EnumType, ...] = Field(default=())
     """Enum types owned by this schema."""
 
+    composite_types: tuple[CompositeType, ...] = Field(default=())
+    """Composite types owned by this schema."""
+
     comment: str | None = None
     """Optional ``COMMENT ON SCHEMA`` value."""
 
@@ -88,6 +92,22 @@ class Schema(BaseModel):
                 raise ValueError(
                     f"Enum {enum.ref.qname.fqn!r} belongs to namespace "
                     f"{enum.ref.qname.namespace!r}, but schema is {self.name!r}"
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _check_composite_type_refs(self) -> Self:
+        seen: set[ObjectRef] = set()
+        for composite in self.composite_types:
+            if composite.ref in seen:
+                raise ValueError(
+                    f"Duplicate composite type ref {composite.ref!r} in schema {self.name!r}"
+                )
+            seen.add(composite.ref)
+            if composite.ref.qname.namespace != self.name:
+                raise ValueError(
+                    f"Composite type {composite.ref.qname.fqn!r} belongs to namespace "
+                    f"{composite.ref.qname.namespace!r}, but schema is {self.name!r}"
                 )
         return self
 

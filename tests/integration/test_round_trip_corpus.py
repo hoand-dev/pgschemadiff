@@ -94,6 +94,46 @@ def _seed(dsn: str, statements: list[str]) -> None:
             [_APP, "CREATE TABLE app.status (id integer)"],
         ),
         pytest.param(
+            "create-nested-composite-types-and-table",
+            [_APP],
+            [
+                _APP,
+                "CREATE TYPE app.mood AS ENUM ('sad', 'happy')",
+                "CREATE TYPE app.inner_payload AS (mood app.mood)",
+                "CREATE TYPE app.event_payload AS (inner app.inner_payload, label text)",
+                "CREATE TABLE app.events (payload app.event_payload)",
+            ],
+        ),
+        pytest.param(
+            "append-composite-attribute",
+            [_APP, "CREATE TYPE app.payload AS (value integer)"],
+            [_APP, "CREATE TYPE app.payload AS (value integer, label text)"],
+        ),
+        pytest.param(
+            "rename-last-composite-attribute",
+            [_APP, "CREATE TYPE app.payload AS (id integer, old_label text)"],
+            [_APP, "CREATE TYPE app.payload AS (id integer, label text)"],
+        ),
+        pytest.param(
+            "change-composite-attribute-type",
+            [_APP, "CREATE TYPE app.payload AS (value integer)"],
+            [_APP, "CREATE TYPE app.payload AS (value bigint)"],
+        ),
+        pytest.param(
+            "drop-composite-attribute",
+            [_APP, "CREATE TYPE app.payload AS (id integer, obsolete text)"],
+            [_APP, "CREATE TYPE app.payload AS (id integer)"],
+        ),
+        pytest.param(
+            "drop-composite-after-dependent-table",
+            [
+                _APP,
+                "CREATE TYPE app.payload AS (value integer)",
+                "CREATE TABLE app.events (payload app.payload)",
+            ],
+            [_APP],
+        ),
+        pytest.param(
             "partitioned-parent-and-child",
             [_APP],
             [

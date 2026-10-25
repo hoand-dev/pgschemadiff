@@ -72,6 +72,7 @@ _OBJECT_FETCHERS: dict[ObjectKind, _ObjectFetcher] = {
     ObjectKind.SCHEMA: lambda db: db.schemas,
     ObjectKind.EXTENSION: lambda db: db.extensions,
     ObjectKind.ENUM: lambda db: db.all_enums(),
+    ObjectKind.COMPOSITE_TYPE: lambda db: db.all_composite_types(),
     ObjectKind.TABLE: lambda db: db.all_tables(),
     ObjectKind.INDEX: lambda db: db.all_indexes(),
 }

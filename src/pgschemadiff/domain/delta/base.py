@@ -295,6 +295,7 @@ class DeltaSet(BaseModel):
 # reference to ``Delta`` in the ``deltas`` field annotation.
 
 from pgschemadiff.domain.delta.column import ColumnDelta  # noqa: E402
+from pgschemadiff.domain.delta.composite_type import CompositeTypeDelta  # noqa: E402
 from pgschemadiff.domain.delta.constraint import ConstraintDelta  # noqa: E402
 from pgschemadiff.domain.delta.enum import EnumDelta  # noqa: E402
 from pgschemadiff.domain.delta.index import IndexDelta  # noqa: E402
@@ -306,6 +307,7 @@ Delta = Annotated[
     | ColumnDelta
     | IndexDelta
     | ConstraintDelta
+    | CompositeTypeDelta
     | SchemaDelta
     | ExtensionDelta
     | EnumDelta,
