@@ -85,8 +85,8 @@ SELECT
     CASE
         WHEN t.typcollation = 0 THEN NULL
         WHEN collation_namespace.nspname = 'pg_catalog'
-            THEN pg_catalog.format('%I', collation.collname)
-        ELSE pg_catalog.format('%I.%I', collation_namespace.nspname, collation.collname)
+            THEN pg_catalog.format('%I', domain_collation.collname)
+        ELSE pg_catalog.format('%I.%I', collation_namespace.nspname, domain_collation.collname)
     END AS collation,
     CASE
         WHEN t.typdefaultbin IS NULL THEN NULL
@@ -106,10 +106,10 @@ SELECT
 FROM pg_catalog.pg_type AS t
 JOIN pg_catalog.pg_namespace AS n
     ON n.oid = t.typnamespace
-LEFT JOIN pg_catalog.pg_collation AS collation
-    ON collation.oid = t.typcollation
+LEFT JOIN pg_catalog.pg_collation AS domain_collation
+    ON domain_collation.oid = t.typcollation
 LEFT JOIN pg_catalog.pg_namespace AS collation_namespace
-    ON collation_namespace.oid = collation.collnamespace
+    ON collation_namespace.oid = domain_collation.collnamespace
 LEFT JOIN pg_catalog.pg_constraint AS domain_check
     ON domain_check.contypid = t.oid
    AND domain_check.contype = 'c'
