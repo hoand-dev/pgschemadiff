@@ -27,7 +27,7 @@ def test_inspector_maps_enum_composite_and_array_prerequisites(pg_test_dsn: str)
             "(mood enum_types.mood, moods enum_types.mood[])"
         )
         conn.execute(
-            "CREATE TYPE enum_types.outer_payload AS (inner enum_types.inner_payload, label text)"
+            'CREATE TYPE enum_types.outer_payload AS ("inner" enum_types.inner_payload, label text)'
         )
         conn.execute(
             "CREATE TABLE public.enum_users "

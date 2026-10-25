@@ -100,7 +100,7 @@ def _seed(dsn: str, statements: list[str]) -> None:
                 _APP,
                 "CREATE TYPE app.mood AS ENUM ('sad', 'happy')",
                 "CREATE TYPE app.inner_payload AS (mood app.mood)",
-                "CREATE TYPE app.event_payload AS (inner app.inner_payload, label text)",
+                'CREATE TYPE app.event_payload AS ("inner" app.inner_payload, label text)',
                 "CREATE TABLE app.events (payload app.event_payload)",
             ],
         ),
