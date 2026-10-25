@@ -258,6 +258,13 @@ def test_indexes_sql_selects_partitioned_and_parent_attachment_flags() -> None:
     ) in sql
 
 
+@pytest.mark.unit
+def test_indexes_sql_excludes_indexes_owned_by_materialized_views() -> None:
+    sql = " ".join(_load_sql("indexes.sql").split())
+
+    assert "c.relkind IN ('r', 'p')" in sql
+
+
 # ---------------------------------------------------------------------------
 # constraints.sql specific checks
 # ---------------------------------------------------------------------------
@@ -623,7 +630,8 @@ def test_views_sql_selects_view_options_and_ordered_output_columns() -> None:
     sql = _load_sql("views.sql")
 
     for expected in (
-        "relkind = 'v'",
+        "relkind IN ('v', 'm')",
+        "AS relation_kind",
         "pg_get_viewdef",
         "check_option",
         "security_barrier",
@@ -631,6 +639,12 @@ def test_views_sql_selects_view_options_and_ordered_output_columns() -> None:
         "attnum AS column_position",
         "attname AS column_name",
         "format_type",
+        "access_method",
+        "tablespace",
+        "storage_parameters",
+        "is_populated",
+        "has_indexes",
+        "pg_index",
         "ORDER BY",
     ):
         assert expected in sql
@@ -656,6 +670,9 @@ def test_view_prerequisites_sql_maps_supported_dependency_kinds_and_excludes_ext
         "refclassid",
         "'table'",
         "'view'",
+        "'materialized_view'",
+        "'sequence'",
+        "relkind IN ('v', 'm')",
         "'function'",
         "'procedure'",
         "'enum'",
@@ -669,6 +686,7 @@ def test_view_prerequisites_sql_maps_supported_dependency_kinds_and_excludes_ext
 
     assert "LIKE 'pg_%'" not in sql
     assert "%s" not in sql
+    assert "prerequisite_relation.relkind = 'S'" in sql
 
 
 # ---------------------------------------------------------------------------

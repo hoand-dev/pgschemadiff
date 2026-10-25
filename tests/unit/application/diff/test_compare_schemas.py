@@ -12,6 +12,7 @@ from pgschemadiff.domain.delta.base import DeltaSet
 from pgschemadiff.domain.delta.column import AddColumn
 from pgschemadiff.domain.delta.constraint import AddConstraint, DropConstraint
 from pgschemadiff.domain.delta.index import CreateIndex
+from pgschemadiff.domain.delta.materialized_view import CreateMaterializedView
 from pgschemadiff.domain.delta.schema import CreateExtension, CreateSchema
 from pgschemadiff.domain.delta.sequence import AlterSequenceOwner
 from pgschemadiff.domain.delta.table import AlterTableAttrs, CreateTable, RenameTable
@@ -19,6 +20,7 @@ from pgschemadiff.domain.delta.view import CreateView
 from pgschemadiff.domain.extension import Extension
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index, IndexKeyColumn
+from pgschemadiff.domain.materialized_view import MaterializedView
 from pgschemadiff.domain.schema import Schema
 from pgschemadiff.domain.sequence import Sequence
 from pgschemadiff.domain.table import PartitionOf, Table
@@ -114,6 +116,30 @@ async def test_compare_schemas_includes_view_comparator() -> None:
     result = await compare_schemas(StubInspector(Database(name="source")), target)
 
     assert CreateView(target=view_ref, view=view) in result.deltas
+
+
+async def test_compare_schemas_includes_materialized_view_comparator() -> None:
+    materialized_view = MaterializedView(
+        ref=_ref(ObjectKind.MATERIALIZED_VIEW, "account_totals"),
+        columns=(("id", "integer"),),
+        definition="SELECT id FROM public.accounts",
+    )
+    target = StubInspector(
+        Database(
+            name="target",
+            schemas=(Schema(ref=_schema().ref, materialized_views=(materialized_view,)),),
+        )
+    )
+
+    result = await compare_schemas(StubInspector(Database(name="source")), target)
+
+    assert (
+        CreateMaterializedView(
+            target=materialized_view.ref,
+            materialized_view=materialized_view,
+        )
+        in result.deltas
+    )
 
 
 async def test_compare_schemas_includes_sequence_comparator() -> None:

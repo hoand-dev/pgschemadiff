@@ -117,9 +117,14 @@ def test_each_ordered_delta_is_classified_once(monkeypatch: pytest.MonkeyPatch) 
         delta: DeltaBase,
         *,
         created_tables: frozenset[ObjectRef],
+        resolved_view_dependencies: frozenset[tuple[ObjectRef, ObjectRef]],
     ) -> RiskAssessment:
         classified.append(delta)
-        return classify_risk(delta, created_tables=created_tables)
+        return classify_risk(
+            delta,
+            created_tables=created_tables,
+            resolved_view_dependencies=resolved_view_dependencies,
+        )
 
     monkeypatch.setattr(
         "pgschemadiff.application.migration.generate.classify_risk",

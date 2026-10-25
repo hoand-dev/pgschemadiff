@@ -32,6 +32,7 @@ from pgschemadiff.domain.index import (
     NullsOrder,
     SortOrder,
 )
+from pgschemadiff.domain.materialized_view import MaterializedView
 from pgschemadiff.domain.ports import SchemaInspector
 from pgschemadiff.domain.procedure import Procedure, ProcedureArgument
 from pgschemadiff.domain.schema import Schema
@@ -69,6 +70,7 @@ __all__ = [
     "Index",
     "IndexKeyColumn",
     "IndexMethod",
+    "MaterializedView",
     "NullsOrder",
     "ObjectKind",
     "ObjectRef",

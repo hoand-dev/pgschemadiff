@@ -21,6 +21,7 @@ from pgschemadiff.domain.enum_type import EnumType
 from pgschemadiff.domain.function import Function
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index
+from pgschemadiff.domain.materialized_view import MaterializedView
 from pgschemadiff.domain.procedure import Procedure
 from pgschemadiff.domain.sequence import Sequence
 from pgschemadiff.domain.table import Table
@@ -78,6 +79,9 @@ class Schema(BaseModel):
 
     views: tuple[View, ...] = Field(default=())
     """Views contained in this schema, ordered by view name."""
+
+    materialized_views: tuple[MaterializedView, ...] = Field(default=())
+    """Materialized views contained in this schema, ordered by name."""
 
     comment: str | None = None
     """Optional ``COMMENT ON SCHEMA`` value."""
@@ -202,6 +206,23 @@ class Schema(BaseModel):
                 raise ValueError(
                     f"View {view.ref.qname.fqn!r} belongs to namespace "
                     f"{view.ref.qname.namespace!r}, but schema is {self.name!r}"
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _check_materialized_view_refs(self) -> Self:
+        seen: set[ObjectRef] = set()
+        for materialized_view in self.materialized_views:
+            if materialized_view.ref in seen:
+                raise ValueError(
+                    f"Duplicate materialized-view ref {materialized_view.ref!r} "
+                    f"in schema {self.name!r}"
+                )
+            seen.add(materialized_view.ref)
+            if materialized_view.ref.qname.namespace != self.name:
+                raise ValueError(
+                    f"Materialized view {materialized_view.ref.qname.fqn!r} belongs to namespace "
+                    f"{materialized_view.ref.qname.namespace!r}, but schema is {self.name!r}"
                 )
         return self
 

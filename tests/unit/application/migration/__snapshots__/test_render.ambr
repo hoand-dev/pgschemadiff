@@ -276,6 +276,7 @@
                 "functions": [],
                 "procedures": [],
                 "views": [],
+                "materialized_views": [],
                 "comment": null
               }
             },
@@ -456,7 +457,7 @@
         - `up.sql`: `a6e992690fd58b789759956c7ec05f9c01aa1694ab140f106d2a915c6f8bd526`
         - `down.sql`: `e87201d8d4470825bb2bea1bd7a4503e7152abd3a22dbd70418d51cfa851166e`
         - `manifest.json`: `04fa4ef4e470362e9755d7177a7988b21c8d956dd3254c962b5702bb05a8deb8`
-        - `deltas.json`: `597d2aac37c8c892d33d950edefd0f48fdf1a10f419e62be5d3e7a869a117add`
+        - `deltas.json`: `fe3a06d6e32b93b059254e40a6057efd4cf1160710e016552d77161dd86df7f3`
         
         ## Warnings
         

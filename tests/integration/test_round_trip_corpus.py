@@ -14,8 +14,11 @@ from pgschemadiff.application.migration.generate import generate_migration
 from pgschemadiff.application.sql_emit.risk import RiskLevel, classify_risk
 from pgschemadiff.domain.delta import (
     AlterSequenceOptions,
+    CreateIndex,
     CreateSequence,
     CreateTable,
+    DropIndex,
+    ReplaceMaterializedView,
     ReplaceView,
 )
 from pgschemadiff.infrastructure.fs.bundle_reader import FilesystemBundleReader
@@ -732,6 +735,103 @@ def _seed(dsn: str, statements: list[str]) -> None:
             ],
         ),
         pytest.param(
+            "create-materialized-view-over-new-table",
+            [_APP],
+            [
+                _APP,
+                _ITEMS,
+                "CREATE MATERIALIZED VIEW app.item_totals AS "
+                "SELECT id, value FROM app.items WITH DATA",
+            ],
+        ),
+        pytest.param(
+            "create-materialized-view-over-new-sequence",
+            [_APP],
+            [
+                _APP,
+                "CREATE SEQUENCE app.z_source_seq",
+                "CREATE MATERIALIZED VIEW app.a_sequence_state AS "
+                "SELECT last_value FROM app.z_source_seq WITH DATA",
+            ],
+        ),
+        pytest.param(
+            "view-over-materialized-view",
+            [_APP, _ITEMS],
+            [
+                _APP,
+                _ITEMS,
+                "CREATE MATERIALIZED VIEW app.item_totals AS "
+                "SELECT id, value FROM app.items WITH DATA",
+                "CREATE VIEW app.item_totals_view AS SELECT id, value FROM app.item_totals",
+            ],
+        ),
+        pytest.param(
+            "replace-materialized-view-definition",
+            [
+                _APP,
+                _ITEMS,
+                "CREATE MATERIALIZED VIEW app.item_totals AS "
+                "SELECT id, value FROM app.items WITH DATA",
+            ],
+            [
+                _APP,
+                _ITEMS,
+                "CREATE MATERIALIZED VIEW app.item_totals AS "
+                'SELECT id, value + 1 AS "value" FROM app.items WITH DATA',
+            ],
+        ),
+        pytest.param(
+            "replace-materialized-view-storage-options",
+            [
+                _APP,
+                _ITEMS,
+                "CREATE MATERIALIZED VIEW app.item_totals AS "
+                "SELECT id, value FROM app.items WITH DATA",
+            ],
+            [
+                _APP,
+                _ITEMS,
+                "CREATE MATERIALIZED VIEW app.item_totals WITH (fillfactor=80) AS "
+                "SELECT id, value FROM app.items WITH DATA",
+            ],
+        ),
+        pytest.param(
+            "drop-materialized-view",
+            [
+                _APP,
+                _ITEMS,
+                "CREATE MATERIALIZED VIEW app.item_totals AS "
+                "SELECT id, value FROM app.items WITH DATA",
+            ],
+            [_APP, _ITEMS],
+        ),
+        pytest.param(
+            "drop-dependent-view-and-materialized-view",
+            [
+                _APP,
+                _ITEMS,
+                "CREATE MATERIALIZED VIEW app.item_totals AS "
+                "SELECT id, value FROM app.items WITH DATA",
+                "CREATE VIEW app.item_totals_view AS SELECT id, value FROM app.item_totals",
+            ],
+            [_APP, _ITEMS],
+        ),
+        pytest.param(
+            "detach-view-before-dropping-materialized-view",
+            [
+                _APP,
+                _ITEMS,
+                "CREATE MATERIALIZED VIEW app.item_totals AS "
+                "SELECT id, value FROM app.items WITH DATA",
+                "CREATE VIEW app.item_totals_view AS SELECT id, value FROM app.item_totals",
+            ],
+            [
+                _APP,
+                _ITEMS,
+                "CREATE VIEW app.item_totals_view AS SELECT id, value FROM app.items",
+            ],
+        ),
+        pytest.param(
             "unlogged-table-persistence",
             [_APP, "CREATE TABLE app.items (id integer)"],
             [
@@ -899,6 +999,50 @@ async def test_incompatible_view_changes_fail_risk_gate_before_emission(
     assert any(isinstance(delta, ReplaceView) and delta.incompatible for delta in delta_set)
     with pytest.raises(RiskGateError):
         generate_migration(delta_set, max_risk=RiskLevel.DESTRUCTIVE)
+
+
+@pytest.mark.integration
+async def test_indexed_materialized_view_definition_change_fails_risk_gate(
+    pg_test_dsn: str,
+    pg_test_dsn2: str,
+) -> None:
+    common = [_APP, _ITEMS]
+    current = [
+        *common,
+        "CREATE MATERIALIZED VIEW app.item_totals AS SELECT id, value FROM app.items WITH DATA",
+        "CREATE INDEX item_totals_id_idx ON app.item_totals (id)",
+    ]
+    desired = [
+        *common,
+        "CREATE MATERIALIZED VIEW app.item_totals AS "
+        'SELECT id, value + 1 AS "value" FROM app.items WITH DATA',
+        "CREATE INDEX item_totals_id_idx ON app.item_totals (id)",
+    ]
+    _seed(pg_test_dsn, current)
+    _seed(pg_test_dsn2, desired)
+
+    delta_set = await compare_urls(pg_test_dsn, pg_test_dsn2, schemas=None)
+
+    assert tuple(type(delta) for delta in delta_set) == (ReplaceMaterializedView,)
+    assert not any(isinstance(delta, (CreateIndex, DropIndex)) for delta in delta_set)
+    assert classify_risk(delta_set.deltas[0]).level is RiskLevel.BLOCKED
+    with pytest.raises(RiskGateError):
+        generate_migration(delta_set, max_risk=RiskLevel.DESTRUCTIVE)
+
+
+@pytest.mark.integration
+async def test_materialized_view_population_state_is_not_compared(
+    pg_test_dsn: str,
+    pg_test_dsn2: str,
+) -> None:
+    common = [_APP, _ITEMS]
+    definition = "CREATE MATERIALIZED VIEW app.item_totals AS SELECT id, value FROM app.items"
+    _seed(pg_test_dsn, [*common, f"{definition} WITH DATA"])
+    _seed(pg_test_dsn2, [*common, f"{definition} WITH NO DATA"])
+
+    delta_set = await compare_urls(pg_test_dsn, pg_test_dsn2, schemas=None)
+
+    assert delta_set.is_empty()
 
 
 @pytest.mark.integration

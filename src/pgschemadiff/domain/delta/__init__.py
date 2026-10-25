@@ -89,6 +89,13 @@ from pgschemadiff.domain.delta.index import (
     IndexDelta,
     ReplaceIndex,
 )
+from pgschemadiff.domain.delta.materialized_view import (
+    AlterMaterializedViewOwner,
+    CreateMaterializedView,
+    DropMaterializedView,
+    MaterializedViewDelta,
+    ReplaceMaterializedView,
+)
 from pgschemadiff.domain.delta.procedure import (
     AlterProcedureOwner,
     CreateProcedure,
@@ -144,6 +151,7 @@ __all__ = [
     "AlterEnumAttrs",
     "AlterExtension",
     "AlterFunctionOwner",
+    "AlterMaterializedViewOwner",
     "AlterProcedureOwner",
     "AlterSequenceOptions",
     "AlterSequenceOwnedBy",
@@ -159,6 +167,7 @@ __all__ = [
     "CreateExtension",
     "CreateFunction",
     "CreateIndex",
+    "CreateMaterializedView",
     "CreateProcedure",
     "CreateSchema",
     "CreateSequence",
@@ -178,6 +187,7 @@ __all__ = [
     "DropExtension",
     "DropFunction",
     "DropIndex",
+    "DropMaterializedView",
     "DropProcedure",
     "DropSchema",
     "DropSequence",
@@ -187,6 +197,7 @@ __all__ = [
     "ExtensionDelta",
     "FunctionDelta",
     "IndexDelta",
+    "MaterializedViewDelta",
     "ProcedureDelta",
     "RenameColumn",
     "RenameTable",
@@ -195,6 +206,7 @@ __all__ = [
     "ReplaceEnumLabels",
     "ReplaceFunction",
     "ReplaceIndex",
+    "ReplaceMaterializedView",
     "ReplaceProcedure",
     "ReplaceView",
     "SchemaDelta",

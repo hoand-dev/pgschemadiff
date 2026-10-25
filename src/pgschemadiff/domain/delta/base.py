@@ -310,6 +310,7 @@ from pgschemadiff.domain.delta.domain_type import DomainTypeDelta  # noqa: E402
 from pgschemadiff.domain.delta.enum import EnumDelta  # noqa: E402
 from pgschemadiff.domain.delta.function import FunctionDelta  # noqa: E402
 from pgschemadiff.domain.delta.index import IndexDelta  # noqa: E402
+from pgschemadiff.domain.delta.materialized_view import MaterializedViewDelta  # noqa: E402
 from pgschemadiff.domain.delta.procedure import ProcedureDelta  # noqa: E402
 from pgschemadiff.domain.delta.schema import ExtensionDelta, SchemaDelta  # noqa: E402
 from pgschemadiff.domain.delta.sequence import SequenceDelta  # noqa: E402
@@ -329,7 +330,8 @@ Delta = Annotated[
     | FunctionDelta
     | ProcedureDelta
     | SequenceDelta
-    | ViewDelta,
+    | ViewDelta
+    | MaterializedViewDelta,
     Field(discriminator="kind"),
 ]
 """Global discriminated union over ALL concrete delta types.

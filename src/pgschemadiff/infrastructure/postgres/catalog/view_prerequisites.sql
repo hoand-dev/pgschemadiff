@@ -1,6 +1,7 @@
 -- catalog/view_prerequisites.sql
--- Returns dependencies recorded for each view rewrite rule. Extension members
--- and system objects are excluded; selected-schema filtering stays in Python.
+-- Returns dependencies recorded for view and materialized-view rewrite rules.
+-- Extension members and system objects are excluded; selected-schema filtering
+-- stays in Python.
 -- Result columns: dependent_schema, dependent_name, prerequisite_kind,
 --                 prerequisite_schema, prerequisite_name, prerequisite_signature
 WITH view_dependencies AS (
@@ -19,7 +20,7 @@ WITH view_dependencies AS (
         ON dependency.classid = 'pg_catalog.pg_rewrite'::regclass
        AND dependency.objid = view_rewrite.oid
     WHERE view_rewrite.rulename = '_RETURN'
-      AND view_class.relkind = 'v'
+      AND view_class.relkind IN ('v', 'm')
       AND left(view_namespace.nspname, 3) != 'pg_'
       AND view_namespace.nspname != 'information_schema'
       AND view_namespace.nspname != 'pgschemadiff'
@@ -38,7 +39,11 @@ SELECT DISTINCT
         WHEN view_dependencies.refclassid = 'pg_catalog.pg_class'::regclass
              AND prerequisite_relation.relkind IN ('r', 'p') THEN 'table'
         WHEN view_dependencies.refclassid = 'pg_catalog.pg_class'::regclass
-             AND prerequisite_relation.relkind = 'v' THEN 'view'
+              AND prerequisite_relation.relkind = 'v' THEN 'view'
+        WHEN view_dependencies.refclassid = 'pg_catalog.pg_class'::regclass
+              AND prerequisite_relation.relkind = 'm' THEN 'materialized_view'
+        WHEN view_dependencies.refclassid = 'pg_catalog.pg_class'::regclass
+             AND prerequisite_relation.relkind = 'S' THEN 'sequence'
         WHEN view_dependencies.refclassid = 'pg_catalog.pg_proc'::regclass
              AND prerequisite_routine.prokind = 'f' THEN 'function'
         WHEN view_dependencies.refclassid = 'pg_catalog.pg_proc'::regclass
@@ -99,7 +104,7 @@ WHERE NOT (
     )
   AND (
       (
-          prerequisite_relation.relkind IN ('r', 'p', 'v')
+           prerequisite_relation.relkind IN ('r', 'p', 'v', 'm', 'S')
           AND left(prerequisite_namespace.nspname, 3) != 'pg_'
           AND prerequisite_namespace.nspname != 'information_schema'
           AND prerequisite_namespace.nspname != 'pgschemadiff'

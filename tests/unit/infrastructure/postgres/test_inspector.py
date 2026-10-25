@@ -40,6 +40,7 @@ from pgschemadiff.domain.database import Database
 from pgschemadiff.domain.domain_type import DomainCheck
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import IndexMethod, NullsOrder, SortOrder
+from pgschemadiff.domain.materialized_view import MaterializedView
 from pgschemadiff.domain.ports import SchemaInspector
 from pgschemadiff.domain.table import PartitionStrategy
 from pgschemadiff.domain.view import View
@@ -222,11 +223,17 @@ _ViewRow = namedtuple(
     [
         "schema_name",
         "view_name",
+        "relation_kind",
         "definition",
         "check_option",
         "security_barrier",
         "security_invoker",
         "owner",
+        "access_method",
+        "tablespace",
+        "storage_parameters",
+        "is_populated",
+        "has_indexes",
         "column_position",
         "column_name",
         "column_type",
@@ -574,18 +581,30 @@ def _make_view_row(
     security_barrier: bool = False,
     security_invoker: bool = False,
     owner: str | None = "postgres",
+    relation_kind: str = "v",
+    access_method: str | None = None,
+    tablespace: str | None = None,
+    storage_parameters: tuple[str, ...] = (),
+    is_populated: bool = True,
+    has_indexes: bool = False,
 ) -> Any:
     return _ViewRow(
-        schema,
-        name,
-        definition,
-        check_option,
-        security_barrier,
-        security_invoker,
-        owner,
-        position,
-        column,
-        data_type,
+        schema_name=schema,
+        view_name=name,
+        relation_kind=relation_kind,
+        definition=definition,
+        check_option=check_option,
+        security_barrier=security_barrier,
+        security_invoker=security_invoker,
+        owner=owner,
+        access_method=access_method,
+        tablespace=tablespace,
+        storage_parameters=storage_parameters,
+        is_populated=is_populated,
+        has_indexes=has_indexes,
+        column_position=position,
+        column_name=column,
+        column_type=data_type,
     )
 
 
@@ -2101,6 +2120,7 @@ async def test_inspect_maps_view_columns_options_prerequisites_and_schema_filter
                 "function", "normalize", dependent_name="MixedView", signature=("text",)
             ),
             _make_view_prerequisite_row("enum", "mood", schema="types", dependent_name="MixedView"),
+            _make_view_prerequisite_row("sequence", "z_source_seq", dependent_name="MixedView"),
             _make_view_prerequisite_row(
                 "table", "hidden", dependent_schema="audit", dependent_name="hidden"
             ),
@@ -2137,6 +2157,110 @@ async def test_inspect_maps_view_columns_options_prerequisites_and_schema_filter
         (ObjectKind.VIEW, "public", "source_view"),
         (ObjectKind.FUNCTION, "public", "normalize"),
         (ObjectKind.ENUM, "types", "mood"),
+        (ObjectKind.SEQUENCE, "public", "z_source_seq"),
     }
     function_ref = next(ref for ref in view.prerequisites if ref.kind is ObjectKind.FUNCTION)
     assert function_ref.arg_signature == ("text",)
+
+
+@pytest.mark.unit
+async def test_inspect_materialized_views_and_excludes_their_indexes_from_table_indexes() -> None:
+    pool = _build_mock_pool(
+        schemas_rows=[_SchemaRow("public"), _SchemaRow("audit")],
+        indexes_rows=[_make_index_row(table="items_mv", index="items_mv_id_idx")],
+        views_rows=[
+            _make_view_row(
+                "audit",
+                "hidden_mv",
+                relation_kind="m",
+                has_indexes=True,
+            ),
+            _make_view_row(
+                "public",
+                "items_mv",
+                relation_kind="m",
+                position=2,
+                column="label",
+                data_type="text",
+                definition="SELECT id, label FROM public.items",
+                access_method="heap",
+                tablespace="fast_space",
+                storage_parameters=("fillfactor=70",),
+                is_populated=False,
+                has_indexes=True,
+            ),
+            _make_view_row(
+                "public",
+                "items_mv",
+                relation_kind="m",
+                position=1,
+                column="id",
+                data_type="integer",
+                definition="SELECT id, label FROM public.items",
+                access_method="heap",
+                tablespace="fast_space",
+                storage_parameters=("fillfactor=70",),
+                is_populated=False,
+                has_indexes=True,
+            ),
+            _make_view_row("public", "items_view"),
+        ],
+        view_prerequisites_rows=[
+            _make_view_prerequisite_row(
+                "table",
+                "items",
+                dependent_name="items_mv",
+            ),
+            _make_view_prerequisite_row(
+                "materialized_view",
+                "source_mv",
+                dependent_name="items_mv",
+            ),
+            _make_view_prerequisite_row(
+                "materialized_view",
+                "items_mv",
+                dependent_name="items_view",
+            ),
+            _make_view_prerequisite_row(
+                "materialized_view",
+                "items_mv",
+                dependent_schema="audit",
+                dependent_name="hidden_mv",
+            ),
+        ],
+    )
+
+    database = await PgCatalogInspector(pool, schemas=["public"]).inspect()
+
+    assert len(database.all_views()) == 1
+    materialized_views = database.all_materialized_views()
+    assert len(materialized_views) == 1
+    materialized_view = materialized_views[0]
+    assert isinstance(materialized_view, MaterializedView)
+    assert materialized_view.columns == (("id", "integer"), ("label", "text"))
+    assert materialized_view.access_method == "heap"
+    assert materialized_view.tablespace == "fast_space"
+    assert materialized_view.storage_parameters == ("fillfactor=70",)
+    assert materialized_view.has_indexes
+    assert materialized_view.dependents == (
+        ObjectRef(
+            kind=ObjectKind.MATERIALIZED_VIEW,
+            qname=QualifiedName(namespace="audit", name="hidden_mv"),
+        ),
+        ObjectRef(
+            kind=ObjectKind.VIEW,
+            qname=QualifiedName(namespace="public", name="items_view"),
+        ),
+    )
+    assert not hasattr(materialized_view, "is_populated")
+    assert {ref.kind for ref in materialized_view.prerequisites} == {
+        ObjectKind.TABLE,
+        ObjectKind.MATERIALIZED_VIEW,
+    }
+    assert database.schemas[0].indexes == ()
+    assert database.all_views()[0].prerequisites == (
+        ObjectRef(
+            kind=ObjectKind.MATERIALIZED_VIEW,
+            qname=QualifiedName(namespace="public", name="items_mv"),
+        ),
+    )

@@ -41,6 +41,7 @@ from pgschemadiff.domain.extension import Extension
 from pgschemadiff.domain.function import Function, FunctionArgument
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index, IndexKeyColumn, IndexMethod, NullsOrder, SortOrder
+from pgschemadiff.domain.materialized_view import MaterializedView
 from pgschemadiff.domain.procedure import Procedure, ProcedureArgument
 from pgschemadiff.domain.schema import Schema
 from pgschemadiff.domain.sequence import Sequence
@@ -726,9 +727,14 @@ class PgCatalogInspector:
             routines_rows or [], allowed, prerequisites_by_object
         )
         view_prerequisites_by_view = self._group_view_prerequisites(
-            view_prerequisites_rows or [], allowed
+            view_prerequisites_rows or [], None
         )
         views_by_schema = self._group_views(views_rows or [], allowed, view_prerequisites_by_view)
+        materialized_views_by_schema = self._group_materialized_views(
+            views_rows or [],
+            allowed,
+            view_prerequisites_by_view,
+        )
 
         tables_by_schema, idxs_by_schema = self._build_tables(
             tables_rows,
@@ -754,6 +760,7 @@ class PgCatalogInspector:
                     functions_by_schema,
                     procedures_by_schema,
                     views_by_schema,
+                    materialized_views_by_schema,
                 )
             ),
             extensions=tuple(extensions),
@@ -896,11 +903,13 @@ class PgCatalogInspector:
         supported_kinds = {
             ObjectKind.TABLE,
             ObjectKind.VIEW,
+            ObjectKind.MATERIALIZED_VIEW,
             ObjectKind.FUNCTION,
             ObjectKind.PROCEDURE,
             ObjectKind.ENUM,
             ObjectKind.COMPOSITE_TYPE,
             ObjectKind.DOMAIN_TYPE,
+            ObjectKind.SEQUENCE,
         }
         routine_kinds = {ObjectKind.FUNCTION, ObjectKind.PROCEDURE}
         grouped: dict[tuple[str, str], set[ObjectRef]] = {}
@@ -965,6 +974,12 @@ class PgCatalogInspector:
             schema_name = row.schema_name
             if allowed is not None and schema_name not in allowed:
                 continue
+            if row.relation_kind not in {"v", "m"}:
+                raise InspectionError(
+                    f"View catalog returned unsupported relation kind {row.relation_kind!r}"
+                )
+            if row.relation_kind != "v":
+                continue
             key = (schema_name, row.view_name)
             current_metadata = (
                 row.definition,
@@ -1017,6 +1032,113 @@ class PgCatalogInspector:
             result.setdefault(schema_name, []).append(view)
         for views in result.values():
             views.sort(key=lambda view: view.ref.qname.name)
+        return result
+
+    @staticmethod
+    def _group_materialized_views(  # noqa: PLR0912
+        rows: list[Any],
+        allowed: set[str] | None,
+        prerequisites: dict[tuple[str, str], list[ObjectRef]],
+    ) -> dict[str, list[MaterializedView]]:
+        metadata: dict[tuple[str, str], tuple[Any, ...]] = {}
+        columns: dict[tuple[str, str], list[tuple[int, str, str]]] = {}
+        dependent_refs_by_view: dict[tuple[str, str], set[ObjectRef]] = {}
+        relation_kinds = {(row.schema_name, row.view_name): row.relation_kind for row in rows}
+        for (dependent_schema, dependent_name), prerequisite_refs in prerequisites.items():
+            relation_kind = relation_kinds.get((dependent_schema, dependent_name))
+            if relation_kind not in {"v", "m"}:
+                continue
+            dependent_kind = (
+                ObjectKind.VIEW if relation_kind == "v" else ObjectKind.MATERIALIZED_VIEW
+            )
+            dependent_ref = ObjectRef(
+                kind=dependent_kind,
+                qname=QualifiedName(namespace=dependent_schema, name=dependent_name),
+            )
+            for prerequisite in prerequisite_refs:
+                if prerequisite.kind is ObjectKind.MATERIALIZED_VIEW:
+                    key = (prerequisite.qname.namespace, prerequisite.qname.name)
+                    dependent_refs_by_view.setdefault(key, set()).add(dependent_ref)
+
+        for row in rows:
+            schema_name = row.schema_name
+            if allowed is not None and schema_name not in allowed:
+                continue
+            if row.relation_kind not in {"v", "m"}:
+                raise InspectionError(
+                    f"View catalog returned unsupported relation kind {row.relation_kind!r}"
+                )
+            if row.relation_kind != "m":
+                continue
+
+            key = (schema_name, row.view_name)
+            current_metadata = (
+                row.definition,
+                row.access_method,
+                row.tablespace,
+                tuple(sorted(row.storage_parameters or ())),
+                row.owner,
+                row.has_indexes,
+            )
+            previous_metadata = metadata.setdefault(key, current_metadata)
+            if previous_metadata != current_metadata:
+                raise InspectionError(
+                    f"Materialized view {schema_name}.{row.view_name} "
+                    "has inconsistent catalog metadata"
+                )
+            if (
+                row.column_position is None
+                or not isinstance(row.column_name, str)
+                or not row.column_name
+                or not isinstance(row.column_type, str)
+                or not row.column_type.strip()
+            ):
+                raise InspectionError(
+                    f"Materialized view {schema_name}.{row.view_name} "
+                    "has incomplete output-column metadata"
+                )
+            columns.setdefault(key, []).append(
+                (int(row.column_position), row.column_name, row.column_type)
+            )
+
+        result: dict[str, list[MaterializedView]] = {}
+        for (schema_name, view_name), metadata_values in metadata.items():
+            view_columns = sorted(columns[(schema_name, view_name)], key=lambda item: item[0])
+            positions = [position for position, _, _ in view_columns]
+            if len(positions) != len(set(positions)):
+                raise InspectionError(
+                    f"Materialized view {schema_name}.{view_name} has duplicate column positions"
+                )
+            definition, access_method, tablespace, storage_parameters, owner, has_indexes = (
+                metadata_values
+            )
+            materialized_view = MaterializedView(
+                ref=ObjectRef(
+                    kind=ObjectKind.MATERIALIZED_VIEW,
+                    qname=QualifiedName(namespace=schema_name, name=view_name),
+                ),
+                columns=tuple((name, data_type) for _, name, data_type in view_columns),
+                definition=definition,
+                access_method=access_method,
+                tablespace=tablespace,
+                storage_parameters=storage_parameters,
+                owner=owner,
+                prerequisites=tuple(prerequisites.get((schema_name, view_name), ())),
+                dependents=tuple(
+                    sorted(
+                        dependent_refs_by_view.get((schema_name, view_name), ()),
+                        key=lambda ref: (
+                            ref.kind.value,
+                            ref.qname.namespace,
+                            ref.qname.name,
+                        ),
+                    )
+                ),
+                has_indexes=has_indexes,
+            )
+            result.setdefault(schema_name, []).append(materialized_view)
+        for materialized_views in result.values():
+            materialized_views.sort(key=lambda view: view.ref.qname.name)
         return result
 
     @staticmethod
@@ -1472,6 +1594,7 @@ class PgCatalogInspector:
         functions_by_schema: dict[str, list[Function]],
         procedures_by_schema: dict[str, list[Procedure]],
         views_by_schema: dict[str, list[View]],
+        materialized_views_by_schema: dict[str, list[MaterializedView]],
     ) -> list[Schema]:
         result: list[Schema] = []
         for name in schema_names:
@@ -1492,6 +1615,7 @@ class PgCatalogInspector:
                     functions=tuple(functions_by_schema.get(name, [])),
                     procedures=tuple(procedures_by_schema.get(name, [])),
                     views=tuple(views_by_schema.get(name, [])),
+                    materialized_views=tuple(materialized_views_by_schema.get(name, [])),
                     comment=row.comment,
                 )
             )

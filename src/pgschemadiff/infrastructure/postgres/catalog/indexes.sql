@@ -56,4 +56,5 @@ LEFT JOIN pg_catalog.pg_constraint con
 WHERE left(n.nspname, 3) != 'pg_'
   AND n.nspname != 'information_schema'
   AND n.nspname != 'pgschemadiff'
+  AND c.relkind IN ('r', 'p')
 ORDER BY n.nspname, c.relname, ic.relname

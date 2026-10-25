@@ -43,6 +43,11 @@ from pgschemadiff.domain.delta.domain_type import (
 from pgschemadiff.domain.delta.enum import AddEnumValue, CreateEnum, DropEnum
 from pgschemadiff.domain.delta.function import CreateFunction, DropFunction, ReplaceFunction
 from pgschemadiff.domain.delta.index import CreateIndex, DropIndex, ReplaceIndex
+from pgschemadiff.domain.delta.materialized_view import (
+    CreateMaterializedView,
+    DropMaterializedView,
+    ReplaceMaterializedView,
+)
 from pgschemadiff.domain.delta.procedure import CreateProcedure, DropProcedure, ReplaceProcedure
 from pgschemadiff.domain.delta.schema import (
     AlterExtension,
@@ -65,6 +70,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
     from pgschemadiff.domain.index import Index
+    from pgschemadiff.domain.materialized_view import MaterializedView
     from pgschemadiff.domain.view import View
 
 
@@ -138,6 +144,8 @@ def _add_enum_dependencies(
                 ReplaceProcedure,
                 CreateView,
                 ReplaceView,
+                CreateMaterializedView,
+                ReplaceMaterializedView,
             ),
         )
     )
@@ -193,6 +201,8 @@ def _add_enum_drop_dependencies(
                 ReplaceProcedure,
                 DropView,
                 ReplaceView,
+                DropMaterializedView,
+                ReplaceMaterializedView,
             ),
         )
     )
@@ -228,6 +238,7 @@ def _collect_resources(
                 CreateFunction,
                 CreateProcedure,
                 CreateView,
+                CreateMaterializedView,
                 AddColumn,
                 AddConstraint,
             ),
@@ -249,10 +260,14 @@ def _collect_resources(
                 DropFunction,
                 DropProcedure,
                 DropView,
+                DropMaterializedView,
             ),
         ):
             drops[delta.target].append(delta)
-        elif isinstance(delta, (ReplaceFunction, ReplaceProcedure, ReplaceView)):
+        elif isinstance(
+            delta,
+            (ReplaceFunction, ReplaceProcedure, ReplaceView, ReplaceMaterializedView),
+        ):
             creates[delta.target].append(delta)
             drops[delta.target].append(delta)
     return creates, drops, schema_creates
@@ -300,6 +315,16 @@ def _add_create_dependencies(
             _add_view_create_dependencies(delta, delta.view, nodes, creates, add)
         elif isinstance(delta, ReplaceView):
             _add_view_create_dependencies(delta, delta.new_view, nodes, creates, add)
+        elif isinstance(delta, CreateMaterializedView):
+            _add_view_create_dependencies(delta, delta.materialized_view, nodes, creates, add)
+        elif isinstance(delta, ReplaceMaterializedView):
+            _add_view_create_dependencies(
+                delta,
+                delta.new_materialized_view,
+                nodes,
+                creates,
+                add,
+            )
 
     _add_sequence_dependencies(nodes, creates, add)
     _add_composite_create_dependencies(nodes, creates, add)
@@ -518,8 +543,8 @@ def _add_index_create_dependencies(
 
 
 def _add_view_create_dependencies(
-    delta: CreateView | ReplaceView,
-    view: View,
+    delta: CreateView | ReplaceView | CreateMaterializedView | ReplaceMaterializedView,
+    view: View | MaterializedView,
     nodes: tuple[DeltaBase, ...],
     creates: dict[ObjectRef, list[DeltaBase]],
     add: Callable[[DeltaBase, DeltaBase], None],
@@ -677,10 +702,17 @@ def _add_drop_dependencies(
             _add_drop_prerequisites(delta, _index_refs(delta.old_index), drops, add)
         elif isinstance(delta, DropTable):
             _add_table_drop_dependencies(delta, drops, add)
-        elif isinstance(delta, DropView):
-            _add_view_drop_dependencies(delta, delta.view, nodes, drops, add)
-        elif isinstance(delta, ReplaceView):
-            _add_view_drop_dependencies(delta, delta.old_view, nodes, drops, add)
+        elif isinstance(
+            delta,
+            (DropView, ReplaceView, DropMaterializedView, ReplaceMaterializedView),
+        ):
+            _add_view_drop_dependencies(
+                delta,
+                _view_payloads(delta)[0],
+                nodes,
+                drops,
+                add,
+            )
 
     _add_sequence_drop_dependencies(nodes, drops, add)
 
@@ -730,8 +762,8 @@ def _add_sequence_drop_dependencies(
 
 
 def _add_view_drop_dependencies(
-    delta: DropView | ReplaceView,
-    view: View,
+    delta: DropView | ReplaceView | DropMaterializedView | ReplaceMaterializedView,
+    view: View | MaterializedView,
     nodes: tuple[DeltaBase, ...],
     drops: dict[ObjectRef, list[DeltaBase]],
     add: Callable[[DeltaBase, DeltaBase], None],
@@ -741,6 +773,18 @@ def _add_view_drop_dependencies(
     for dependent in nodes:
         if isinstance(dependent, DropColumn) and dependent.target.parent in table_refs:
             add(delta, dependent)
+
+
+def _view_payloads(delta: DeltaBase) -> tuple[View | MaterializedView, ...]:
+    if isinstance(delta, (CreateView, DropView)):
+        return (delta.view,)
+    if isinstance(delta, ReplaceView):
+        return (delta.old_view, delta.new_view)
+    if isinstance(delta, (CreateMaterializedView, DropMaterializedView)):
+        return (delta.materialized_view,)
+    if isinstance(delta, ReplaceMaterializedView):
+        return (delta.old_materialized_view, delta.new_materialized_view)
+    return ()
 
 
 def _add_constraint_drop_dependencies(
@@ -886,16 +930,9 @@ def _referenced_tables(delta: DeltaBase) -> set[QualifiedName]:
     for constraint in constraints:
         if isinstance(constraint, ForeignKeyConstraint):
             refs.add(QualifiedName(namespace=constraint.ref_namespace, name=constraint.ref_table))
-    views: tuple[View, ...]
-    if isinstance(delta, CreateView | DropView):
-        views = (delta.view,)
-    elif isinstance(delta, ReplaceView):
-        views = (delta.old_view, delta.new_view)
-    else:
-        views = ()
     refs.update(
         prerequisite.qname
-        for view in views
+        for view in _view_payloads(delta)
         for prerequisite in view.prerequisites
         if prerequisite.kind is ObjectKind.TABLE
     )

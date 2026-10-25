@@ -25,6 +25,7 @@ from pgschemadiff.domain.extension import Extension
 from pgschemadiff.domain.function import Function
 from pgschemadiff.domain.identity import ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index
+from pgschemadiff.domain.materialized_view import MaterializedView
 from pgschemadiff.domain.procedure import Procedure
 from pgschemadiff.domain.schema import Schema
 from pgschemadiff.domain.sequence import Sequence
@@ -189,6 +190,13 @@ class Database(BaseModel):
         result: list[View] = []
         for schema in self.schemas:
             result.extend(schema.views)
+        return tuple(result)
+
+    def all_materialized_views(self) -> tuple[MaterializedView, ...]:
+        """Return all materialized views across every schema."""
+        result: list[MaterializedView] = []
+        for schema in self.schemas:
+            result.extend(schema.materialized_views)
         return tuple(result)
 
     def all_indexes(self) -> tuple[Index, ...]:

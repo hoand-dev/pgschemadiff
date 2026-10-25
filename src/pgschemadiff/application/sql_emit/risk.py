@@ -21,6 +21,7 @@ from pgschemadiff.domain.delta import (
     AlterEnumAttrs,
     AlterExtension,
     AlterFunctionOwner,
+    AlterMaterializedViewOwner,
     AlterProcedureOwner,
     AlterSequenceOptions,
     AlterSequenceOwnedBy,
@@ -33,6 +34,7 @@ from pgschemadiff.domain.delta import (
     CreateExtension,
     CreateFunction,
     CreateIndex,
+    CreateMaterializedView,
     CreateProcedure,
     CreateSchema,
     CreateSequence,
@@ -48,6 +50,7 @@ from pgschemadiff.domain.delta import (
     DropExtension,
     DropFunction,
     DropIndex,
+    DropMaterializedView,
     DropProcedure,
     DropSchema,
     DropSequence,
@@ -60,6 +63,7 @@ from pgschemadiff.domain.delta import (
     ReplaceEnumLabels,
     ReplaceFunction,
     ReplaceIndex,
+    ReplaceMaterializedView,
     ReplaceProcedure,
     ReplaceView,
     SetColumnDefault,
@@ -161,6 +165,10 @@ _SUPPORTED_DELTA_TYPES: tuple[type[DeltaBase], ...] = (
     DropView,
     ReplaceView,
     AlterViewOwner,
+    CreateMaterializedView,
+    DropMaterializedView,
+    ReplaceMaterializedView,
+    AlterMaterializedViewOwner,
 )
 
 
@@ -181,6 +189,7 @@ def classify_risk(  # noqa: PLR0912, PLR0915
     delta: DeltaBase,
     *,
     created_tables: frozenset[ObjectRef] = frozenset(),
+    resolved_view_dependencies: frozenset[tuple[ObjectRef, ObjectRef]] = frozenset(),
 ) -> RiskAssessment:
     """Classify a schema delta using static risk policy and migration context."""
     if type(delta) not in _SUPPORTED_DELTA_TYPES:
@@ -276,6 +285,56 @@ def classify_risk(  # noqa: PLR0912, PLR0915
         level, reason = (
             RiskLevel.DANGEROUS,
             "Changes view ownership, which can change effective access to underlying relations.",
+        )
+    elif isinstance(
+        delta,
+        (CreateMaterializedView, DropMaterializedView, ReplaceMaterializedView),
+    ):
+        materialized_views = (
+            (delta.old_materialized_view, delta.new_materialized_view)
+            if isinstance(delta, ReplaceMaterializedView)
+            else (delta.materialized_view,)
+        )
+        if any(view.has_indexes for view in materialized_views):
+            level, reason = (
+                RiskLevel.BLOCKED,
+                "Materialized-view create, replace, or drop is blocked while attached indexes "
+                "are not managed.",
+            )
+        elif isinstance(delta, (DropMaterializedView, ReplaceMaterializedView)):
+            old_materialized_view = (
+                delta.old_materialized_view
+                if isinstance(delta, ReplaceMaterializedView)
+                else delta.materialized_view
+            )
+            if any(
+                (dependent, delta.target) not in resolved_view_dependencies
+                for dependent in old_materialized_view.dependents
+            ):
+                level, reason = (
+                    RiskLevel.BLOCKED,
+                    "Materialized-view drop or replacement has dependent views or "
+                    "materialized views that are not removed or detached.",
+                )
+            elif isinstance(delta, DropMaterializedView):
+                level, reason = (
+                    RiskLevel.DESTRUCTIVE,
+                    "Removes a materialized view and its stored rows.",
+                )
+            else:
+                level, reason = (
+                    RiskLevel.DANGEROUS,
+                    "Recreates a materialized view, evaluates its query, and rebuilds stored rows.",
+                )
+        elif isinstance(delta, CreateMaterializedView):
+            level, reason = (
+                RiskLevel.DANGEROUS,
+                "Creates a materialized view and evaluates its defining query.",
+            )
+    elif isinstance(delta, AlterMaterializedViewOwner):
+        level, reason = (
+            RiskLevel.DANGEROUS,
+            "Changes materialized-view ownership, which can change effective access.",
         )
     elif isinstance(delta, AddColumn):
         conditions = []

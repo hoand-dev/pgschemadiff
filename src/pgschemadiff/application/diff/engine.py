@@ -80,6 +80,7 @@ _OBJECT_FETCHERS: dict[ObjectKind, _ObjectFetcher] = {
     ObjectKind.TABLE: lambda db: db.all_tables(),
     ObjectKind.INDEX: lambda db: db.all_indexes(),
     ObjectKind.VIEW: lambda db: db.all_views(),
+    ObjectKind.MATERIALIZED_VIEW: lambda db: db.all_materialized_views(),
 }
 
 

@@ -30,6 +30,17 @@
     raises MigrationError
   alter view owner: alter_view_owner target=view "App ""Schema"."Order""View"
     transactional=true new_unit=false isolated=false sql=ALTER VIEW "App ""Schema"."Order""View" OWNER TO "New ""Owner"
+  create materialized view: create_materialized_view target=materialized_view "App ""Schema"."Order""MaterializedView"
+    transactional=true new_unit=false isolated=false sql=CREATE MATERIALIZED VIEW "App ""Schema"."Order""MaterializedView" ("id", "select") USING "heap" WITH (fillfactor=70) TABLESPACE "fast ""space" AS SELECT "id", "select" FROM "App ""Schema"."Order""Items" WITH DATA
+    transactional=true new_unit=false isolated=false sql=ALTER MATERIALIZED VIEW "App ""Schema"."Order""MaterializedView" OWNER TO "Role ""Owner"
+  drop materialized view: drop_materialized_view target=materialized_view "App ""Schema"."Order""MaterializedView"
+    transactional=true new_unit=false isolated=false sql=DROP MATERIALIZED VIEW "App ""Schema"."Order""MaterializedView" RESTRICT
+  replace materialized view: replace_materialized_view target=materialized_view "App ""Schema"."Order""MaterializedView"
+    transactional=true new_unit=false isolated=false sql=DROP MATERIALIZED VIEW "App ""Schema"."Order""MaterializedView" RESTRICT
+    transactional=true new_unit=false isolated=false sql=CREATE MATERIALIZED VIEW "App ""Schema"."Order""MaterializedView" ("id", "select") USING "heap" WITH (fillfactor=70) TABLESPACE "fast ""space" AS SELECT "id" + 1 AS "id", "select" FROM "App ""Schema"."Order""Items" WITH DATA
+    transactional=true new_unit=false isolated=false sql=ALTER MATERIALIZED VIEW "App ""Schema"."Order""MaterializedView" OWNER TO "Role ""Owner"
+  alter materialized view owner: alter_materialized_view_owner target=materialized_view "App ""Schema"."Order""MaterializedView"
+    transactional=true new_unit=false isolated=false sql=ALTER MATERIALIZED VIEW "App ""Schema"."Order""MaterializedView" OWNER TO "New ""Owner"
   create sequence: create_sequence target=sequence "App ""Schema"."Serial""ID"
     transactional=true new_unit=false isolated=false sql=CREATE SEQUENCE "App ""Schema"."Serial""ID" AS bigint INCREMENT BY 5 MINVALUE 1 MAXVALUE 999 START WITH 7 CACHE 3 CYCLE
     transactional=true new_unit=false isolated=false sql=ALTER SEQUENCE "App ""Schema"."Serial""ID" OWNER TO "Role ""Owner"

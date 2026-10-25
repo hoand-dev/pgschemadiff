@@ -38,6 +38,7 @@ from pgschemadiff.domain.delta import (
     AlterEnumAttrs,
     AlterExtension,
     AlterFunctionOwner,
+    AlterMaterializedViewOwner,
     AlterProcedureOwner,
     AlterSequenceOptions,
     AlterSequenceOwnedBy,
@@ -50,6 +51,7 @@ from pgschemadiff.domain.delta import (
     CreateExtension,
     CreateFunction,
     CreateIndex,
+    CreateMaterializedView,
     CreateProcedure,
     CreateSchema,
     CreateSequence,
@@ -67,6 +69,7 @@ from pgschemadiff.domain.delta import (
     DropExtension,
     DropFunction,
     DropIndex,
+    DropMaterializedView,
     DropProcedure,
     DropSchema,
     DropSequence,
@@ -79,6 +82,7 @@ from pgschemadiff.domain.delta import (
     ReplaceEnumLabels,
     ReplaceFunction,
     ReplaceIndex,
+    ReplaceMaterializedView,
     ReplaceProcedure,
     ReplaceView,
     SetColumnDefault,
@@ -91,6 +95,7 @@ from pgschemadiff.domain.extension import Extension
 from pgschemadiff.domain.function import Function, FunctionArgument
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index, IndexKeyColumn, IndexMethod, SortOrder
+from pgschemadiff.domain.materialized_view import MaterializedView
 from pgschemadiff.domain.procedure import Procedure, ProcedureArgument
 from pgschemadiff.domain.schema import Schema
 from pgschemadiff.domain.sequence import Sequence
@@ -438,6 +443,24 @@ def _emitter_cases() -> tuple[tuple[str, Delta], ...]:
             "definition": ('SELECT "id" AS "renamed", "select" FROM "App ""Schema"."Order""Items"'),
         }
     )
+    materialized_view_ref = ObjectRef(
+        kind=ObjectKind.MATERIALIZED_VIEW,
+        qname=QualifiedName(namespace='App "Schema', name='Order"MaterializedView'),
+    )
+    materialized_view = MaterializedView(
+        ref=materialized_view_ref,
+        columns=(("id", "integer"), ("select", "text")),
+        definition='SELECT "id", "select" FROM "App ""Schema"."Order""Items"',
+        access_method="heap",
+        tablespace='fast "space',
+        storage_parameters=("fillfactor=70",),
+        owner='Role "Owner',
+    )
+    new_materialized_view = materialized_view.model_copy(
+        update={
+            "definition": ('SELECT "id" + 1 AS "id", "select" FROM "App ""Schema"."Order""Items"')
+        }
+    )
 
     return (
         ("create function", CreateFunction(target=function_ref, function=function)),
@@ -508,6 +531,36 @@ def _emitter_cases() -> tuple[tuple[str, Delta], ...]:
         (
             "alter view owner",
             AlterViewOwner(target=view_ref, view=view, new_owner='New "Owner'),
+        ),
+        (
+            "create materialized view",
+            CreateMaterializedView(
+                target=materialized_view_ref,
+                materialized_view=materialized_view,
+            ),
+        ),
+        (
+            "drop materialized view",
+            DropMaterializedView(
+                target=materialized_view_ref,
+                materialized_view=materialized_view,
+            ),
+        ),
+        (
+            "replace materialized view",
+            ReplaceMaterializedView(
+                target=materialized_view_ref,
+                old_materialized_view=materialized_view,
+                new_materialized_view=new_materialized_view,
+            ),
+        ),
+        (
+            "alter materialized view owner",
+            AlterMaterializedViewOwner(
+                target=materialized_view_ref,
+                materialized_view=materialized_view,
+                new_owner='New "Owner',
+            ),
         ),
         ("create sequence", CreateSequence(target=sequence_ref, sequence=sequence)),
         ("drop sequence", DropSequence(target=sequence_ref, sequence=sequence)),

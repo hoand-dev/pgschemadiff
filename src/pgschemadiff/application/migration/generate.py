@@ -22,12 +22,18 @@ from pgschemadiff.application.sql_emit.risk import (
 )
 from pgschemadiff.application.sql_emit.transaction import split_units
 from pgschemadiff.domain.delta import CreateTable
+from pgschemadiff.domain.delta.materialized_view import (
+    DropMaterializedView,
+    ReplaceMaterializedView,
+)
+from pgschemadiff.domain.delta.view import DropView, ReplaceView
 from pgschemadiff.shared.errors import MigrationError, RiskGateError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from pgschemadiff.domain.delta import DeltaBase, DeltaSet
+    from pgschemadiff.domain.identity import ObjectRef
 
 
 def _utc_now() -> datetime:
@@ -54,6 +60,35 @@ def _clock_utc(clock: Callable[[], datetime]) -> datetime:
     return created_at.astimezone(UTC)
 
 
+def _resolved_view_dependencies(
+    deltas: DeltaSet,
+) -> frozenset[tuple[ObjectRef, ObjectRef]]:
+    resolved: set[tuple[ObjectRef, ObjectRef]] = set()
+    for delta in deltas:
+        old_prerequisites: tuple[ObjectRef, ...]
+        new_prerequisites: tuple[ObjectRef, ...]
+        if isinstance(delta, DropView):
+            old_prerequisites = delta.view.prerequisites
+            new_prerequisites = ()
+        elif isinstance(delta, DropMaterializedView):
+            old_prerequisites = delta.materialized_view.prerequisites
+            new_prerequisites = ()
+        elif isinstance(delta, ReplaceView):
+            old_prerequisites = delta.old_view.prerequisites
+            new_prerequisites = delta.new_view.prerequisites
+        elif isinstance(delta, ReplaceMaterializedView):
+            old_prerequisites = delta.old_materialized_view.prerequisites
+            new_prerequisites = delta.new_materialized_view.prerequisites
+        else:
+            continue
+        resolved.update(
+            (delta.target, prerequisite)
+            for prerequisite in old_prerequisites
+            if prerequisite not in new_prerequisites
+        )
+    return frozenset(resolved)
+
+
 def generate_migration(
     delta_set: DeltaSet,
     *,
@@ -77,8 +112,14 @@ def generate_migration(
     created_tables = frozenset(
         delta.target for delta in delta_set if isinstance(delta, CreateTable)
     )
+    resolved_view_dependencies = _resolved_view_dependencies(ordered_deltas)
     risk_assessments = tuple(
-        classify_risk(delta, created_tables=created_tables) for delta in ordered_deltas
+        classify_risk(
+            delta,
+            created_tables=created_tables,
+            resolved_view_dependencies=resolved_view_dependencies,
+        )
+        for delta in ordered_deltas
     )
 
     if not passes_risk_limit(risk_assessments, max_risk=max_risk):
