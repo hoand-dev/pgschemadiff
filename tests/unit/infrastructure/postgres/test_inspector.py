@@ -562,6 +562,7 @@ def test_map_column_generated() -> None:
     )
     col = _map_column(row)
     assert col.generated_expression == "first_name || ' ' || last_name"
+    assert col.generated_kind == "stored"
     assert col.default_expr is None
     assert col.identity is None
 
@@ -575,11 +576,20 @@ def test_map_column_with_collation() -> None:
 
 
 @pytest.mark.unit
-def test_map_column_rejects_virtual_generated_column() -> None:
-    row = _make_column_row(is_virtual_generated=True)
+def test_map_column_virtual_generated() -> None:
+    row = _make_column_row(
+        column="full_name",
+        data_type="text",
+        is_virtual_generated=True,
+        generated_expr="first_name || ' ' || last_name",
+    )
 
-    with pytest.raises(InspectionError, match="Virtual generated columns are unsupported in MVP-A"):
-        _map_column(row)
+    col = _map_column(row)
+
+    assert col.generated_expression == "first_name || ' ' || last_name"
+    assert col.generated_kind == "virtual"
+    assert col.default_expr is None
+    assert col.identity is None
 
 
 # ===========================================================================

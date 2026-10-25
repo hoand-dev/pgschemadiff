@@ -303,7 +303,8 @@
                     "default_expr": null,
                     "collation": null,
                     "identity": null,
-                    "generated_expression": null
+                    "generated_expression": null,
+                    "generated_kind": null
                   },
                   {
                     "name": "email",
@@ -313,7 +314,8 @@
                     "default_expr": null,
                     "collation": null,
                     "identity": null,
-                    "generated_expression": null
+                    "generated_expression": null,
+                    "generated_kind": null
                   }
                 ],
                 "constraints": [],
@@ -441,7 +443,7 @@
         - `up.sql`: `a6e992690fd58b789759956c7ec05f9c01aa1694ab140f106d2a915c6f8bd526`
         - `down.sql`: `e87201d8d4470825bb2bea1bd7a4503e7152abd3a22dbd70418d51cfa851166e`
         - `manifest.json`: `04fa4ef4e470362e9755d7177a7988b21c8d956dd3254c962b5702bb05a8deb8`
-        - `deltas.json`: `bc7effbceb5f74c247b2bc8aa1ebac0d850c12b16f11495685acdd8d3029962b`
+        - `deltas.json`: `5bb88fcf8dd9d3ea4dfe6130d033b8ee9fdc4b6078f2484ad2ed53c0a695bff3`
         
         ## Warnings
         

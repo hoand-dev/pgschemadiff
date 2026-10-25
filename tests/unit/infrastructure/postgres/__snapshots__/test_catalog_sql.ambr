@@ -17,8 +17,8 @@
   --   is_identity        bool       -- true when attidentity != ''
   --   identity_generated text|null  -- 'ALWAYS' or 'BY DEFAULT' (when is_identity), null otherwise
   --   is_generated       bool       -- true when attgenerated = 's' (stored generated)
-  --   is_virtual_generated bool     -- true when attgenerated = 'v' (unsupported)
-  --   generated_expr     text|null  -- pg_get_expr(adbin, adrelid) for generated cols, null otherwise
+  --   is_virtual_generated bool     -- true when attgenerated = 'v' (virtual generated)
+  --   generated_expr     text|null  -- pg_get_expr(adbin, adrelid) for stored/virtual generated cols
   SELECT
       n.nspname                                            AS schema_name,
       c.relname                                            AS table_name,
@@ -51,7 +51,7 @@
       a.attgenerated = 's'                                 AS is_generated,
       a.attgenerated = 'v'                                 AS is_virtual_generated,
       CASE
-          WHEN a.attgenerated = 's' AND ad.adbin IS NOT NULL
+          WHEN a.attgenerated IN ('s', 'v') AND ad.adbin IS NOT NULL
               THEN pg_get_expr(ad.adbin, ad.adrelid)
           ELSE NULL
       END                                                  AS generated_expr

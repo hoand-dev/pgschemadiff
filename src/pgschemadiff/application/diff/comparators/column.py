@@ -145,7 +145,10 @@ class ColumnComparator:
             raise DiffError(f"Unsupported column position change for {target_ref.qname.fqn}")
         if source.identity != target.identity:
             raise DiffError(f"Unsupported identity change for {target_ref.qname.fqn}")
-        if source.generated_expression != target.generated_expression:
+        if (
+            source.generated_expression != target.generated_expression
+            or source.generated_kind != target.generated_kind
+        ):
             raise DiffError(f"Unsupported generated_expression change for {target_ref.qname.fqn}")
         if source.collation != target.collation and target.collation is None:
             raise DiffError(f"Unsupported collation removal for {target_ref.qname.fqn}")

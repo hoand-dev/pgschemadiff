@@ -20,6 +20,8 @@
     transactional=true new_unit=false sql=ALTER TABLE "App Schema"."Order""Items" OWNER TO "Role ""Owner"
     transactional=true new_unit=false sql=ALTER TABLE "App Schema"."Order""Items" SET TABLESPACE "fast space"
     transactional=true new_unit=false sql=COMMENT ON TABLE "App Schema"."Order""Items" IS 'Customer''s order table'
+  create table with virtual generated column: create_table target=table "App Schema"."accounts"
+    transactional=true new_unit=false sql=CREATE TABLE "App Schema"."accounts" ("value" integer, "doubled" integer GENERATED ALWAYS AS (value * 2) VIRTUAL)
   create partitioned parent: create_table target=table "App Schema"."events"
     transactional=true new_unit=false sql=CREATE TABLE "App Schema"."events" ("created_at" date) PARTITION BY RANGE (created_at)
   create partition child: create_table target=table "App Schema"."events_2026"
@@ -41,6 +43,8 @@
     transactional=true new_unit=false sql=ALTER TABLE "App Schema"."accounts" ADD COLUMN "generated_id" bigint GENERATED ALWAYS AS IDENTITY (START WITH 7)
   add stored generated column: add_column target=column "App Schema"."accounts"."computed"
     transactional=true new_unit=false sql=ALTER TABLE "App Schema"."accounts" ADD COLUMN "computed" integer GENERATED ALWAYS AS (quantity * unit_price) STORED
+  add virtual generated column: add_column target=column "App Schema"."accounts"."virtual_computed"
+    transactional=true new_unit=false sql=ALTER TABLE "App Schema"."accounts" ADD COLUMN "virtual_computed" integer GENERATED ALWAYS AS (quantity * unit_price) VIRTUAL
   add collated column: add_column target=column "App Schema"."accounts"."Display ""name"
     transactional=true new_unit=false sql=ALTER TABLE "App Schema"."accounts" ADD COLUMN "Display ""name" text COLLATE "App Schema"."case_insensitive"
   drop column: drop_column target=column "App Schema"."accounts"."legacy"

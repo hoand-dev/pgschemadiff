@@ -293,6 +293,25 @@ def _emitter_cases() -> tuple[tuple[str, Delta], ...]:
             CreateTable(target=plain_table_ref, table=plain_table),
         ),
         (
+            "create table with virtual generated column",
+            CreateTable(
+                target=account_ref,
+                table=Table(
+                    ref=account_ref,
+                    columns=(
+                        Column(name="value", position=1, data_type="integer"),
+                        Column(
+                            name="doubled",
+                            position=2,
+                            data_type="integer",
+                            generated_expression="value * 2",
+                            generated_kind="virtual",
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        (
             "create partitioned parent",
             CreateTable(
                 target=partition_parent_ref,
@@ -386,6 +405,19 @@ def _emitter_cases() -> tuple[tuple[str, Delta], ...]:
                     position=4,
                     data_type="integer",
                     generated_expression="quantity * unit_price",
+                ),
+            ),
+        ),
+        (
+            "add virtual generated column",
+            AddColumn(
+                target=_column_ref(account_ref, "virtual_computed"),
+                column=Column(
+                    name="virtual_computed",
+                    position=5,
+                    data_type="integer",
+                    generated_expression="quantity * unit_price",
+                    generated_kind="virtual",
                 ),
             ),
         ),

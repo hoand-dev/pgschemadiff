@@ -72,7 +72,8 @@ def render_column_definition(column: Column) -> str:
         # PostgreSQL identity columns are implicitly NOT NULL.
     elif column.generated_expression is not None:
         expression = catalog_fragment(column.generated_expression, "Generated expression")
-        definition.append(f"GENERATED ALWAYS AS ({expression}) STORED")
+        storage = "VIRTUAL" if column.generated_kind == "virtual" else "STORED"
+        definition.append(f"GENERATED ALWAYS AS ({expression}) {storage}")
     elif column.default_expr is not None:
         default = catalog_fragment(column.default_expr, "Column default")
         definition.extend(("DEFAULT", default))

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import importlib.resources as importlib_resources
 import re
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import psycopg
 import psycopg.rows
@@ -287,11 +287,9 @@ def _parse_exclusion_elements(body: str) -> tuple[ExclusionElement, ...]:
 
 def _map_column(row: Any) -> Column:
     """Map a columns.sql result row to a :class:`Column` domain object."""
-    if bool(row.is_virtual_generated):
-        raise InspectionError("Virtual generated columns are unsupported in MVP-A")
-
     is_identity: bool = bool(row.is_identity)
     is_generated: bool = bool(row.is_generated)
+    is_virtual_generated: bool = bool(row.is_virtual_generated)
 
     identity: IdentitySpec | None = None
     if is_identity:
@@ -303,7 +301,14 @@ def _map_column(row: Any) -> Column:
             )
         )
 
-    generated_expression: str | None = row.generated_expr or None if is_generated else None
+    generated_expression: str | None = (
+        row.generated_expr or None if is_generated or is_virtual_generated else None
+    )
+    generated_kind: Literal["stored", "virtual"] | None = None
+    if is_generated:
+        generated_kind = "stored"
+    elif is_virtual_generated:
+        generated_kind = "virtual"
     default_expr: str | None = (
         row.default_expr or None if not is_identity and not is_generated else None
     )
@@ -317,6 +322,7 @@ def _map_column(row: Any) -> Column:
         collation=row.collation or None,
         identity=identity,
         generated_expression=generated_expression,
+        generated_kind=generated_kind,
     )
 
 

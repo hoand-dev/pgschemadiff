@@ -92,6 +92,7 @@ def _column(
     default_expr: str | None = None,
     identity: IdentitySpec | None = None,
     generated_expression: str | None = None,
+    generated_kind: Literal["stored", "virtual"] | None = None,
 ) -> Column:
     return Column(
         name="email",
@@ -101,6 +102,7 @@ def _column(
         default_expr=default_expr,
         identity=identity,
         generated_expression=generated_expression,
+        generated_kind=generated_kind,
     )
 
 
@@ -250,6 +252,17 @@ RISK_CASES = (
         ),
         RiskLevel.WARNING,
         id="add-generated-column",
+    ),
+    pytest.param(
+        AddColumn(
+            target=_COLUMN_REF,
+            column=_column(
+                generated_expression="lower(email)",
+                generated_kind="virtual",
+            ),
+        ),
+        RiskLevel.SAFE,
+        id="add-virtual-generated-column",
     ),
     pytest.param(
         DropColumn(target=_COLUMN_REF, column=_column()),
@@ -410,6 +423,33 @@ def test_classify_risk_matches_policy(delta: DeltaBase, expected_level: RiskLeve
     assert assessment.level is expected_level
     assert assessment.reason.strip()
     assert classify_risk(delta).reason == assessment.reason
+
+
+def test_virtual_generated_column_addition_has_precise_safe_reason() -> None:
+    delta = AddColumn(
+        target=_COLUMN_REF,
+        column=_column(generated_expression="lower(email)", generated_kind="virtual"),
+    )
+
+    assessment = classify_risk(delta)
+
+    assert assessment.level is RiskLevel.SAFE
+    assert assessment.reason == (
+        "Adds a virtual generated column; existing row values are computed on read, not rewritten."
+    )
+
+
+def test_not_null_virtual_generated_column_remains_warning() -> None:
+    delta = AddColumn(
+        target=_COLUMN_REF,
+        column=_column(
+            nullable=False,
+            generated_expression="lower(email)",
+            generated_kind="virtual",
+        ),
+    )
+
+    assert classify_risk(delta).level is RiskLevel.WARNING
 
 
 def test_add_constraint_on_new_table_is_safe() -> None:

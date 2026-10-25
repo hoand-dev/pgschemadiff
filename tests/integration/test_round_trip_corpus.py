@@ -279,12 +279,6 @@ def _seed(dsn: str, statements: list[str]) -> None:
                 "CREATE TABLE app.virtuals (value integer, doubled integer "
                 "GENERATED ALWAYS AS (value * 2) VIRTUAL)",
             ],
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason=(
-                    "TD-INSPECT-02: PG18 virtual generated columns are unsupported by inspection."
-                ),
-            ),
         ),
         pytest.param(
             "unlogged-table-persistence",

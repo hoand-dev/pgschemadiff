@@ -174,15 +174,25 @@ def classify_risk(  # noqa: PLR0912, PLR0915
             level, reason = RiskLevel.SAFE, "Changes table owner or comment metadata only."
     elif isinstance(delta, AddColumn):
         conditions = []
+        is_virtual_generated = (
+            delta.column.generated_expression is not None
+            and delta.column.generated_kind == "virtual"
+        )
         if not delta.column.nullable:
             conditions.append("NOT NULL")
         if delta.column.default_expr is not None:
             conditions.append("a default")
         if delta.column.identity is not None:
             conditions.append("identity generation")
-        if delta.column.generated_expression is not None:
+        if delta.column.generated_expression is not None and not is_virtual_generated:
             conditions.append("a generated expression")
-        if conditions:
+        if is_virtual_generated and not conditions:
+            level, reason = (
+                RiskLevel.SAFE,
+                "Adds a virtual generated column; existing row values are computed on read, "
+                "not rewritten.",
+            )
+        elif conditions:
             level = RiskLevel.WARNING
             reason = (
                 f"Adds a column with {', '.join(conditions)}; "

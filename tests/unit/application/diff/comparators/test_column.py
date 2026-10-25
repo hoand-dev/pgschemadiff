@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 import pytest
 
 import pgschemadiff.application.diff.comparators as comparator_package
@@ -48,6 +50,7 @@ def _column(
     collation: str | None = None,
     identity: IdentitySpec | None = None,
     generated_expression: str | None = None,
+    generated_kind: Literal["stored", "virtual"] | None = None,
 ) -> Column:
     return Column(
         name=name,
@@ -58,6 +61,7 @@ def _column(
         collation=collation,
         identity=identity,
         generated_expression=generated_expression,
+        generated_kind=generated_kind,
     )
 
 
@@ -202,6 +206,12 @@ def test_removing_collation_raises_diff_error() -> None:
             _column(generated_expression="id * 2"),
             "generated_expression",
             id="generated-expression",
+        ),
+        pytest.param(
+            _column(generated_expression="id * 2"),
+            _column(generated_expression="id * 2", generated_kind="virtual"),
+            "generated_expression",
+            id="generated-kind",
         ),
     ],
 )

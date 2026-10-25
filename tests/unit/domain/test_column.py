@@ -134,6 +134,7 @@ def test_plain_column_minimal() -> None:
     assert col.collation is None
     assert col.identity is None
     assert col.generated_expression is None
+    assert col.generated_kind is None
 
 
 @pytest.mark.unit
@@ -238,6 +239,35 @@ def test_generated_stored_column_ok() -> None:
     )
     assert col.is_generated_stored is True
     assert col.is_identity is False
+    assert col.generated_kind == "stored"
+
+
+@pytest.mark.unit
+def test_generated_virtual_column_ok() -> None:
+    col = Column(
+        name="full_name",
+        position=3,
+        data_type="text",
+        generated_expression="first_name || ' ' || last_name",
+        generated_kind="virtual",
+    )
+
+    assert col.generated_kind == "virtual"
+    assert col.is_generated_stored is False
+
+
+@pytest.mark.unit
+def test_generated_kind_requires_generated_expression() -> None:
+    with pytest.raises(
+        ValidationError,
+        match="generated_kind must be set exactly when generated_expression is set",
+    ):
+        Column(
+            name="full_name",
+            position=3,
+            data_type="text",
+            generated_kind="virtual",
+        )
 
 
 @pytest.mark.unit
