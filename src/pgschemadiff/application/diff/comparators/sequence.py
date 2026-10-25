@@ -99,7 +99,9 @@ class SequenceComparator:
                     or source_table_owner == target_table_owner
                 ):
                     raise DiffError(
-                        "Sequence and owning table owners have inconsistent catalog state."
+                        "Sequence and owning table owners have inconsistent catalog state: "
+                        f"sequence {src.ref.qname.fqn} owner {src.owner!r} -> {tgt.owner!r}, "
+                        f"table owner {source_table_owner!r} -> {target_table_owner!r}."
                     )
             else:
                 result.append(
