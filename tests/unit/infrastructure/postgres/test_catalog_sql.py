@@ -49,6 +49,8 @@ _CATALOG_FILES = [
     "composite_types.sql",
     "domain_types.sql",
     "type_prerequisites.sql",
+    "sequences.sql",
+    "sequence_prerequisites.sql",
 ]
 
 
@@ -368,6 +370,8 @@ def test_schemas_sql_selects_owner_and_comment() -> None:
         pytest.param("composite_types.sql"),
         pytest.param("domain_types.sql"),
         pytest.param("type_prerequisites.sql"),
+        pytest.param("sequences.sql"),
+        pytest.param("sequence_prerequisites.sql"),
     ],
 )
 def test_catalog_sql_excludes_reserved_history_schema(filename: str) -> None:
@@ -477,6 +481,73 @@ def test_type_prerequisites_sql_excludes_system_and_extension_types() -> None:
     assert "!= 'pgschemadiff'" in sql
     assert "pg_depend" in sql
     assert "deptype = 'e'" in sql
+
+
+@pytest.mark.unit
+def test_sequences_sql_selects_options_owner_and_owned_column() -> None:
+    sql = _load_sql("sequences.sql")
+
+    for expected in (
+        "pg_sequence",
+        "seqstart",
+        "seqincrement",
+        "seqmin",
+        "seqmax",
+        "seqcache",
+        "seqcycle",
+        "pg_get_userbyid(sequence_class.relowner)",
+        "owned_column",
+    ):
+        assert expected in sql
+
+
+@pytest.mark.unit
+def test_sequences_sql_excludes_identity_extension_and_system_sequences() -> None:
+    sql = _load_sql("sequences.sql")
+
+    assert "relkind = 'S'" in sql
+    assert "deptype = 'i'" in sql
+    assert "deptype = 'e'" in sql
+    assert "left(sequence_namespace.nspname, 3) != 'pg_'" in sql
+    assert "nspname != 'information_schema'" in sql
+    assert "nspname != 'pgschemadiff'" in sql
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("filename", "prefix_filters"),
+    [
+        ("sequences.sql", ("left(sequence_namespace.nspname, 3) != 'pg_'",)),
+        (
+            "sequence_prerequisites.sql",
+            (
+                "left(table_namespace.nspname, 3) != 'pg_'",
+                "left(sequence_namespace.nspname, 3) != 'pg_'",
+            ),
+        ),
+    ],
+)
+def test_sequence_catalog_sql_filters_literal_pg_prefix(
+    filename: str, prefix_filters: tuple[str, ...]
+) -> None:
+    sql = " ".join(_load_sql(filename).split())
+
+    for prefix_filter in prefix_filters:
+        assert prefix_filter in sql
+    assert "NOT LIKE 'pg_%'" not in sql
+
+
+@pytest.mark.unit
+def test_sequence_prerequisites_sql_uses_catalog_dependencies_not_default_parsing() -> None:
+    sql = _load_sql("sequence_prerequisites.sql")
+
+    assert "pg_attrdef" in sql
+    assert "pg_depend" in sql
+    assert "deptype = 'n'" in sql
+    assert "dependent_column" in sql
+    assert "sequence_schema" in sql
+    assert "sequence_name" in sql
+    assert "nextval" not in sql
 
 
 # ---------------------------------------------------------------------------

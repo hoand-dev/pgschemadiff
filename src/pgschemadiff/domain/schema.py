@@ -20,6 +20,7 @@ from pgschemadiff.domain.domain_type import DomainType
 from pgschemadiff.domain.enum_type import EnumType
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index
+from pgschemadiff.domain.sequence import Sequence
 from pgschemadiff.domain.table import Table
 
 
@@ -62,6 +63,9 @@ class Schema(BaseModel):
 
     domain_types: tuple[DomainType, ...] = Field(default=())
     """Domain types owned by this schema."""
+
+    sequences: tuple[Sequence, ...] = Field(default=())
+    """Sequences owned by this schema, ordered by sequence name."""
 
     comment: str | None = None
     """Optional ``COMMENT ON SCHEMA`` value."""
@@ -128,6 +132,20 @@ class Schema(BaseModel):
                 raise ValueError(
                     f"Domain type {domain.ref.qname.fqn!r} belongs to namespace "
                     f"{domain.ref.qname.namespace!r}, but schema is {self.name!r}"
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _check_sequence_refs(self) -> Self:
+        seen: set[ObjectRef] = set()
+        for sequence in self.sequences:
+            if sequence.ref in seen:
+                raise ValueError(f"Duplicate sequence ref {sequence.ref!r} in schema {self.name!r}")
+            seen.add(sequence.ref)
+            if sequence.ref.qname.namespace != self.name:
+                raise ValueError(
+                    f"Sequence {sequence.ref.qname.fqn!r} belongs to namespace "
+                    f"{sequence.ref.qname.namespace!r}, but schema is {self.name!r}"
                 )
         return self
 

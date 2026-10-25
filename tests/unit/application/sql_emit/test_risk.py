@@ -35,6 +35,9 @@ from pgschemadiff.domain.delta import (
     AlterDomainNullability,
     AlterEnumAttrs,
     AlterExtension,
+    AlterSequenceOptions,
+    AlterSequenceOwnedBy,
+    AlterSequenceOwner,
     AlterTableAttrs,
     CreateCompositeType,
     CreateDomain,
@@ -42,6 +45,7 @@ from pgschemadiff.domain.delta import (
     CreateExtension,
     CreateIndex,
     CreateSchema,
+    CreateSequence,
     CreateTable,
     DeltaBase,
     DeltaOp,
@@ -54,6 +58,7 @@ from pgschemadiff.domain.delta import (
     DropExtension,
     DropIndex,
     DropSchema,
+    DropSequence,
     DropTable,
     RenameColumn,
     RenameTable,
@@ -71,6 +76,7 @@ from pgschemadiff.domain.extension import Extension
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index, IndexKeyColumn, IndexMethod
 from pgschemadiff.domain.schema import Schema
+from pgschemadiff.domain.sequence import Sequence
 from pgschemadiff.domain.table import PartitionInfo, PartitionOf, PartitionStrategy, Table
 
 _SCHEMA_REF = ObjectRef(
@@ -107,6 +113,10 @@ _DOMAIN_REF = ObjectRef(
     kind=ObjectKind.DOMAIN_TYPE,
     qname=QualifiedName(namespace="public", name="positive"),
 )
+_SEQUENCE_REF = ObjectRef(
+    kind=ObjectKind.SEQUENCE,
+    qname=QualifiedName(namespace="public", name="users_id_seq"),
+)
 
 
 def _table(*, partition_of: PartitionOf | None = None, unlogged: bool = False) -> Table:
@@ -127,6 +137,21 @@ def _composite() -> CompositeType:
 
 def _domain() -> DomainType:
     return DomainType(ref=_DOMAIN_REF, base_type="integer", owner="app_owner")
+
+
+def _sequence(*, owned_by: ObjectRef | None = None) -> Sequence:
+    return Sequence(
+        ref=_SEQUENCE_REF,
+        data_type="bigint",
+        start=1,
+        increment=1,
+        min_value=1,
+        max_value=9223372036854775807,
+        cache=1,
+        cycle=False,
+        owner="app_owner",
+        owned_by=owned_by,
+    )
 
 
 def _add_constraint(table_ref: ObjectRef, constraint: Constraint) -> AddConstraint:
@@ -623,6 +648,36 @@ RISK_CASES = (
         ),
         RiskLevel.BLOCKED,
         id="replace-domain-type-blocked",
+    ),
+    pytest.param(
+        CreateSequence(target=_SEQUENCE_REF, sequence=_sequence()),
+        RiskLevel.SAFE,
+        id="create-unowned-sequence",
+    ),
+    pytest.param(
+        CreateSequence(target=_SEQUENCE_REF, sequence=_sequence(owned_by=_COLUMN_REF)),
+        RiskLevel.DANGEROUS,
+        id="create-column-owned-sequence",
+    ),
+    pytest.param(
+        DropSequence(target=_SEQUENCE_REF, sequence=_sequence()),
+        RiskLevel.DESTRUCTIVE,
+        id="drop-sequence",
+    ),
+    pytest.param(
+        AlterSequenceOptions(target=_SEQUENCE_REF, new_increment=2),
+        RiskLevel.WARNING,
+        id="alter-sequence-options",
+    ),
+    pytest.param(
+        AlterSequenceOwner(target=_SEQUENCE_REF, new_owner="other_owner"),
+        RiskLevel.DANGEROUS,
+        id="alter-sequence-role-owner",
+    ),
+    pytest.param(
+        AlterSequenceOwnedBy(target=_SEQUENCE_REF, new_owned_by=_COLUMN_REF),
+        RiskLevel.WARNING,
+        id="alter-sequence-owned-by",
     ),
 )
 

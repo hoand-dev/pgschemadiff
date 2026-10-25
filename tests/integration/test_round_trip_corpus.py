@@ -12,6 +12,7 @@ from pgschemadiff.application.migration.apply import ApplyResult, apply_migratio
 from pgschemadiff.application.migration.bundle import load_bundle
 from pgschemadiff.application.migration.generate import generate_migration
 from pgschemadiff.application.sql_emit.risk import RiskLevel
+from pgschemadiff.domain.delta import AlterSequenceOptions, CreateSequence, CreateTable
 from pgschemadiff.infrastructure.fs.bundle_reader import FilesystemBundleReader
 from pgschemadiff.infrastructure.fs.migration_writer import FilesystemMigrationWriter
 from pgschemadiff.infrastructure.postgres.applier import open_executor
@@ -463,6 +464,55 @@ def _seed(dsn: str, statements: list[str]) -> None:
             [_APP, 'CREATE TABLE app."MixedCase" ("select" integer, "MixedColumn" text)'],
         ),
         pytest.param(
+            "create-sequence",
+            [_APP],
+            [
+                _APP,
+                "CREATE SEQUENCE app.event_id_seq AS bigint START WITH 5 INCREMENT BY 2 "
+                "MINVALUE 1 MAXVALUE 1000 CACHE 8 CYCLE",
+            ],
+        ),
+        pytest.param(
+            "alter-sequence-options",
+            [
+                _APP,
+                "CREATE SEQUENCE app.counter_seq AS integer START WITH 1 INCREMENT BY 1 "
+                "MINVALUE 0 MAXVALUE 1000 CACHE 1 NO CYCLE",
+            ],
+            [
+                _APP,
+                "CREATE SEQUENCE app.counter_seq AS integer START WITH 11 INCREMENT BY 2 "
+                "MINVALUE 0 MAXVALUE 1000 CACHE 5 CYCLE",
+            ],
+        ),
+        pytest.param(
+            "drop-standalone-sequence",
+            [
+                _APP,
+                "CREATE SEQUENCE app.standalone_seq AS bigint START WITH 1 INCREMENT BY 1",
+            ],
+            [_APP],
+        ),
+        pytest.param(
+            "create-serial-style-sequence",
+            [_APP],
+            [_APP, "CREATE TABLE app.orders (id serial PRIMARY KEY)"],
+        ),
+        pytest.param(
+            "drop-table-with-serial-style-sequence",
+            [_APP, "CREATE TABLE app.orders (id serial PRIMARY KEY)"],
+            [_APP],
+        ),
+        pytest.param(
+            "identity-backing-sequence",
+            [_APP],
+            [
+                _APP,
+                "CREATE TABLE app.identity_rows ("
+                "id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY)",
+            ],
+        ),
+        pytest.param(
             "pg18-virtual-generated-column",
             [_APP, "CREATE TABLE app.virtuals (value integer)"],
             [
@@ -513,6 +563,116 @@ async def test_pg18_round_trip_corpus(
 
     remaining = await compare_urls(pg_test_dsn, pg_test_dsn2, schemas=None)
     assert remaining.is_empty(), scenario
+
+
+@pytest.mark.integration
+async def test_sequence_option_migration_preserves_runtime_state(
+    pg_test_dsn: str,
+    pg_test_dsn2: str,
+    tmp_path: Path,
+) -> None:
+    current_sql = [
+        _APP,
+        "CREATE SEQUENCE app.runtime_seq AS bigint START WITH 1 INCREMENT BY 1 "
+        "MINVALUE 1 MAXVALUE 100 CACHE 1 NO CYCLE",
+        "SELECT pg_catalog.setval('app.runtime_seq'::regclass, 42, true)",
+    ]
+    desired_sql = [
+        _APP,
+        "CREATE SEQUENCE app.runtime_seq AS bigint START WITH 5 INCREMENT BY 3 "
+        "MINVALUE 1 MAXVALUE 200 CACHE 4 CYCLE",
+    ]
+    _seed(pg_test_dsn, current_sql)
+    _seed(pg_test_dsn2, desired_sql)
+
+    delta_set = await compare_urls(pg_test_dsn, pg_test_dsn2, schemas=None)
+    assert any(isinstance(delta, AlterSequenceOptions) for delta in delta_set)
+    plan = generate_migration(
+        delta_set,
+        max_risk=RiskLevel.DESTRUCTIVE,
+        clock=lambda: datetime(2026, 10, 25, 12, 0, tzinfo=UTC),
+        id_factory=lambda: "pg18-corpus-sequence-runtime-state",
+    )
+    bundle_dir = FilesystemMigrationWriter().write(plan, tmp_path)
+    manifest_bytes, up_sql_bytes = FilesystemBundleReader().read(bundle_dir)
+    bundle = load_bundle(manifest_bytes, up_sql_bytes)
+
+    async with open_executor(pg_test_dsn) as executor:
+        result = await apply_migration(bundle, executor, approve_destructive=True)
+    assert result.status == "applied"
+    with psycopg.connect(pg_test_dsn) as connection:
+        state = connection.execute("SELECT last_value, is_called FROM app.runtime_seq").fetchone()
+    assert state == (42, True)
+    assert (await compare_urls(pg_test_dsn, pg_test_dsn2, schemas=None)).is_empty()
+
+
+@pytest.mark.integration
+async def test_sequence_owner_transition_precedes_owned_by_change_for_pg18(
+    pg_admin_dsn: str,
+    pg_test_dsn: str,
+    pg_test_dsn2: str,
+    tmp_path: Path,
+) -> None:
+    old_owner = "pgsd_sequence_old_owner"
+    with psycopg.connect(pg_admin_dsn, autocommit=True) as connection:
+        connection.execute(f"CREATE ROLE {old_owner}")
+
+    common = [
+        _APP,
+        "CREATE SEQUENCE app.transfer_seq AS bigint START WITH 1 INCREMENT BY 1",
+    ]
+    current_sql = [
+        *common,
+        f"ALTER SEQUENCE app.transfer_seq OWNER TO {old_owner}",
+        "CREATE TABLE app.old_owner_table "
+        "(id bigint DEFAULT nextval('app.transfer_seq'::regclass))",
+        f"ALTER TABLE app.old_owner_table OWNER TO {old_owner}",
+        "ALTER SEQUENCE app.transfer_seq OWNED BY app.old_owner_table.id",
+    ]
+    desired_sql = [
+        *common,
+        "CREATE TABLE app.new_owner_table "
+        "(id bigint DEFAULT nextval('app.transfer_seq'::regclass))",
+        "ALTER SEQUENCE app.transfer_seq OWNED BY app.new_owner_table.id",
+    ]
+    _seed(pg_test_dsn, current_sql)
+    _seed(pg_test_dsn2, desired_sql)
+
+    delta_set = await compare_urls(pg_test_dsn, pg_test_dsn2, schemas=None)
+    plan = generate_migration(
+        delta_set,
+        max_risk=RiskLevel.DESTRUCTIVE,
+        clock=lambda: datetime(2026, 10, 25, 12, 0, tzinfo=UTC),
+        id_factory=lambda: "pg18-corpus-sequence-owner-transition",
+    )
+    bundle_dir = FilesystemMigrationWriter().write(plan, tmp_path)
+    manifest_bytes, up_sql_bytes = FilesystemBundleReader().read(bundle_dir)
+    bundle = load_bundle(manifest_bytes, up_sql_bytes)
+
+    async with open_executor(pg_test_dsn) as executor:
+        result = await apply_migration(bundle, executor, approve_destructive=True)
+    assert result.status == "applied"
+    assert (await compare_urls(pg_test_dsn, pg_test_dsn2, schemas=None)).is_empty()
+
+
+@pytest.mark.integration
+async def test_identity_backing_sequence_is_not_compared(
+    pg_test_dsn: str,
+    pg_test_dsn2: str,
+) -> None:
+    _seed(pg_test_dsn, [_APP])
+    _seed(
+        pg_test_dsn2,
+        [
+            _APP,
+            "CREATE TABLE app.identity_rows (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY)",
+        ],
+    )
+
+    delta_set = await compare_urls(pg_test_dsn, pg_test_dsn2, schemas=None)
+
+    assert any(isinstance(delta, CreateTable) for delta in delta_set)
+    assert not any(isinstance(delta, CreateSequence) for delta in delta_set)
 
 
 @pytest.mark.integration

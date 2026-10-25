@@ -38,7 +38,7 @@ from pgschemadiff.domain.constraint import (
 )
 from pgschemadiff.domain.database import Database
 from pgschemadiff.domain.domain_type import DomainCheck
-from pgschemadiff.domain.identity import QualifiedName
+from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import IndexMethod, NullsOrder, SortOrder
 from pgschemadiff.domain.ports import SchemaInspector
 from pgschemadiff.domain.table import PartitionStrategy
@@ -182,6 +182,34 @@ _TypePrerequisiteRow = namedtuple(
         "type_kind",
         "type_schema",
         "type_name",
+    ],
+)
+_SequenceRow = namedtuple(
+    "_SequenceRow",
+    [
+        "schema_name",
+        "sequence_name",
+        "data_type",
+        "start_value",
+        "increment_by",
+        "min_value",
+        "max_value",
+        "cache_size",
+        "cycle",
+        "owner",
+        "owned_schema",
+        "owned_table",
+        "owned_column",
+    ],
+)
+_SequencePrerequisiteRow = namedtuple(
+    "_SequencePrerequisiteRow",
+    [
+        "dependent_schema",
+        "dependent_table",
+        "dependent_column",
+        "sequence_schema",
+        "sequence_name",
     ],
 )
 
@@ -340,6 +368,55 @@ def _make_type_prerequisite_row(
     )
 
 
+def _make_sequence_row(
+    schema: str = "public",
+    name: str = "tickets_id_seq",
+    *,
+    data_type: str = "bigint",
+    start: int = 1,
+    increment: int = 1,
+    min_value: int = 1,
+    max_value: int = 9223372036854775807,
+    cache: int = 1,
+    cycle: bool = False,
+    owner: str | None = "postgres",
+    owned_schema: str | None = None,
+    owned_table: str | None = None,
+    owned_column: str | None = None,
+) -> Any:
+    return _SequenceRow(
+        schema,
+        name,
+        data_type,
+        start,
+        increment,
+        min_value,
+        max_value,
+        cache,
+        cycle,
+        owner,
+        owned_schema,
+        owned_table,
+        owned_column,
+    )
+
+
+def _make_sequence_prerequisite_row(
+    dependent_schema: str = "public",
+    dependent_table: str = "tickets",
+    dependent_column: str = "id",
+    sequence_schema: str = "public",
+    sequence_name: str = "tickets_id_seq",
+) -> Any:
+    return _SequencePrerequisiteRow(
+        dependent_schema,
+        dependent_table,
+        dependent_column,
+        sequence_schema,
+        sequence_name,
+    )
+
+
 def _make_composite_type_row(
     schema: str = "public",
     name: str = "address",
@@ -399,6 +476,8 @@ def _build_mock_pool(
     composite_types_rows: list[Any] | None = None,
     domain_types_rows: list[Any] | None = None,
     type_prerequisites_rows: list[Any] | None = None,
+    sequences_rows: list[Any] | None = None,
+    sequence_prerequisites_rows: list[Any] | None = None,
 ) -> MagicMock:
     """Build a mock Pool that yields a mocked psycopg connection.
 
@@ -415,6 +494,8 @@ def _build_mock_pool(
         composite_types_rows or [],
         domain_types_rows or [],
         type_prerequisites_rows or [],
+        sequences_rows or [],
+        sequence_prerequisites_rows or [],
     ]
 
     cur = AsyncMock()
@@ -465,7 +546,7 @@ def test_inspector_is_importable() -> None:
 
 
 @pytest.mark.unit
-async def test_inspect_calls_all_ten_queries() -> None:
+async def test_inspect_calls_all_twelve_queries() -> None:
     """inspect() must execute one query per catalog file."""
     pool = _build_mock_pool(
         schemas_rows=[_SchemaRow("public")],
@@ -480,7 +561,7 @@ async def test_inspect_calls_all_ten_queries() -> None:
 
     # fetchall should have been called once per catalog SQL file.
     cur = pool.acquire.return_value.__aenter__.return_value.cursor.return_value
-    assert cur.fetchall.call_count == 10
+    assert cur.fetchall.call_count == 12
     assert isinstance(result, Database)
 
 
@@ -522,7 +603,7 @@ async def test_inspect_sets_local_search_path_before_catalog_queries() -> None:
     assert [mock_call[0] for mock_call in statements] == [
         "execute",
         "execute",
-        *("catalog_cursor.execute" for _ in range(10)),
+        *("catalog_cursor.execute" for _ in range(12)),
         "execute",
     ]
     assert statements[0].args == ("BEGIN ISOLATION LEVEL REPEATABLE READ",)
@@ -795,6 +876,79 @@ async def test_inspect_maps_domain_metadata_checks_and_base_type_prerequisites()
     assert domain.owner == "domain_owner"
     assert domain.used_in_container is True
     assert domain.type_prerequisites[0].qname == QualifiedName(namespace="types", name="state")
+
+
+@pytest.mark.unit
+async def test_inspect_maps_sequence_options_ownership_and_default_prerequisite() -> None:
+    pool = _build_mock_pool(
+        schemas_rows=[_SchemaRow("public")],
+        tables_rows=[_make_table_row("public", "tickets")],
+        columns_rows=[
+            _make_column_row(
+                "public",
+                "tickets",
+                "id",
+                default_expr="nextval('public.tickets_id_seq'::regclass)",
+            )
+        ],
+        sequences_rows=[
+            _make_sequence_row(
+                owner="ticket_owner",
+                start=5,
+                increment=3,
+                min_value=2,
+                max_value=999,
+                cache=8,
+                cycle=True,
+                owned_schema="public",
+                owned_table="tickets",
+                owned_column="id",
+            )
+        ],
+        sequence_prerequisites_rows=[_make_sequence_prerequisite_row()],
+    )
+
+    database = await PgCatalogInspector(pool).inspect()
+
+    sequence = database.all_sequences()[0]
+    assert sequence.data_type == "bigint"
+    assert sequence.start == 5
+    assert sequence.increment == 3
+    assert sequence.min_value == 2
+    assert sequence.max_value == 999
+    assert sequence.cache == 8
+    assert sequence.cycle is True
+    assert sequence.owner == "ticket_owner"
+    assert sequence.owned_by == ObjectRef(
+        kind=ObjectKind.COLUMN,
+        qname=QualifiedName(namespace="public", name="id"),
+        parent=ObjectRef(
+            kind=ObjectKind.TABLE,
+            qname=QualifiedName(namespace="public", name="tickets"),
+        ),
+    )
+    assert database.schemas[0].tables[0].columns[0].sequence_prerequisites == (sequence.ref,)
+
+
+@pytest.mark.unit
+async def test_inspect_keeps_cross_schema_sequence_default_prerequisite() -> None:
+    pool = _build_mock_pool(
+        schemas_rows=[_SchemaRow("public"), _SchemaRow("other")],
+        tables_rows=[_make_table_row("public", "tickets")],
+        columns_rows=[_make_column_row("public", "tickets", default_expr="nextval(...)")],
+        sequences_rows=[_make_sequence_row("other", "external_seq")],
+        sequence_prerequisites_rows=[
+            _make_sequence_prerequisite_row(sequence_schema="other", sequence_name="external_seq")
+        ],
+    )
+
+    database = await PgCatalogInspector(pool, schemas=["public"]).inspect()
+
+    assert [schema.name for schema in database.schemas] == ["public"]
+    assert database.all_sequences() == ()
+    (prerequisite,) = database.schemas[0].tables[0].columns[0].sequence_prerequisites
+    assert prerequisite.kind is ObjectKind.SEQUENCE
+    assert prerequisite.qname == QualifiedName(namespace="other", name="external_seq")
 
 
 @pytest.mark.unit

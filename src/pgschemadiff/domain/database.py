@@ -25,6 +25,7 @@ from pgschemadiff.domain.extension import Extension
 from pgschemadiff.domain.identity import ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index
 from pgschemadiff.domain.schema import Schema
+from pgschemadiff.domain.sequence import Sequence
 from pgschemadiff.domain.table import Table
 
 
@@ -157,6 +158,13 @@ class Database(BaseModel):
         result: list[DomainType] = []
         for schema in self.schemas:
             result.extend(schema.domain_types)
+        return tuple(result)
+
+    def all_sequences(self) -> tuple[Sequence, ...]:
+        """Return all sequences across every schema."""
+        result: list[Sequence] = []
+        for schema in self.schemas:
+            result.extend(schema.sequences)
         return tuple(result)
 
     def all_indexes(self) -> tuple[Index, ...]:

@@ -13,6 +13,7 @@ from pgschemadiff.application.diff.comparators import (
     ExtensionComparator,
     IndexComparator,
     SchemaComparator,
+    SequenceComparator,
     TableComparator,
 )
 from pgschemadiff.application.diff.dependencies import order_deltas
@@ -42,6 +43,7 @@ async def compare_schemas(
         EnumComparator(),
         CompositeTypeComparator(),
         DomainTypeComparator(),
+        SequenceComparator(),
         TableComparator(
             column_comparator=ColumnComparator(),
             constraint_comparator=ConstraintComparator(),

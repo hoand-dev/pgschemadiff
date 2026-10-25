@@ -47,6 +47,7 @@ from pgschemadiff.domain.extension import Extension
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index, IndexKeyColumn
 from pgschemadiff.domain.schema import Schema
+from pgschemadiff.domain.sequence import Sequence
 from pgschemadiff.domain.table import PartitionOf, Table
 
 
@@ -80,6 +81,21 @@ def _table(
             for position, column in enumerate(columns, start=1)
         ),
         constraints=constraints,
+    )
+
+
+def _sequence(name: str, *, owned_by: ObjectRef | None = None) -> Sequence:
+    return Sequence(
+        ref=_ref(ObjectKind.SEQUENCE, name),
+        data_type="bigint",
+        start=1,
+        increment=1,
+        min_value=1,
+        max_value=9223372036854775807,
+        cache=1,
+        cycle=False,
+        owner="app_owner",
+        owned_by=owned_by,
     )
 
 

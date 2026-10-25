@@ -37,6 +37,9 @@ from pgschemadiff.domain.delta import (
     AlterDomainNullability,
     AlterEnumAttrs,
     AlterExtension,
+    AlterSequenceOptions,
+    AlterSequenceOwnedBy,
+    AlterSequenceOwner,
     AlterTableAttrs,
     CreateCompositeType,
     CreateDomain,
@@ -44,6 +47,7 @@ from pgschemadiff.domain.delta import (
     CreateExtension,
     CreateIndex,
     CreateSchema,
+    CreateSequence,
     CreateTable,
     Delta,
     DeltaBase,
@@ -57,6 +61,7 @@ from pgschemadiff.domain.delta import (
     DropExtension,
     DropIndex,
     DropSchema,
+    DropSequence,
     DropTable,
     RenameColumn,
     RenameTable,
@@ -74,6 +79,7 @@ from pgschemadiff.domain.extension import Extension
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index, IndexKeyColumn, IndexMethod, SortOrder
 from pgschemadiff.domain.schema import Schema
+from pgschemadiff.domain.sequence import Sequence
 from pgschemadiff.domain.table import PartitionInfo, PartitionOf, PartitionStrategy, Table
 from pgschemadiff.shared.errors import MigrationError
 
@@ -159,6 +165,21 @@ def _emitter_cases() -> tuple[tuple[str, Delta], ...]:
     enum = EnumType(
         ref=enum_ref,
         labels=("open", "owner's choice"),
+        owner='Role "Owner',
+    )
+    sequence_ref = ObjectRef(
+        kind=ObjectKind.SEQUENCE,
+        qname=QualifiedName(namespace='App "Schema', name='Serial"ID'),
+    )
+    sequence = Sequence(
+        ref=sequence_ref,
+        data_type="bigint",
+        start=7,
+        increment=5,
+        min_value=1,
+        max_value=999,
+        cache=3,
+        cycle=True,
         owner='Role "Owner',
     )
     empty_enum = EnumType(
@@ -332,6 +353,36 @@ def _emitter_cases() -> tuple[tuple[str, Delta], ...]:
     )
 
     return (
+        ("create sequence", CreateSequence(target=sequence_ref, sequence=sequence)),
+        ("drop sequence", DropSequence(target=sequence_ref, sequence=sequence)),
+        (
+            "alter sequence options",
+            AlterSequenceOptions(
+                target=sequence_ref,
+                new_data_type="smallint",
+                new_start=10,
+                new_increment=2,
+                new_min_value=0,
+                new_max_value=100,
+                new_cache=8,
+                new_cycle=False,
+            ),
+        ),
+        (
+            "alter sequence owner",
+            AlterSequenceOwner(target=sequence_ref, new_owner='New "Owner'),
+        ),
+        (
+            "set sequence owned by",
+            AlterSequenceOwnedBy(
+                target=sequence_ref,
+                new_owned_by=_column_ref(plain_table_ref, "select"),
+            ),
+        ),
+        (
+            "clear sequence owned by",
+            AlterSequenceOwnedBy(target=sequence_ref, new_owned_by=None),
+        ),
         ("create enum", CreateEnum(target=enum_ref, enum=enum)),
         ("create empty enum", CreateEnum(target=empty_enum.ref, enum=empty_enum)),
         ("drop enum", DropEnum(target=enum_ref, enum=enum)),

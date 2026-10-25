@@ -163,8 +163,18 @@ class ColumnComparator:
                 )
             )
 
-        if source.default_expr != target.default_expr:
-            result.append(SetColumnDefault(target=target_ref, new_default=target.default_expr))
+        if (
+            source.default_expr != target.default_expr
+            or source.sequence_prerequisites != target.sequence_prerequisites
+        ):
+            result.append(
+                SetColumnDefault(
+                    target=target_ref,
+                    new_default=target.default_expr,
+                    old_sequence_prerequisites=source.sequence_prerequisites,
+                    new_sequence_prerequisites=target.sequence_prerequisites,
+                )
+            )
 
         if source.nullable != target.nullable:
             result.append(SetColumnNullability(target=target_ref, nullable=target.nullable))

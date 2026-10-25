@@ -12,6 +12,7 @@ from pgschemadiff.application.sql_emit import (
     enum_emitter,
     index_emitter,
     schema_emitter,
+    sequence_emitter,
     table_emitter,
 )
 from pgschemadiff.shared.errors import MigrationError
@@ -33,6 +34,7 @@ def default_handlers() -> dict[type[DeltaBase], SqlHandler]:
         constraint_emitter.handlers(),
         enum_emitter.handlers(),
         schema_emitter.handlers(),
+        sequence_emitter.handlers(),
     ):
         for delta_type, handler in emitter_handlers.items():
             if delta_type in handlers:

@@ -18,6 +18,8 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from pgschemadiff.domain.identity import ObjectKind, ObjectRef
+
 
 class GeneratedTiming(StrEnum):
     """Controls when an identity or generated column is populated."""
@@ -132,6 +134,9 @@ class Column(BaseModel):
     backward-compatible generated-column construction.
     """
 
+    sequence_prerequisites: tuple[ObjectRef, ...] = Field(default=())
+    """Sequences referenced by this column's default, as recorded by pg_depend."""
+
     @model_validator(mode="before")
     @classmethod
     def _default_generated_kind(cls, values: Any) -> Any:
@@ -166,6 +171,11 @@ class Column(BaseModel):
                 "An identity column must not have a default_expr; "
                 "its value is always derived from the identity sequence"
             )
+
+        if len(set(self.sequence_prerequisites)) != len(self.sequence_prerequisites):
+            raise ValueError("Column sequence prerequisites must be unique")
+        if any(ref.kind is not ObjectKind.SEQUENCE for ref in self.sequence_prerequisites):
+            raise ValueError("Column sequence prerequisites must have kind SEQUENCE")
 
         return self
 

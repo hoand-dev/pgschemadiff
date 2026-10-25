@@ -91,7 +91,7 @@ from pydantic import Field, model_validator
 
 from pgschemadiff.domain.column import Column
 from pgschemadiff.domain.delta.base import DeltaBase, DeltaOp
-from pgschemadiff.domain.identity import ObjectKind
+from pgschemadiff.domain.identity import ObjectKind, ObjectRef
 
 # ---------------------------------------------------------------------------
 # AddColumn
@@ -269,12 +269,23 @@ class SetColumnDefault(DeltaBase):
     this delta unless the default is actually changing.
     """
 
+    old_sequence_prerequisites: tuple[ObjectRef, ...] = ()
+    new_sequence_prerequisites: tuple[ObjectRef, ...] = ()
+
     @model_validator(mode="after")
     def _check_target_kind(self) -> Self:
         if self.target.kind is not ObjectKind.COLUMN:
             raise ValueError(
                 f"SetColumnDefault.target.kind must be ObjectKind.COLUMN, got {self.target.kind!r}"
             )
+        for prerequisites in (
+            self.old_sequence_prerequisites,
+            self.new_sequence_prerequisites,
+        ):
+            if len(set(prerequisites)) != len(prerequisites):
+                raise ValueError("Column default sequence prerequisites must be unique")
+            if any(ref.kind is not ObjectKind.SEQUENCE for ref in prerequisites):
+                raise ValueError("Column default prerequisites must have kind SEQUENCE")
         return self
 
 

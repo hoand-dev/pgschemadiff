@@ -20,6 +20,9 @@ from pgschemadiff.domain.delta import (
     AlterDomainNullability,
     AlterEnumAttrs,
     AlterExtension,
+    AlterSequenceOptions,
+    AlterSequenceOwnedBy,
+    AlterSequenceOwner,
     AlterTableAttrs,
     CreateCompositeType,
     CreateDomain,
@@ -27,6 +30,7 @@ from pgschemadiff.domain.delta import (
     CreateExtension,
     CreateIndex,
     CreateSchema,
+    CreateSequence,
     CreateTable,
     DeltaBase,
     DropColumn,
@@ -38,6 +42,7 @@ from pgschemadiff.domain.delta import (
     DropExtension,
     DropIndex,
     DropSchema,
+    DropSequence,
     DropTable,
     RenameColumn,
     RenameTable,
@@ -127,6 +132,11 @@ _SUPPORTED_DELTA_TYPES: tuple[type[DeltaBase], ...] = (
     DropDomainCheck,
     AlterDomainAttrs,
     ReplaceDomainType,
+    CreateSequence,
+    DropSequence,
+    AlterSequenceOptions,
+    AlterSequenceOwner,
+    AlterSequenceOwnedBy,
 )
 
 
@@ -445,6 +455,28 @@ def classify_risk(  # noqa: PLR0912, PLR0915
             RiskLevel.BLOCKED,
             "Changing a domain base type or collation has no safe in-place DDL.",
         )
+    elif isinstance(delta, CreateSequence):
+        if delta.sequence.owned_by is None:
+            level, reason = RiskLevel.SAFE, "Creates an unowned sequence."
+        else:
+            level, reason = (
+                RiskLevel.DANGEROUS,
+                "Creates a column-owned sequence; runtime state is not copied.",
+            )
+    elif isinstance(delta, DropSequence):
+        level, reason = RiskLevel.DESTRUCTIVE, "Removes a sequence and its future value generation."
+    elif isinstance(delta, AlterSequenceOptions):
+        level, reason = (
+            RiskLevel.WARNING,
+            "Changes sequence options without restarting its runtime counter.",
+        )
+    elif isinstance(delta, AlterSequenceOwner):
+        level, reason = (
+            RiskLevel.DANGEROUS,
+            "Changes sequence owner, which can change effective access.",
+        )
+    elif isinstance(delta, AlterSequenceOwnedBy):
+        level, reason = RiskLevel.WARNING, "Changes sequence OWNED BY behavior."
     else:
         level, reason = RiskLevel.BLOCKED, "No risk policy exists for this delta type."
 

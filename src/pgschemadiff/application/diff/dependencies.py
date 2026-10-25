@@ -48,6 +48,12 @@ from pgschemadiff.domain.delta.schema import (
     DropExtension,
     DropSchema,
 )
+from pgschemadiff.domain.delta.sequence import (
+    AlterSequenceOwnedBy,
+    AlterSequenceOwner,
+    CreateSequence,
+    DropSequence,
+)
 from pgschemadiff.domain.delta.table import CreateTable, DropTable, RenameTable
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 
@@ -59,7 +65,7 @@ if TYPE_CHECKING:
 
 def order_deltas(delta_set: DeltaSet) -> DeltaSet:
     """Return deltas ordered after their structured prerequisites."""
-    nodes = delta_set.deltas
+    nodes = _omit_implicitly_dropped_sequences(delta_set.deltas)
     dependencies: dict[DeltaBase, set[DeltaBase]] = {delta: set() for delta in nodes}
 
     def add(prerequisite: DeltaBase, dependent: DeltaBase) -> None:
@@ -74,6 +80,23 @@ def order_deltas(delta_set: DeltaSet) -> DeltaSet:
     _add_rename_dependencies(nodes, add)
     return DeltaSet.from_iterable(
         topological_sort(nodes, dependencies, key=lambda delta: delta.sort_key)
+    )
+
+
+def _omit_implicitly_dropped_sequences(nodes: tuple[DeltaBase, ...]) -> tuple[DeltaBase, ...]:
+    dropped_tables = {delta.table.ref for delta in nodes if isinstance(delta, DropTable)}
+    dropped_columns = {delta.target for delta in nodes if isinstance(delta, DropColumn)}
+    return tuple(
+        delta
+        for delta in nodes
+        if not (
+            isinstance(delta, DropSequence)
+            and delta.sequence.owned_by is not None
+            and (
+                delta.sequence.owned_by in dropped_columns
+                or delta.sequence.owned_by.parent in dropped_tables
+            )
+        )
     )
 
 
@@ -179,7 +202,14 @@ def _collect_resources(
                 creates[_column_ref(delta.table.ref, column.name)].append(delta)
         elif isinstance(
             delta,
-            (CreateEnum, CreateCompositeType, CreateDomain, AddColumn, AddConstraint),
+            (
+                CreateEnum,
+                CreateCompositeType,
+                CreateDomain,
+                CreateSequence,
+                AddColumn,
+                AddConstraint,
+            ),
         ):
             creates[delta.target].append(delta)
         elif isinstance(delta, DropTable):
@@ -188,7 +218,7 @@ def _collect_resources(
                 drops[_column_ref(delta.table.ref, column.name)].append(delta)
         elif isinstance(
             delta,
-            (DropColumn, DropConstraint, DropEnum, DropCompositeType, DropDomain),
+            (DropColumn, DropConstraint, DropEnum, DropCompositeType, DropDomain, DropSequence),
         ):
             drops[delta.target].append(delta)
     return creates, drops, schema_creates
@@ -202,11 +232,24 @@ def _add_create_dependencies(
 ) -> None:
     for delta in nodes:
         if isinstance(delta, AddColumn):
-            _add_create_prerequisites(delta, (delta.target.parent, delta.target), creates, add)
+            _add_create_prerequisites(
+                delta,
+                (delta.target.parent, delta.target, *delta.column.sequence_prerequisites),
+                creates,
+                add,
+            )
         elif isinstance(delta, AddConstraint):
             _add_constraint_create_dependencies(delta, creates, add)
         elif isinstance(delta, CreateTable):
-            _add_create_prerequisites(delta, delta.table.type_prerequisites, creates, add)
+            sequence_prerequisites = tuple(
+                ref for column in delta.table.columns for ref in column.sequence_prerequisites
+            )
+            _add_create_prerequisites(
+                delta,
+                (*delta.table.type_prerequisites, *sequence_prerequisites),
+                creates,
+                add,
+            )
             partition_of = delta.table.partition_of
             if partition_of is not None:
                 parent_ref = ObjectRef(
@@ -217,7 +260,10 @@ def _add_create_dependencies(
                     ),
                 )
                 _add_create_prerequisites(delta, (parent_ref,), creates, add)
+        elif isinstance(delta, SetColumnDefault):
+            _add_create_prerequisites(delta, delta.new_sequence_prerequisites, creates, add)
 
+    _add_sequence_dependencies(nodes, creates, add)
     _add_composite_create_dependencies(nodes, creates, add)
     _add_domain_create_dependencies(nodes, creates, add)
     _add_index_create_dependencies(nodes, creates, add)
@@ -240,6 +286,30 @@ def _add_create_dependencies(
             if schema_name is not None:
                 for schema_create in schema_creates.get(schema_name, ()):
                     add(schema_create, delta)
+
+
+def _add_sequence_dependencies(
+    nodes: tuple[DeltaBase, ...],
+    creates: dict[ObjectRef, list[DeltaBase]],
+    add: Callable[[DeltaBase, DeltaBase], None],
+) -> None:
+    owners_by_ref: dict[ObjectRef, list[AlterSequenceOwner]] = defaultdict(list)
+    for delta in nodes:
+        if isinstance(delta, AlterSequenceOwner):
+            owners_by_ref[delta.target].append(delta)
+
+    for delta in nodes:
+        if isinstance(delta, AlterSequenceOwnedBy):
+            _add_create_prerequisites(
+                delta,
+                (delta.target, delta.new_owned_by),
+                creates,
+                add,
+            )
+            if delta.new_owned_by is not None:
+                for owner_change in owners_by_ref.get(delta.target, ()):
+                    # OWNED BY requires sequence and destination table owners to match.
+                    add(owner_change, delta)
 
 
 def _add_composite_create_dependencies(
@@ -417,7 +487,12 @@ def _add_drop_dependencies(
 ) -> None:
     for delta in nodes:
         if isinstance(delta, DropColumn) and delta.target.parent is not None:
-            _add_drop_prerequisites(delta, (delta.target.parent,), drops, add)
+            _add_drop_prerequisites(
+                delta,
+                (delta.target.parent, *delta.column.sequence_prerequisites),
+                drops,
+                add,
+            )
         elif isinstance(delta, AlterCompositeDropAttribute):
             _add_drop_prerequisites(delta, delta.type_prerequisites, drops, add)
         elif isinstance(delta, AlterCompositeAttributeType):
@@ -433,10 +508,32 @@ def _add_drop_dependencies(
         elif isinstance(delta, ReplaceIndex):
             _add_drop_prerequisites(delta, _index_refs(delta.old_index), drops, add)
         elif isinstance(delta, DropTable):
-            _add_drop_prerequisites(delta, delta.table.type_prerequisites, drops, add)
+            sequence_prerequisites = tuple(
+                ref for column in delta.table.columns for ref in column.sequence_prerequisites
+            )
+            _add_drop_prerequisites(
+                delta,
+                (*delta.table.type_prerequisites, *sequence_prerequisites),
+                drops,
+                add,
+            )
             for constraint in delta.table.constraints:
                 if isinstance(constraint, ForeignKeyConstraint):
                     _add_drop_prerequisites(delta, _fk_remote_refs(constraint), drops, add)
+
+    _add_sequence_drop_dependencies(nodes, drops, add)
+
+
+def _add_sequence_drop_dependencies(
+    nodes: tuple[DeltaBase, ...],
+    drops: dict[ObjectRef, list[DeltaBase]],
+    add: Callable[[DeltaBase, DeltaBase], None],
+) -> None:
+    for delta in nodes:
+        if isinstance(delta, SetColumnDefault):
+            _add_drop_prerequisites(delta, delta.old_sequence_prerequisites, drops, add)
+        elif isinstance(delta, AlterSequenceOwnedBy) and delta.old_owned_by is not None:
+            _add_drop_prerequisites(delta, (delta.old_owned_by,), drops, add)
 
 
 def _add_constraint_drop_dependencies(

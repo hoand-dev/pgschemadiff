@@ -18,6 +18,7 @@ from pgschemadiff.domain.extension import Extension
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index, IndexKeyColumn
 from pgschemadiff.domain.schema import Schema
+from pgschemadiff.domain.sequence import Sequence
 from pgschemadiff.domain.table import PartitionOf, Table
 
 
@@ -94,6 +95,27 @@ async def test_compare_schemas_uses_all_default_comparators() -> None:
 
     delta_types = {type(delta) for delta in result.deltas}
     assert {AddColumn, AddConstraint, CreateIndex, CreateExtension} <= delta_types
+
+
+async def test_compare_schemas_includes_sequence_comparator() -> None:
+    sequence = Sequence(
+        ref=_ref(ObjectKind.SEQUENCE, "ticket_seq"),
+        data_type="bigint",
+        start=1,
+        increment=1,
+        min_value=1,
+        max_value=999,
+        cache=1,
+        cycle=False,
+        owner="app_owner",
+    )
+    target = StubInspector(
+        Database(name="target", schemas=(Schema(ref=_schema().ref, sequences=(sequence,)),))
+    )
+
+    result = await compare_schemas(StubInspector(Database(name="source")), target)
+
+    assert any(delta.target == sequence.ref for delta in result.deltas)
 
 
 async def test_compare_schemas_creates_table_before_local_constraints() -> None:

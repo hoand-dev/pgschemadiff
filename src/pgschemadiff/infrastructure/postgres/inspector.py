@@ -41,6 +41,7 @@ from pgschemadiff.domain.extension import Extension
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index, IndexKeyColumn, IndexMethod, NullsOrder, SortOrder
 from pgschemadiff.domain.schema import Schema
+from pgschemadiff.domain.sequence import Sequence
 from pgschemadiff.domain.table import (
     PartitionInfo,
     PartitionOf,
@@ -85,6 +86,8 @@ _SQL_ENUMS: str = _load_sql("enums.sql")
 _SQL_COMPOSITE_TYPES: str = _load_sql("composite_types.sql")
 _SQL_DOMAIN_TYPES: str = _load_sql("domain_types.sql")
 _SQL_TYPE_PREREQUISITES: str = _load_sql("type_prerequisites.sql")
+_SQL_SEQUENCES: str = _load_sql("sequences.sql")
+_SQL_SEQUENCE_PREREQUISITES: str = _load_sql("sequence_prerequisites.sql")
 
 # ---------------------------------------------------------------------------
 # Regex helpers for parsing pg_get_constraintdef output
@@ -292,7 +295,11 @@ def _parse_exclusion_elements(body: str) -> tuple[ExclusionElement, ...]:
 # ---------------------------------------------------------------------------
 
 
-def _map_column(row: Any) -> Column:
+def _map_column(
+    row: Any,
+    *,
+    sequence_prerequisites: tuple[ObjectRef, ...] = (),
+) -> Column:
     """Map a columns.sql result row to a :class:`Column` domain object."""
     is_identity: bool = bool(row.is_identity)
     is_generated: bool = bool(row.is_generated)
@@ -330,6 +337,7 @@ def _map_column(row: Any) -> Column:
         identity=identity,
         generated_expression=generated_expression,
         generated_kind=generated_kind,
+        sequence_prerequisites=sequence_prerequisites,
     )
 
 
@@ -621,6 +629,12 @@ class PgCatalogInspector:
 
                     await cur.execute(_SQL_TYPE_PREREQUISITES)
                     type_prerequisites_rows = await cur.fetchall()
+
+                    await cur.execute(_SQL_SEQUENCES)
+                    sequences_rows = await cur.fetchall()
+
+                    await cur.execute(_SQL_SEQUENCE_PREREQUISITES)
+                    sequence_prerequisites_rows = await cur.fetchall()
             finally:
                 await conn.execute("ROLLBACK")
 
@@ -635,6 +649,8 @@ class PgCatalogInspector:
             composite_types_rows=composite_types_rows,
             domain_types_rows=domain_types_rows,
             type_prerequisites_rows=type_prerequisites_rows,
+            sequences_rows=sequences_rows,
+            sequence_prerequisites_rows=sequence_prerequisites_rows,
         )
 
     def _assemble(
@@ -650,6 +666,8 @@ class PgCatalogInspector:
         composite_types_rows: list[Any],
         domain_types_rows: list[Any],
         type_prerequisites_rows: list[Any],
+        sequences_rows: list[Any] | None = None,
+        sequence_prerequisites_rows: list[Any] | None = None,
     ) -> Database:
         """Assemble domain objects from raw catalog rows."""
         extensions = self._build_extensions(extensions_rows)
@@ -660,10 +678,14 @@ class PgCatalogInspector:
             row.schema_name for row in schemas_rows if allowed is None or row.schema_name in allowed
         ]
 
-        cols_by_table = self._group_columns(columns_rows, allowed)
+        sequence_prerequisites_by_column = self._group_sequence_prerequisites(
+            sequence_prerequisites_rows or [], allowed
+        )
+        cols_by_table = self._group_columns(columns_rows, allowed, sequence_prerequisites_by_column)
         idxs_by_table = self._group_indexes(indexes_rows, allowed)
         cons_by_table = self._group_constraints(constraints_rows, allowed)
         enums_by_schema = self._group_enums(enums_rows, allowed)
+        sequences_by_schema = self._group_sequences(sequences_rows or [], allowed)
         prerequisites_by_object = self._group_type_prerequisites(type_prerequisites_rows, allowed)
         prerequisites_by_table = {
             (schema_name, object_name): refs
@@ -697,6 +719,7 @@ class PgCatalogInspector:
                     enums_by_schema,
                     composite_types_by_schema,
                     domain_types_by_schema,
+                    sequences_by_schema,
                 )
             ),
             extensions=tuple(extensions),
@@ -710,13 +733,83 @@ class PgCatalogInspector:
     def _group_columns(
         rows: list[Any],
         allowed: set[str] | None,
+        sequence_prerequisites: dict[tuple[str, str, str], list[ObjectRef]] | None = None,
     ) -> dict[tuple[str, str], list[Column]]:
         result: dict[tuple[str, str], list[Column]] = {}
         for row in rows:
             if allowed is not None and row.schema_name not in allowed:
                 continue
-            result.setdefault((row.schema_name, row.table_name), []).append(_map_column(row))
+            sequence_refs = (sequence_prerequisites or {}).get(
+                (row.schema_name, row.table_name, row.column_name), []
+            )
+            result.setdefault((row.schema_name, row.table_name), []).append(
+                _map_column(row, sequence_prerequisites=tuple(sequence_refs))
+            )
         return result
+
+    @staticmethod
+    def _group_sequences(rows: list[Any], allowed: set[str] | None) -> dict[str, list[Sequence]]:
+        result: dict[str, list[Sequence]] = {}
+        for row in rows:
+            if allowed is not None and row.schema_name not in allowed:
+                continue
+            owned_values = (row.owned_schema, row.owned_table, row.owned_column)
+            if any(value is not None for value in owned_values) and not all(
+                isinstance(value, str) and value for value in owned_values
+            ):
+                raise InspectionError(
+                    f"Sequence {row.schema_name}.{row.sequence_name} has incomplete "
+                    "OWNED BY metadata"
+                )
+            owned_by = None
+            if all(value is not None for value in owned_values):
+                owned_by = ObjectRef(
+                    kind=ObjectKind.COLUMN,
+                    qname=QualifiedName(namespace=row.owned_schema, name=row.owned_column),
+                    parent=ObjectRef(
+                        kind=ObjectKind.TABLE,
+                        qname=QualifiedName(namespace=row.owned_schema, name=row.owned_table),
+                    ),
+                )
+            sequence = Sequence(
+                ref=ObjectRef(
+                    kind=ObjectKind.SEQUENCE,
+                    qname=QualifiedName(namespace=row.schema_name, name=row.sequence_name),
+                ),
+                data_type=row.data_type,
+                start=row.start_value,
+                increment=row.increment_by,
+                min_value=row.min_value,
+                max_value=row.max_value,
+                cache=row.cache_size,
+                cycle=row.cycle,
+                owner=row.owner,
+                owned_by=owned_by,
+            )
+            result.setdefault(row.schema_name, []).append(sequence)
+        for sequences in result.values():
+            sequences.sort(key=lambda sequence: sequence.ref.qname.name)
+        return result
+
+    @staticmethod
+    def _group_sequence_prerequisites(
+        rows: list[Any],
+        allowed: set[str] | None,
+    ) -> dict[tuple[str, str, str], list[ObjectRef]]:
+        result: dict[tuple[str, str, str], set[ObjectRef]] = {}
+        for row in rows:
+            if allowed is not None and row.dependent_schema not in allowed:
+                continue
+            sequence_ref = ObjectRef(
+                kind=ObjectKind.SEQUENCE,
+                qname=QualifiedName(namespace=row.sequence_schema, name=row.sequence_name),
+            )
+            key = (row.dependent_schema, row.dependent_table, row.dependent_column)
+            result.setdefault(key, set()).add(sequence_ref)
+        return {
+            key: sorted(refs, key=lambda ref: (ref.qname.namespace, ref.qname.name))
+            for key, refs in result.items()
+        }
 
     @staticmethod
     def _group_indexes(
@@ -994,6 +1087,7 @@ class PgCatalogInspector:
         enums_by_schema: dict[str, list[EnumType]],
         composite_types_by_schema: dict[str, list[CompositeType]],
         domain_types_by_schema: dict[str, list[DomainType]],
+        sequences_by_schema: dict[str, list[Sequence]],
     ) -> list[Schema]:
         result: list[Schema] = []
         for name in schema_names:
@@ -1010,6 +1104,7 @@ class PgCatalogInspector:
                     enums=tuple(enums_by_schema.get(name, [])),
                     composite_types=tuple(composite_types_by_schema.get(name, [])),
                     domain_types=tuple(domain_types_by_schema.get(name, [])),
+                    sequences=tuple(sequences_by_schema.get(name, [])),
                     comment=row.comment,
                 )
             )

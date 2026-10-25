@@ -91,6 +91,14 @@ from pgschemadiff.domain.delta.schema import (
     ExtensionDelta,
     SchemaDelta,
 )
+from pgschemadiff.domain.delta.sequence import (
+    AlterSequenceOptions,
+    AlterSequenceOwnedBy,
+    AlterSequenceOwner,
+    CreateSequence,
+    DropSequence,
+    SequenceDelta,
+)
 from pgschemadiff.domain.delta.table import (
     AlterTableAttrs,
     CreateTable,
@@ -114,6 +122,9 @@ __all__ = [
     "AlterDomainNullability",
     "AlterEnumAttrs",
     "AlterExtension",
+    "AlterSequenceOptions",
+    "AlterSequenceOwnedBy",
+    "AlterSequenceOwner",
     "AlterTableAttrs",
     "ColumnDelta",
     "CompositeTypeDelta",
@@ -124,6 +135,7 @@ __all__ = [
     "CreateExtension",
     "CreateIndex",
     "CreateSchema",
+    "CreateSequence",
     "CreateTable",
     "Delta",
     "DeltaBase",
@@ -139,6 +151,7 @@ __all__ = [
     "DropExtension",
     "DropIndex",
     "DropSchema",
+    "DropSequence",
     "DropTable",
     "EnumDelta",
     "ExtensionDelta",
@@ -150,6 +163,7 @@ __all__ = [
     "ReplaceEnumLabels",
     "ReplaceIndex",
     "SchemaDelta",
+    "SequenceDelta",
     "SetColumnDefault",
     "SetColumnNullability",
     "TableDelta",
