@@ -109,7 +109,7 @@
 | Status | ID | Title | Owner | Pri | Deps | Cx |
 |---|---|---|---|---|---|---|
 | [x] | P3-MVPB-01 | Views | backend-engineer | P1 | P3-CLI-01 | M |
-| [ ] | P3-MVPB-02 | Materialized views | backend-engineer | P1 | P3-CLI-01 | M |
+| [x] | P3-MVPB-02 | Materialized views | backend-engineer | P1 | P3-CLI-01 | M |
 | [x] | P3-MVPB-03 | Functions | backend-engineer | P1 | P3-CLI-01 | L |
 | [x] | P3-MVPB-04 | Procedures | backend-engineer | P1 | P3-CLI-01 | M |
 | [x] | P3-MVPB-05 | Sequences | backend-engineer | P1 | P3-CLI-01 | M |
