@@ -14,6 +14,7 @@ from pgschemadiff.domain.constraint import (
     UniqueConstraint,
 )
 from pgschemadiff.domain.database import Database
+from pgschemadiff.domain.enum_type import EnumType
 from pgschemadiff.domain.extension import Extension
 from pgschemadiff.domain.identity import (
     SUB_OBJECT_KINDS,
@@ -44,6 +45,7 @@ __all__ = [
     "Constraint",
     "ConstraintDeferrability",
     "Database",
+    "EnumType",
     "ExclusionConstraint",
     "ExclusionElement",
     "Extension",

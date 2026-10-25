@@ -18,6 +18,7 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from pgschemadiff.domain.enum_type import EnumType
 from pgschemadiff.domain.extension import Extension
 from pgschemadiff.domain.identity import ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index
@@ -133,6 +134,13 @@ class Database(BaseModel):
         result: list[Table] = []
         for schema in self.schemas:
             result.extend(schema.tables)
+        return tuple(result)
+
+    def all_enums(self) -> tuple[EnumType, ...]:
+        """Return all enum types across schemas, in schema-then-name order."""
+        result: list[EnumType] = []
+        for schema in self.schemas:
+            result.extend(schema.enums)
         return tuple(result)
 
     def all_indexes(self) -> tuple[Index, ...]:

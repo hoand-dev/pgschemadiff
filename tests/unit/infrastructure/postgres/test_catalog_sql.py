@@ -45,6 +45,8 @@ _CATALOG_FILES = [
     "constraints.sql",
     "extensions.sql",
     "schemas.sql",
+    "enums.sql",
+    "type_prerequisites.sql",
 ]
 
 
@@ -349,12 +351,61 @@ def test_schemas_sql_selects_owner_and_comment() -> None:
         pytest.param("columns.sql"),
         pytest.param("constraints.sql"),
         pytest.param("indexes.sql"),
+        pytest.param("enums.sql"),
+        pytest.param("type_prerequisites.sql"),
     ],
 )
 def test_catalog_sql_excludes_reserved_history_schema(filename: str) -> None:
     sql = _load_sql(filename)
     assert "n.nspname != 'information_schema'" in sql
     assert "n.nspname != 'pgschemadiff'" in sql
+
+
+@pytest.mark.unit
+def test_enums_sql_preserves_postgres_label_order_and_owner() -> None:
+    sql = _load_sql("enums.sql")
+    assert "pg_enum" in sql
+    assert "enumlabel" in sql
+    assert "enumsortorder" in sql
+    assert "pg_get_userbyid(t.typowner) AS owner" in sql
+    assert "ORDER BY e.enumsortorder" in sql
+
+
+@pytest.mark.unit
+def test_enums_sql_excludes_extension_owned_types() -> None:
+    sql = _load_sql("enums.sql")
+    assert "pg_depend" in sql
+    assert "deptype = 'e'" in sql
+    assert "pg_type" in sql
+    assert "n.nspname != 'pgschemadiff'" in sql
+
+
+@pytest.mark.unit
+def test_type_prerequisites_sql_follows_enum_array_element_types() -> None:
+    sql = _load_sql("type_prerequisites.sql")
+    assert "pg_attribute" in sql
+    assert "atttypid" in sql
+    assert "typelem" in sql
+    assert "pg_enum" in sql
+    assert "DISTINCT" in sql
+
+
+@pytest.mark.unit
+def test_type_prerequisites_sql_excludes_system_and_extension_types() -> None:
+    sql = _load_sql("type_prerequisites.sql")
+    assert "n.nspname NOT LIKE 'pg_%'" in sql
+    assert "n.nspname != 'information_schema'" in sql
+    assert "n.nspname != 'pgschemadiff'" in sql
+    assert "pg_depend" in sql
+    assert "deptype = 'e'" in sql
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("filename", ["enums.sql", "type_prerequisites.sql"])
+def test_new_catalog_queries_support_schema_filter(filename: str) -> None:
+    sql = _load_sql(filename)
+    assert "%s::text[]" in sql
+    assert "ANY(" in sql
 
 
 # ---------------------------------------------------------------------------

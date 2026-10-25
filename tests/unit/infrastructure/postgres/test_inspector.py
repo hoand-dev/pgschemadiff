@@ -4,7 +4,7 @@ These tests do NOT require a live PostgreSQL instance.  They verify:
 
 - ``PgCatalogInspector`` is importable and satisfies the ``SchemaInspector``
   protocol.
-- ``inspect()`` calls all 6 SQL queries via the mocked connection.
+- ``inspect()`` calls each catalog SQL query via the mocked connection.
 - Schema filter (``schemas=["public"]``) excludes non-matching schemas.
 - Column rows are correctly mapped to :class:`Column` domain objects.
 - Each constraint type (p/u/c/f/x) is dispatched to the right domain class.
@@ -36,6 +36,7 @@ from pgschemadiff.domain.constraint import (
     UniqueConstraint,
 )
 from pgschemadiff.domain.database import Database
+from pgschemadiff.domain.identity import QualifiedName
 from pgschemadiff.domain.index import IndexMethod, NullsOrder, SortOrder
 from pgschemadiff.domain.ports import SchemaInspector
 from pgschemadiff.domain.table import PartitionStrategy
@@ -139,6 +140,10 @@ _ExtensionRow = namedtuple(
     "_ExtensionRow",
     ["extension_name", "installed_version", "installed_schema", "comment"],
     defaults=[None, None],
+)
+_EnumRow = namedtuple("_EnumRow", ["schema_name", "enum_name", "labels", "owner"], defaults=[None])
+_TypePrerequisiteRow = namedtuple(
+    "_TypePrerequisiteRow", ["table_schema", "table_name", "type_schema", "type_name"]
 )
 
 
@@ -266,6 +271,24 @@ def _make_extension_row(
     )
 
 
+def _make_enum_row(
+    schema: str = "public",
+    name: str = "mood",
+    labels: tuple[str, ...] = ("sad", "happy"),
+    owner: str | None = "postgres",
+) -> Any:
+    return _EnumRow(schema, name, labels, owner)
+
+
+def _make_type_prerequisite_row(
+    table_schema: str = "public",
+    table: str = "users",
+    type_schema: str = "public",
+    type_name: str = "mood",
+) -> Any:
+    return _TypePrerequisiteRow(table_schema, table, type_schema, type_name)
+
+
 # ---------------------------------------------------------------------------
 # Mock pool + connection factory
 # ---------------------------------------------------------------------------
@@ -278,11 +301,12 @@ def _build_mock_pool(
     indexes_rows: list[Any] | None = None,
     constraints_rows: list[Any] | None = None,
     extensions_rows: list[Any] | None = None,
+    enums_rows: list[Any] | None = None,
+    type_prerequisites_rows: list[Any] | None = None,
 ) -> MagicMock:
     """Build a mock Pool that yields a mocked psycopg connection.
 
-    The cursor's ``fetchall`` is wired to return rows in this order:
-    schemas → tables → columns → indexes → constraints → extensions.
+    The cursor's ``fetchall`` is wired to return rows in catalog-query order.
     """
     fetch_sequence = [
         schemas_rows or [],
@@ -291,6 +315,8 @@ def _build_mock_pool(
         indexes_rows or [],
         constraints_rows or [],
         extensions_rows or [],
+        enums_rows or [],
+        type_prerequisites_rows or [],
     ]
 
     cur = AsyncMock()
@@ -336,13 +362,13 @@ def test_inspector_is_importable() -> None:
 
 
 # ===========================================================================
-# Tests: inspect() calls all 6 queries
+# Tests: inspect() calls all catalog queries
 # ===========================================================================
 
 
 @pytest.mark.unit
-async def test_inspect_calls_all_six_queries() -> None:
-    """inspect() must execute exactly 6 SQL queries (one per catalog file)."""
+async def test_inspect_calls_all_eight_queries() -> None:
+    """inspect() must execute one query per catalog file."""
     pool = _build_mock_pool(
         schemas_rows=[_SchemaRow("public")],
         tables_rows=[],
@@ -354,9 +380,9 @@ async def test_inspect_calls_all_six_queries() -> None:
     inspector = PgCatalogInspector(pool)
     result = await inspector.inspect()
 
-    # fetchall should have been called 6 times (one per catalog SQL file)
+    # fetchall should have been called once per catalog SQL file.
     cur = pool.acquire.return_value.__aenter__.return_value.cursor.return_value
-    assert cur.fetchall.call_count == 6
+    assert cur.fetchall.call_count == 8
     assert isinstance(result, Database)
 
 
@@ -369,6 +395,20 @@ async def test_inspect_starts_repeatable_read_transaction() -> None:
 
     conn = pool.acquire.return_value.__aenter__.return_value
     conn.execute.assert_any_call("BEGIN ISOLATION LEVEL REPEATABLE READ")
+
+
+@pytest.mark.unit
+async def test_inspect_passes_schema_filter_to_new_catalog_queries() -> None:
+    pool = _build_mock_pool()
+
+    await PgCatalogInspector(pool, schemas=["public"]).inspect()
+
+    cur = pool.acquire.return_value.__aenter__.return_value.cursor.return_value
+    filtered_type_queries = [
+        call for call in cur.execute.call_args_list if "pg_enum" in call.args[0]
+    ]
+    assert len(filtered_type_queries) == 2
+    assert all(call.args[1] == (["public"], ["public"]) for call in filtered_type_queries)
 
 
 @pytest.mark.unit
@@ -387,7 +427,7 @@ async def test_inspect_sets_local_search_path_before_catalog_queries() -> None:
     assert [mock_call[0] for mock_call in statements] == [
         "execute",
         "execute",
-        *("catalog_cursor.execute" for _ in range(6)),
+        *("catalog_cursor.execute" for _ in range(8)),
         "execute",
     ]
     assert statements[0].args == ("BEGIN ISOLATION LEVEL REPEATABLE READ",)
@@ -469,6 +509,8 @@ def test_assemble_maps_schema_and_extension_metadata() -> None:
         indexes_rows=[],
         constraints_rows=[],
         extensions_rows=[_ExtensionRow("pgcrypto", "1.3", "extensions", "extension note")],
+        enums_rows=[],
+        type_prerequisites_rows=[],
     )
 
     assert database.schemas[0].owner == "owner_role"
@@ -491,10 +533,54 @@ def test_assemble_keeps_extensions_database_wide_with_schema_filter() -> None:
             _ExtensionRow("pgcrypto", "1.3", "extensions", None),
             _ExtensionRow("hstore", "1.8", "extensions", None),
         ],
+        enums_rows=[],
+        type_prerequisites_rows=[],
     )
 
     assert [schema.name for schema in database.schemas] == ["public"]
     assert [extension.name for extension in database.extensions] == ["pgcrypto", "hstore"]
+
+
+@pytest.mark.unit
+async def test_inspect_maps_enum_and_cross_schema_type_prerequisite() -> None:
+    pool = _build_mock_pool(
+        schemas_rows=[_SchemaRow("public"), _SchemaRow("types")],
+        tables_rows=[_make_table_row("public", "users")],
+        columns_rows=[
+            _make_column_row("public", "users", "mood", data_type="types.mood"),
+            _make_column_row("public", "users", "moods", data_type="types.mood[]", position=2),
+        ],
+        enums_rows=[_make_enum_row("types", "mood", ("sad", "ok", "happy"), "type_owner")],
+        type_prerequisites_rows=[_make_type_prerequisite_row("public", "users", "types", "mood")],
+    )
+
+    database = await PgCatalogInspector(pool).inspect()
+
+    enum = database.all_enums()[0]
+    assert enum.ref.qname == QualifiedName(namespace="types", name="mood")
+    assert enum.labels == ("sad", "ok", "happy")
+    assert enum.owner == "type_owner"
+    table = database.table_by_qname(QualifiedName(namespace="public", name="users"))
+    assert table is not None
+    assert table.type_prerequisites == (enum.ref,)
+
+
+@pytest.mark.unit
+def test_assemble_retains_unselected_cross_schema_type_prerequisite() -> None:
+    database = PgCatalogInspector(MagicMock(), schemas=["public"])._assemble(
+        schemas_rows=[_SchemaRow("public"), _SchemaRow("types")],
+        tables_rows=[_make_table_row("public", "users")],
+        columns_rows=[],
+        indexes_rows=[],
+        constraints_rows=[],
+        extensions_rows=[],
+        enums_rows=[_make_enum_row("types")],
+        type_prerequisites_rows=[_make_type_prerequisite_row(type_schema="types")],
+    )
+
+    assert [schema.name for schema in database.schemas] == ["public"]
+    table = database.schemas[0].tables[0]
+    assert table.type_prerequisites[0].qname == QualifiedName(namespace="types", name="mood")
 
 
 # ===========================================================================

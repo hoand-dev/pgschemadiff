@@ -6,7 +6,7 @@ assembles a :class:`~pgschemadiff.domain.database.Database` snapshot.
 Design decisions:
 - Implements the :class:`~pgschemadiff.domain.ports.SchemaInspector` Protocol.
 - Uses a single ``REPEATABLE READ`` transaction per ADR-0012 MVP.
-- All six SQL files are loaded once at module import via
+- Catalog SQL files are loaded once at module import via
   ``importlib.resources`` (ADR-0004).
 - Constraint column lists are parsed from ``pg_get_constraintdef`` output so
   that no extra round-trips are needed.
@@ -34,6 +34,7 @@ from pgschemadiff.domain.constraint import (
     UniqueConstraint,
 )
 from pgschemadiff.domain.database import Database
+from pgschemadiff.domain.enum_type import EnumType
 from pgschemadiff.domain.extension import Extension
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index, IndexKeyColumn, IndexMethod, NullsOrder, SortOrder
@@ -78,6 +79,8 @@ _SQL_COLUMNS: str = _load_sql("columns.sql")
 _SQL_INDEXES: str = _load_sql("indexes.sql")
 _SQL_CONSTRAINTS: str = _load_sql("constraints.sql")
 _SQL_EXTENSIONS: str = _load_sql("extensions.sql")
+_SQL_ENUMS: str = _load_sql("enums.sql")
+_SQL_TYPE_PREREQUISITES: str = _load_sql("type_prerequisites.sql")
 
 # ---------------------------------------------------------------------------
 # Regex helpers for parsing pg_get_constraintdef output
@@ -602,6 +605,12 @@ class PgCatalogInspector:
 
                     await cur.execute(_SQL_EXTENSIONS)
                     extensions_rows = await cur.fetchall()
+
+                    await cur.execute(_SQL_ENUMS, (self._schemas, self._schemas))
+                    enums_rows = await cur.fetchall()
+
+                    await cur.execute(_SQL_TYPE_PREREQUISITES, (self._schemas, self._schemas))
+                    type_prerequisites_rows = await cur.fetchall()
             finally:
                 await conn.execute("ROLLBACK")
 
@@ -612,6 +621,8 @@ class PgCatalogInspector:
             indexes_rows=indexes_rows,
             constraints_rows=constraints_rows,
             extensions_rows=extensions_rows,
+            enums_rows=enums_rows,
+            type_prerequisites_rows=type_prerequisites_rows,
         )
 
     def _assemble(
@@ -623,6 +634,8 @@ class PgCatalogInspector:
         indexes_rows: list[Any],
         constraints_rows: list[Any],
         extensions_rows: list[Any],
+        enums_rows: list[Any],
+        type_prerequisites_rows: list[Any],
     ) -> Database:
         """Assemble domain objects from raw catalog rows."""
         extensions = self._build_extensions(extensions_rows)
@@ -636,15 +649,28 @@ class PgCatalogInspector:
         cols_by_table = self._group_columns(columns_rows, allowed)
         idxs_by_table = self._group_indexes(indexes_rows, allowed)
         cons_by_table = self._group_constraints(constraints_rows, allowed)
+        enums_by_schema = self._group_enums(enums_rows, allowed)
+        prerequisites_by_table = self._group_type_prerequisites(type_prerequisites_rows, allowed)
 
         tables_by_schema, idxs_by_schema = self._build_tables(
-            tables_rows, schema_names, cols_by_table, idxs_by_table, cons_by_table
+            tables_rows,
+            schema_names,
+            cols_by_table,
+            idxs_by_table,
+            cons_by_table,
+            prerequisites_by_table,
         )
 
         return Database(
             name="inspected",
             schemas=tuple(
-                self._build_schemas(schema_names, tables_by_schema, idxs_by_schema, schemas_by_name)
+                self._build_schemas(
+                    schema_names,
+                    tables_by_schema,
+                    idxs_by_schema,
+                    schemas_by_name,
+                    enums_by_schema,
+                )
             ),
             extensions=tuple(extensions),
         )
@@ -689,6 +715,44 @@ class PgCatalogInspector:
             result.setdefault((row.schema_name, row.table_name), []).append(row)
         return result
 
+    @staticmethod
+    def _group_enums(rows: list[Any], allowed: set[str] | None) -> dict[str, list[EnumType]]:
+        result: dict[str, list[EnumType]] = {}
+        for row in rows:
+            if allowed is not None and row.schema_name not in allowed:
+                continue
+            enum = EnumType(
+                ref=ObjectRef(
+                    kind=ObjectKind.ENUM,
+                    qname=QualifiedName(namespace=row.schema_name, name=row.enum_name),
+                ),
+                labels=tuple(row.labels),
+                owner=row.owner,
+            )
+            result.setdefault(row.schema_name, []).append(enum)
+        for enums in result.values():
+            enums.sort(key=lambda enum: enum.ref.qname.name)
+        return result
+
+    @staticmethod
+    def _group_type_prerequisites(
+        rows: list[Any],
+        allowed: set[str] | None,
+    ) -> dict[tuple[str, str], list[ObjectRef]]:
+        result: dict[tuple[str, str], set[ObjectRef]] = {}
+        for row in rows:
+            if allowed is not None and row.table_schema not in allowed:
+                continue
+            ref = ObjectRef(
+                kind=ObjectKind.ENUM,
+                qname=QualifiedName(namespace=row.type_schema, name=row.type_name),
+            )
+            result.setdefault((row.table_schema, row.table_name), set()).add(ref)
+        return {
+            key: sorted(refs, key=lambda ref: (ref.qname.namespace, ref.qname.name))
+            for key, refs in result.items()
+        }
+
     # ------------------------------------------------------------------
     # Table builder
     # ------------------------------------------------------------------
@@ -700,6 +764,7 @@ class PgCatalogInspector:
         cols_by_table: dict[tuple[str, str], list[Column]],
         idxs_by_table: dict[tuple[str, str], list[Index]],
         cons_by_table: dict[tuple[str, str], list[Any]],
+        type_prerequisites_by_table: dict[tuple[str, str], list[ObjectRef]] | None = None,
     ) -> tuple[dict[str, list[Table]], dict[str, list[Index]]]:
         tables_by_schema: dict[str, list[Table]] = {n: [] for n in schema_names}
         idxs_by_schema: dict[str, list[Index]] = {n: [] for n in schema_names}
@@ -723,6 +788,7 @@ class PgCatalogInspector:
                     ),
                     columns=tuple(cols),
                     constraints=tuple(_safe_map_constraints(cons_by_table.get(key, []), col_names)),
+                    type_prerequisites=tuple((type_prerequisites_by_table or {}).get(key, [])),
                     unlogged=row.unlogged,
                     partition_info=_build_partition_info(row),
                     partition_of=_build_partition_of(row),
@@ -742,6 +808,7 @@ class PgCatalogInspector:
         tables_by_schema: dict[str, list[Table]],
         idxs_by_schema: dict[str, list[Index]],
         schemas_by_name: dict[str, Any],
+        enums_by_schema: dict[str, list[EnumType]],
     ) -> list[Schema]:
         result: list[Schema] = []
         for name in schema_names:
@@ -755,6 +822,7 @@ class PgCatalogInspector:
                     owner=row.owner,
                     tables=tuple(tables_by_schema.get(name, [])),
                     indexes=tuple(idxs_by_schema.get(name, [])),
+                    enums=tuple(enums_by_schema.get(name, [])),
                     comment=row.comment,
                 )
             )

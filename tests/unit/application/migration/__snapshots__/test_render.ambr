@@ -269,6 +269,7 @@
                 "owner": null,
                 "tables": [],
                 "indexes": [],
+                "enums": [],
                 "comment": null
               }
             },
@@ -319,6 +320,7 @@
                   }
                 ],
                 "constraints": [],
+                "type_prerequisites": [],
                 "owner": null,
                 "tablespace": null,
                 "unlogged": false,
@@ -446,7 +448,7 @@
         - `up.sql`: `a6e992690fd58b789759956c7ec05f9c01aa1694ab140f106d2a915c6f8bd526`
         - `down.sql`: `e87201d8d4470825bb2bea1bd7a4503e7152abd3a22dbd70418d51cfa851166e`
         - `manifest.json`: `04fa4ef4e470362e9755d7177a7988b21c8d956dd3254c962b5702bb05a8deb8`
-        - `deltas.json`: `2644ff70a7f8cbfcee2702cb0afb7e6aeb363d58e4767cf0a2e6e7cd1437220b`
+        - `deltas.json`: `e77fce8bc9ff10d3f75d685a2f35a1d81b47514bfe72ddbfca5e54158420e343`
         
         ## Warnings
         

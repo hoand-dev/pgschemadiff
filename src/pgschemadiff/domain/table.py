@@ -121,6 +121,9 @@ class Table(BaseModel):
     constraints: tuple[Constraint, ...] = Field(default=())
     """Table-level constraints (PK, unique, check, FK, exclusion)."""
 
+    type_prerequisites: tuple[ObjectRef, ...] = Field(default=())
+    """User-defined types required by this table's columns."""
+
     owner: str | None = None
     """Database role that owns the table (``pg_tables.tableowner``)."""
 
@@ -158,6 +161,12 @@ class Table(BaseModel):
                     f"Duplicate column name {col.name!r} in table {self.ref.qname.fqn}"
                 )
             seen.add(col.name)
+        return self
+
+    @model_validator(mode="after")
+    def _check_type_prerequisite_uniqueness(self) -> Self:
+        if len(set(self.type_prerequisites)) != len(self.type_prerequisites):
+            raise ValueError(f"Duplicate type prerequisite in table {self.ref.qname.fqn}")
         return self
 
     @model_validator(mode="after")

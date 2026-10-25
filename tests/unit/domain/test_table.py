@@ -123,6 +123,18 @@ def test_table_minimal_construction() -> None:
     assert table.partition_info is None
     assert table.partition_of is None
     assert table.comment is None
+    assert table.type_prerequisites == ()
+
+
+@pytest.mark.unit
+def test_table_rejects_duplicate_type_prerequisites() -> None:
+    enum_ref = ObjectRef(
+        kind=ObjectKind.ENUM,
+        qname=QualifiedName(namespace="types", name="mood"),
+    )
+
+    with pytest.raises(ValidationError, match="Duplicate type prerequisite"):
+        Table(ref=_table_ref("users"), type_prerequisites=(enum_ref, enum_ref))
 
 
 @pytest.mark.unit
@@ -278,6 +290,17 @@ def test_table_is_frozen(users_table: Table) -> None:
 def test_table_json_round_trip(users_table: Table) -> None:
     restored = Table.model_validate_json(users_table.model_dump_json())
     assert restored == users_table
+
+
+@pytest.mark.unit
+def test_table_json_round_trip_with_type_prerequisites() -> None:
+    enum_ref = ObjectRef(
+        kind=ObjectKind.ENUM,
+        qname=QualifiedName(namespace="types", name="mood"),
+    )
+    table = Table(ref=_table_ref("users"), type_prerequisites=(enum_ref,))
+
+    assert Table.model_validate_json(table.model_dump_json()) == table
 
 
 @pytest.mark.unit

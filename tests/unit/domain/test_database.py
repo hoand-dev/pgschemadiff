@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from pgschemadiff.domain.column import Column
 from pgschemadiff.domain.database import Database
+from pgschemadiff.domain.enum_type import EnumType
 from pgschemadiff.domain.extension import Extension
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index, IndexKeyColumn
@@ -59,6 +60,11 @@ def _make_extension(name: str, version: str = "1.0") -> Extension:
     return Extension(ref=ref, version=version)
 
 
+def _make_enum(schema: str, name: str, labels: tuple[str, ...]) -> EnumType:
+    ref = ObjectRef(kind=ObjectKind.ENUM, qname=QualifiedName(namespace=schema, name=name))
+    return EnumType(ref=ref, labels=labels)
+
+
 # ---------------------------------------------------------------------------
 # Database — construction
 # ---------------------------------------------------------------------------
@@ -92,6 +98,14 @@ def test_database_with_extensions() -> None:
     ext = _make_extension("pgcrypto", "1.3")
     db = Database(name="db", extensions=(ext,))
     assert len(db.extensions) == 1
+
+
+@pytest.mark.unit
+def test_database_rejects_duplicate_enum_refs_in_schema() -> None:
+    enum = _make_enum("public", "mood", ("sad", "happy"))
+
+    with pytest.raises(ValidationError, match="Duplicate enum ref"):
+        Schema(ref=_schema_ref("public"), enums=(enum, enum))
 
 
 @pytest.mark.unit
@@ -272,6 +286,26 @@ def test_database_all_tables_empty() -> None:
 
 
 @pytest.mark.unit
+def test_database_all_enums() -> None:
+    public_enum = _make_enum("public", "mood", ("sad", "happy"))
+    private_enum = _make_enum("private", "state", ("open", "closed"))
+    db = Database(
+        name="db",
+        schemas=(
+            Schema(ref=_schema_ref("public"), enums=(public_enum,)),
+            Schema(ref=_schema_ref("private"), enums=(private_enum,)),
+        ),
+    )
+
+    assert db.all_enums() == (public_enum, private_enum)
+
+
+@pytest.mark.unit
+def test_database_all_enums_empty() -> None:
+    assert Database(name="db").all_enums() == ()
+
+
+@pytest.mark.unit
 def test_database_all_indexes() -> None:
     idx_a = _make_index("public", "users_pkey", "users")
     idx_b = _make_index("public", "orders_idx", "orders")
@@ -308,11 +342,13 @@ def test_database_is_frozen() -> None:
 
 @pytest.mark.unit
 def test_database_json_round_trip() -> None:
-    tbl = _make_table("public", "users")
+    enum = _make_enum("types", "mood", ("sad", "happy"))
+    tbl = Table(ref=_table_ref("public", "users"), type_prerequisites=(enum.ref,))
     idx = _make_index("public", "users_id_idx", "users")
     pub = _make_schema("public", tables=(tbl,), indexes=(idx,))
+    types = Schema(ref=_schema_ref("types"), enums=(enum,))
     ext = _make_extension("pgcrypto", "1.3")
-    db = Database(name="testdb", schemas=(pub,), extensions=(ext,), server_version="18.0")
+    db = Database(name="testdb", schemas=(pub, types), extensions=(ext,), server_version="18.0")
     restored = Database.model_validate_json(db.model_dump_json())
     assert restored == db
 

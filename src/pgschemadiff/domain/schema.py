@@ -15,6 +15,7 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from pgschemadiff.domain.enum_type import EnumType
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index
 from pgschemadiff.domain.table import Table
@@ -51,6 +52,9 @@ class Schema(BaseModel):
     indexes: tuple[Index, ...] = Field(default=())
     """Indexes belonging to tables in this schema."""
 
+    enums: tuple[EnumType, ...] = Field(default=())
+    """Enum types owned by this schema."""
+
     comment: str | None = None
     """Optional ``COMMENT ON SCHEMA`` value."""
 
@@ -70,6 +74,20 @@ class Schema(BaseModel):
                 raise ValueError(
                     f"Table {table.ref.qname.fqn!r} belongs to namespace {tbl_ns!r}, "
                     f"but schema is {schema_name!r}"
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _check_enum_refs(self) -> Self:
+        seen: set[ObjectRef] = set()
+        for enum in self.enums:
+            if enum.ref in seen:
+                raise ValueError(f"Duplicate enum ref {enum.ref!r} in schema {self.name!r}")
+            seen.add(enum.ref)
+            if enum.ref.qname.namespace != self.name:
+                raise ValueError(
+                    f"Enum {enum.ref.qname.fqn!r} belongs to namespace "
+                    f"{enum.ref.qname.namespace!r}, but schema is {self.name!r}"
                 )
         return self
 

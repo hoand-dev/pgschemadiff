@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from pgschemadiff.domain.column import Column
+from pgschemadiff.domain.enum_type import EnumType
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index, IndexKeyColumn
 from pgschemadiff.domain.schema import Schema
@@ -26,6 +27,11 @@ def _table_ref(schema: str, name: str) -> ObjectRef:
 
 def _index_ref(schema: str, name: str) -> ObjectRef:
     return ObjectRef(kind=ObjectKind.INDEX, qname=QualifiedName(namespace=schema, name=name))
+
+
+def _make_enum(schema: str, name: str) -> EnumType:
+    ref = ObjectRef(kind=ObjectKind.ENUM, qname=QualifiedName(namespace=schema, name=name))
+    return EnumType(ref=ref, labels=("sad", "happy"))
 
 
 def _make_table(schema: str, name: str) -> Table:
@@ -81,6 +87,15 @@ def test_schema_with_indexes() -> None:
 
 
 @pytest.mark.unit
+def test_schema_with_enums() -> None:
+    enum = _make_enum("public", "mood")
+
+    schema = Schema(ref=_schema_ref("public"), enums=(enum,))
+
+    assert schema.enums == (enum,)
+
+
+@pytest.mark.unit
 def test_schema_name_property() -> None:
     ref = _schema_ref("reporting")
     schema = Schema(ref=ref)
@@ -112,6 +127,21 @@ def test_schema_rejects_table_from_different_namespace() -> None:
     wrong_table = _make_table("private", "secret")
     with pytest.raises(ValidationError, match="belongs to namespace"):
         Schema(ref=ref, tables=(wrong_table,))
+
+
+@pytest.mark.unit
+def test_schema_rejects_enum_from_different_namespace() -> None:
+    with pytest.raises(ValidationError, match="belongs to namespace"):
+        Schema(ref=_schema_ref("public"), enums=(_make_enum("private", "mood"),))
+
+
+@pytest.mark.unit
+def test_schema_rejects_duplicate_enum_refs() -> None:
+    first = _make_enum("public", "mood")
+    duplicate = _make_enum("public", "mood")
+
+    with pytest.raises(ValidationError, match="Duplicate enum ref"):
+        Schema(ref=_schema_ref("public"), enums=(first, duplicate))
 
 
 @pytest.mark.unit
