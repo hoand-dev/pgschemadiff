@@ -21,6 +21,7 @@ from pgschemadiff.application.sql_emit.risk import (
     passes_risk_limit,
 )
 from pgschemadiff.application.sql_emit.transaction import split_units
+from pgschemadiff.domain.delta import CreateTable
 from pgschemadiff.shared.errors import MigrationError, RiskGateError
 
 if TYPE_CHECKING:
@@ -73,7 +74,12 @@ def generate_migration(
 
     ordered_deltas = order_deltas(delta_set)
     delta_ids = tuple(f"d{index:04d}" for index in range(1, len(ordered_deltas) + 1))
-    risk_assessments = tuple(classify_risk(delta) for delta in ordered_deltas)
+    created_tables = frozenset(
+        delta.target for delta in delta_set if isinstance(delta, CreateTable)
+    )
+    risk_assessments = tuple(
+        classify_risk(delta, created_tables=created_tables) for delta in ordered_deltas
+    )
 
     if not passes_risk_limit(risk_assessments, max_risk=max_risk):
         offending = tuple(

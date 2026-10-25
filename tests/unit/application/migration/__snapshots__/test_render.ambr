@@ -97,9 +97,9 @@
       '''
         -- pgschemadiff migration: render-plan
         -- created_at: 2026-10-24T12:30:45Z
-        -- max_risk: dangerous
+        -- max_risk: safe
         SET standard_conforming_strings = on;
-        -- pgschemadiff unit: 0 transactional=true max_risk=dangerous
+        -- pgschemadiff unit: 0 transactional=true max_risk=safe
         BEGIN;
         -- delta: d0001
         CREATE SCHEMA "app"
@@ -112,7 +112,7 @@
         ;
         COMMIT;
         
-        -- pgschemadiff unit: 1 transactional=false max_risk=warning
+        -- pgschemadiff unit: 1 transactional=false max_risk=safe
         -- delta: d0004
         CREATE INDEX CONCURRENTLY "accounts_email_idx" ON "app"."accounts" USING btree ("email")
         ;
@@ -143,7 +143,7 @@
           "source_fingerprint": "source-hash",
           "target_fingerprint": "target-hash",
           "delta_count": 4,
-          "overall_max_risk": "dangerous",
+          "overall_max_risk": "safe",
           "assessments": [
             {
               "delta_id": "d0001",
@@ -167,8 +167,8 @@
               "delta_id": "d0003",
               "kind": "add_constraint",
               "target": "\"app\".\"accounts\".accounts_pkey",
-              "level": "dangerous",
-              "reason": "Adding a constraint may scan or validate rows, block, or fail on existing data.",
+              "level": "safe",
+              "reason": "Adds a constraint to a table created in the same migration; it has no existing rows.",
               "reversible": false,
               "reversibility_reason": "MVP-A does not derive inverse SQL from DeltaSet; complete prior state may be missing."
             },
@@ -176,8 +176,8 @@
               "delta_id": "d0004",
               "kind": "create_index",
               "target": "\"app\".\"accounts_email_idx\"",
-              "level": "warning",
-              "reason": "Index creation may block because execution mode is not specified.",
+              "level": "safe",
+              "reason": "Creates an index on an empty table created in this migration.",
               "reversible": false,
               "reversibility_reason": "MVP-A does not derive inverse SQL from DeltaSet; complete prior state may be missing."
             }
@@ -188,7 +188,7 @@
               "transactional": true,
               "start_line": 8,
               "end_line": 14,
-              "max_risk": "dangerous",
+              "max_risk": "safe",
               "delta_ids": [
                 "d0001",
                 "d0002",
@@ -218,7 +218,7 @@
               "transactional": false,
               "start_line": 20,
               "end_line": 20,
-              "max_risk": "warning",
+              "max_risk": "safe",
               "delta_ids": [
                 "d0004"
               ],
@@ -233,7 +233,7 @@
             }
           ],
           "checksums": {
-            "up_sql_sha256": "242b5aff311b4647a9dcefd0bf310fca322ba3b3d579e91de311133c0b413edb"
+            "up_sql_sha256": "a6e992690fd58b789759956c7ec05f9c01aa1694ab140f106d2a915c6f8bd526"
           }
         }
   
@@ -419,14 +419,14 @@
         - Source fingerprint: `source-hash`
         - Target fingerprint: `target-hash`
         - Delta count: 4
-        - Overall max risk: dangerous
+        - Overall max risk: safe
         
         ## Execution units
         
         | Unit | Transactional | Max risk | Delta IDs |
         |---:|:---:|---|---|
-        | 0 | true | dangerous | d0001, d0002, d0003 |
-        | 1 | false | warning | d0004 |
+        | 0 | true | safe | d0001, d0002, d0003 |
+        | 1 | false | safe | d0004 |
         
         ## Files
         
@@ -438,9 +438,9 @@
         
         ## SHA-256
         
-        - `up.sql`: `242b5aff311b4647a9dcefd0bf310fca322ba3b3d579e91de311133c0b413edb`
+        - `up.sql`: `a6e992690fd58b789759956c7ec05f9c01aa1694ab140f106d2a915c6f8bd526`
         - `down.sql`: `e87201d8d4470825bb2bea1bd7a4503e7152abd3a22dbd70418d51cfa851166e`
-        - `manifest.json`: `c7459bda50db5fa8a5cdaa722327769bc4eff7905ce00fd615466c85de50deba`
+        - `manifest.json`: `04fa4ef4e470362e9755d7177a7988b21c8d956dd3254c962b5702bb05a8deb8`
         - `deltas.json`: `bc7effbceb5f74c247b2bc8aa1ebac0d850c12b16f11495685acdd8d3029962b`
         
         ## Warnings

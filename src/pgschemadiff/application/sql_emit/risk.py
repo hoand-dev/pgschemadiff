@@ -4,6 +4,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 
+from pgschemadiff.domain.constraint import ForeignKeyConstraint
 from pgschemadiff.domain.delta import (
     AddColumn,
     AddConstraint,
@@ -27,6 +28,7 @@ from pgschemadiff.domain.delta import (
     SetColumnDefault,
     SetColumnNullability,
 )
+from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 
 
 class RiskLevel(StrEnum):
@@ -99,8 +101,12 @@ def passes_risk_limit(
     )
 
 
-def classify_risk(delta: DeltaBase) -> RiskAssessment:  # noqa: PLR0912, PLR0915
-    """Classify a schema delta using the approved static risk policy."""
+def classify_risk(  # noqa: PLR0912, PLR0915
+    delta: DeltaBase,
+    *,
+    created_tables: frozenset[ObjectRef] = frozenset(),
+) -> RiskAssessment:
+    """Classify a schema delta using static risk policy and migration context."""
     if type(delta) not in _SUPPORTED_DELTA_TYPES:
         return RiskAssessment(
             delta=delta,
@@ -213,10 +219,16 @@ def classify_risk(delta: DeltaBase) -> RiskAssessment:  # noqa: PLR0912, PLR0915
             "Column rename requires a lock and can affect dependent application behavior.",
         )
     elif isinstance(delta, CreateIndex):
-        level, reason = (
-            RiskLevel.WARNING,
-            "Index creation may block because execution mode is not specified.",
-        )
+        if delta.index.table_ref in created_tables:
+            level, reason = (
+                RiskLevel.SAFE,
+                "Creates an index on an empty table created in this migration.",
+            )
+        else:
+            level, reason = (
+                RiskLevel.WARNING,
+                "Index creation may block because execution mode is not specified.",
+            )
     elif isinstance(delta, DropIndex):
         if delta.index.unique:
             level, reason = (
@@ -238,10 +250,32 @@ def classify_risk(delta: DeltaBase) -> RiskAssessment:  # noqa: PLR0912, PLR0915
                 "Replacing an index requires a rebuild that may block.",
             )
     elif isinstance(delta, AddConstraint):
-        level, reason = (
-            RiskLevel.DANGEROUS,
-            "Adding a constraint may scan or validate rows, block, or fail on existing data.",
-        )
+        if delta.target.parent not in created_tables:
+            level, reason = (
+                RiskLevel.DANGEROUS,
+                "Adding a constraint may scan or validate rows, block, or fail on existing data.",
+            )
+        else:
+            level, reason = (
+                RiskLevel.SAFE,
+                "Adds a constraint to a table created in the same migration; "
+                "it has no existing rows.",
+            )
+            if isinstance(delta.constraint, ForeignKeyConstraint):
+                referenced_table = ObjectRef(
+                    kind=ObjectKind.TABLE,
+                    qname=QualifiedName(
+                        namespace=delta.constraint.ref_namespace,
+                        name=delta.constraint.ref_table,
+                    ),
+                )
+                if referenced_table not in created_tables:
+                    level, reason = (
+                        RiskLevel.WARNING,
+                        "Adds a foreign key from a table created in this migration; "
+                        "the existing referenced table takes a SHARE ROW EXCLUSIVE lock, "
+                        "bounded by lock_timeout.",
+                    )
     elif isinstance(delta, DropConstraint):
         level, reason = RiskLevel.DESTRUCTIVE, "Removes an enforced integrity rule."
     else:

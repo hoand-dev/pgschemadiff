@@ -12,6 +12,7 @@ from pgschemadiff.application.sql_emit.risk import (
 from pgschemadiff.domain.column import Column, GeneratedTiming, IdentitySpec
 from pgschemadiff.domain.constraint import (
     CheckConstraint,
+    Constraint,
     ExclusionConstraint,
     ExclusionElement,
     ForeignKeyConstraint,
@@ -74,6 +75,15 @@ _EXTENSION_REF = ObjectRef(
 
 def _table(*, partition_of: PartitionOf | None = None) -> Table:
     return Table(ref=_TABLE_REF, partition_of=partition_of)
+
+
+def _add_constraint(table_ref: ObjectRef, constraint: Constraint) -> AddConstraint:
+    target = ObjectRef(
+        kind=ObjectKind.CONSTRAINT,
+        qname=QualifiedName(namespace=table_ref.qname.namespace, name=constraint.name),
+        parent=table_ref,
+    )
+    return AddConstraint(target=target, constraint=constraint)
 
 
 def _column(
@@ -400,6 +410,98 @@ def test_classify_risk_matches_policy(delta: DeltaBase, expected_level: RiskLeve
     assert assessment.level is expected_level
     assert assessment.reason.strip()
     assert classify_risk(delta).reason == assessment.reason
+
+
+def test_add_constraint_on_new_table_is_safe() -> None:
+    delta = _add_constraint(
+        _TABLE_REF,
+        CheckConstraint(name="users_email_check", expression="email <> ''"),
+    )
+
+    assessment = classify_risk(delta, created_tables=frozenset({_TABLE_REF}))
+
+    assert assessment.level is RiskLevel.SAFE
+    assert "created in the same migration" in assessment.reason
+    assert "no existing rows" in assessment.reason
+
+
+def test_foreign_key_to_existing_table_is_warning_for_new_table() -> None:
+    delta = _add_constraint(
+        _TABLE_REF,
+        ForeignKeyConstraint(
+            name="users_team_fkey",
+            columns=("team_id",),
+            ref_namespace="public",
+            ref_table="teams",
+            ref_columns=("id",),
+        ),
+    )
+
+    assessment = classify_risk(delta, created_tables=frozenset({_TABLE_REF}))
+
+    assert assessment.level is RiskLevel.WARNING
+    assert "SHARE ROW EXCLUSIVE" in assessment.reason
+    assert "lock_timeout" in assessment.reason
+
+
+def test_foreign_key_between_new_tables_is_safe() -> None:
+    teams_ref = ObjectRef(
+        kind=ObjectKind.TABLE,
+        qname=QualifiedName(namespace="public", name="teams"),
+    )
+    delta = _add_constraint(
+        _TABLE_REF,
+        ForeignKeyConstraint(
+            name="users_team_fkey",
+            columns=("team_id",),
+            ref_namespace="public",
+            ref_table="teams",
+            ref_columns=("id",),
+        ),
+    )
+
+    assessment = classify_risk(delta, created_tables=frozenset({_TABLE_REF, teams_ref}))
+
+    assert assessment.level is RiskLevel.SAFE
+    assert "created in the same migration" in assessment.reason
+    assert "no existing rows" in assessment.reason
+
+
+def test_index_on_new_table_is_safe() -> None:
+    delta = CreateIndex(target=_INDEX_REF, index=_index())
+
+    assessment = classify_risk(delta, created_tables=frozenset({_TABLE_REF}))
+
+    assert assessment.level is RiskLevel.SAFE
+    assert "empty table" in assessment.reason
+
+
+def test_existing_table_risks_stay_conservative_with_context() -> None:
+    other_table = ObjectRef(
+        kind=ObjectKind.TABLE,
+        qname=QualifiedName(namespace="public", name="teams"),
+    )
+    constraint = _add_constraint(
+        _TABLE_REF,
+        CheckConstraint(name="users_email_check", expression="email <> ''"),
+    )
+    index = CreateIndex(target=_INDEX_REF, index=_index())
+
+    assert classify_risk(constraint, created_tables=frozenset({other_table})).level is (
+        RiskLevel.DANGEROUS
+    )
+    assert classify_risk(index, created_tables=frozenset({other_table})).level is RiskLevel.WARNING
+
+
+def test_default_context_preserves_existing_constraint_and_index_risks() -> None:
+    constraint = _add_constraint(
+        _TABLE_REF,
+        CheckConstraint(name="users_email_check", expression="email <> ''"),
+    )
+    index = CreateIndex(target=_INDEX_REF, index=_index())
+
+    assert classify_risk(constraint).level is RiskLevel.DANGEROUS
+    assert classify_risk(index).level is RiskLevel.WARNING
 
 
 class UnsupportedDelta(DeltaBase):

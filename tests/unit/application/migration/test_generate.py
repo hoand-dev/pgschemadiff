@@ -5,9 +5,27 @@ import pytest
 from pgschemadiff.application.diff.dependencies import order_deltas
 from pgschemadiff.application.migration import generate_migration
 from pgschemadiff.application.sql_emit.risk import RiskAssessment, RiskLevel, classify_risk
-from pgschemadiff.domain.delta import CreateSchema, DeltaBase, DeltaSet, DropSchema
+from pgschemadiff.domain.column import Column
+from pgschemadiff.domain.constraint import (
+    CheckConstraint,
+    Constraint,
+    ForeignKeyConstraint,
+    PrimaryKeyConstraint,
+    UniqueConstraint,
+)
+from pgschemadiff.domain.delta import (
+    AddConstraint,
+    CreateIndex,
+    CreateSchema,
+    CreateTable,
+    DeltaBase,
+    DeltaSet,
+    DropSchema,
+)
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
+from pgschemadiff.domain.index import Index, IndexKeyColumn
 from pgschemadiff.domain.schema import Schema
+from pgschemadiff.domain.table import Table
 from pgschemadiff.shared.errors import MigrationError, RiskGateError
 
 
@@ -26,6 +44,22 @@ def _create_schema(name: str) -> CreateSchema:
 def _drop_schema(name: str) -> DropSchema:
     ref = _schema_ref(name)
     return DropSchema(target=ref, pg_schema=Schema(ref=ref))
+
+
+def _table_ref(name: str) -> ObjectRef:
+    return ObjectRef(
+        kind=ObjectKind.TABLE,
+        qname=QualifiedName(namespace="public", name=name),
+    )
+
+
+def _add_constraint(table_ref: ObjectRef, constraint: Constraint) -> AddConstraint:
+    target = ObjectRef(
+        kind=ObjectKind.CONSTRAINT,
+        qname=QualifiedName(namespace=table_ref.qname.namespace, name=constraint.name),
+        parent=table_ref,
+    )
+    return AddConstraint(target=target, constraint=constraint)
 
 
 def _clock() -> datetime:
@@ -77,9 +111,13 @@ def test_each_ordered_delta_is_classified_once(monkeypatch: pytest.MonkeyPatch) 
     alpha, beta = _create_schema("alpha"), _create_schema("beta")
     classified: list[DeltaBase] = []
 
-    def count_classifications(delta: DeltaBase) -> RiskAssessment:
+    def count_classifications(
+        delta: DeltaBase,
+        *,
+        created_tables: frozenset[ObjectRef],
+    ) -> RiskAssessment:
         classified.append(delta)
-        return classify_risk(delta)
+        return classify_risk(delta, created_tables=created_tables)
 
     monkeypatch.setattr(
         "pgschemadiff.application.migration.generate.classify_risk",
@@ -108,6 +146,78 @@ def test_empty_plan_has_no_risk_or_units() -> None:
     assert plan.assessments == ()
     assert plan.units == ()
     assert plan.overall_max_risk is None
+
+
+def test_new_two_table_schema_with_constraints_and_index_has_safe_max_risk() -> None:
+    teams_ref = _table_ref("teams")
+    users_ref = _table_ref("users")
+    teams_pk = PrimaryKeyConstraint(
+        name="teams_pkey", columns=("id",), definition="PRIMARY KEY (id)"
+    )
+    users_pk = PrimaryKeyConstraint(
+        name="users_pkey", columns=("id",), definition="PRIMARY KEY (id)"
+    )
+    users_unique = UniqueConstraint(
+        name="users_email_key", columns=("email",), definition="UNIQUE (email)"
+    )
+    users_check = CheckConstraint(
+        name="users_email_check",
+        expression="email <> ''",
+        definition="CHECK (email <> '')",
+    )
+    users_fk = ForeignKeyConstraint(
+        name="users_team_fkey",
+        columns=("team_id",),
+        ref_namespace="public",
+        ref_table="teams",
+        ref_columns=("id",),
+    )
+    teams = Table(
+        ref=teams_ref,
+        columns=(Column(name="id", position=1, data_type="integer", nullable=False),),
+        constraints=(teams_pk,),
+    )
+    users = Table(
+        ref=users_ref,
+        columns=(
+            Column(name="id", position=1, data_type="integer", nullable=False),
+            Column(name="team_id", position=2, data_type="integer", nullable=False),
+            Column(name="email", position=3, data_type="text", nullable=False),
+        ),
+        constraints=(users_pk, users_unique, users_check, users_fk),
+    )
+    index_ref = ObjectRef(
+        kind=ObjectKind.INDEX,
+        qname=QualifiedName(namespace="public", name="users_email_idx"),
+    )
+    index = Index(
+        ref=index_ref,
+        table_ref=users_ref,
+        key_columns=(IndexKeyColumn(column_name="email"),),
+        definition="CREATE INDEX users_email_idx ON public.users USING btree (email)",
+    )
+    delta_set = DeltaSet.from_iterable(
+        (
+            CreateTable(target=teams_ref, table=teams),
+            CreateTable(target=users_ref, table=users),
+            _add_constraint(teams_ref, teams_pk),
+            _add_constraint(users_ref, users_pk),
+            _add_constraint(users_ref, users_unique),
+            _add_constraint(users_ref, users_check),
+            _add_constraint(users_ref, users_fk),
+            CreateIndex(target=index_ref, index=index),
+        )
+    )
+
+    plan = generate_migration(
+        delta_set,
+        max_risk=RiskLevel.SAFE,
+        clock=_clock,
+        id_factory=lambda: "new-tables-safe",
+    )
+
+    assert plan.overall_max_risk is RiskLevel.SAFE
+    assert all(record.assessment.level is RiskLevel.SAFE for record in plan.assessments)
 
 
 @pytest.mark.parametrize(
