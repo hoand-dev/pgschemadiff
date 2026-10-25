@@ -15,12 +15,14 @@ from pgschemadiff.domain.delta.index import CreateIndex
 from pgschemadiff.domain.delta.schema import CreateExtension, CreateSchema
 from pgschemadiff.domain.delta.sequence import AlterSequenceOwner
 from pgschemadiff.domain.delta.table import AlterTableAttrs, CreateTable, RenameTable
+from pgschemadiff.domain.delta.view import CreateView
 from pgschemadiff.domain.extension import Extension
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index, IndexKeyColumn
 from pgschemadiff.domain.schema import Schema
 from pgschemadiff.domain.sequence import Sequence
 from pgschemadiff.domain.table import PartitionOf, Table
+from pgschemadiff.domain.view import View
 
 
 def _ref(
@@ -96,6 +98,22 @@ async def test_compare_schemas_uses_all_default_comparators() -> None:
 
     delta_types = {type(delta) for delta in result.deltas}
     assert {AddColumn, AddConstraint, CreateIndex, CreateExtension} <= delta_types
+
+
+async def test_compare_schemas_includes_view_comparator() -> None:
+    view_ref = _ref(ObjectKind.VIEW, "active_accounts")
+    view = View(
+        ref=view_ref,
+        columns=(("id", "integer"),),
+        definition="SELECT id FROM public.accounts",
+    )
+    target = StubInspector(
+        Database(name="target", schemas=(Schema(ref=_schema().ref, views=(view,)),))
+    )
+
+    result = await compare_schemas(StubInspector(Database(name="source")), target)
+
+    assert CreateView(target=view_ref, view=view) in result.deltas
 
 
 async def test_compare_schemas_includes_sequence_comparator() -> None:

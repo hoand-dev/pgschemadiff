@@ -43,6 +43,7 @@ from pgschemadiff.domain.delta.schema import (
     DropSchema,
 )
 from pgschemadiff.domain.delta.table import CreateTable, DropTable, RenameTable
+from pgschemadiff.domain.delta.view import CreateView, DropView
 from pgschemadiff.domain.domain_type import DomainType
 from pgschemadiff.domain.enum_type import EnumType
 from pgschemadiff.domain.extension import Extension
@@ -53,6 +54,7 @@ from pgschemadiff.domain.procedure import Procedure, ProcedureArgument
 from pgschemadiff.domain.schema import Schema
 from pgschemadiff.domain.sequence import Sequence
 from pgschemadiff.domain.table import PartitionOf, Table
+from pgschemadiff.domain.view import View
 
 
 def _ref(kind: ObjectKind, name: str, *, namespace: str = "public") -> ObjectRef:
@@ -785,3 +787,61 @@ def test_mutually_referencing_new_tables_create_before_fk_constraints() -> None:
     ordered = order_deltas(DeltaSet.from_iterable((add_b_fk, create_b, add_a_fk, create_a))).deltas
 
     assert ordered == (create_a, create_b, add_a_fk, add_b_fk)
+
+
+def test_view_create_waits_for_table_added_columns_and_prerequisite_view() -> None:
+    table = _table("items")
+    create_table = CreateTable(target=table.ref, table=table)
+    added_column = AddColumn(
+        target=_column_ref(table.ref, "label"),
+        column=Column(name="label", position=1, data_type="text"),
+    )
+    first_view = View(
+        ref=_ref(ObjectKind.VIEW, "items_view"),
+        columns=(("id", "integer"),),
+        definition="SELECT id FROM public.items",
+        prerequisites=(table.ref,),
+    )
+    create_first = CreateView(target=first_view.ref, view=first_view)
+    dependent_view = View(
+        ref=_ref(ObjectKind.VIEW, "labels_view"),
+        columns=(("label", "text"),),
+        definition="SELECT label FROM public.items_view",
+        prerequisites=(first_view.ref,),
+    )
+    create_dependent = CreateView(target=dependent_view.ref, view=dependent_view)
+
+    ordered = order_deltas(
+        DeltaSet.from_iterable((create_dependent, create_first, added_column, create_table))
+    ).deltas
+
+    _assert_precedes(ordered, create_table, added_column, create_first, create_dependent)
+
+
+def test_view_drop_chain_precedes_prerequisite_view_table_and_column_drops() -> None:
+    table = _table("items", columns=("label",))
+    drop_table = DropTable(target=table.ref, table=table)
+    drop_column = DropColumn(
+        target=_column_ref(table.ref, "label"),
+        column=Column(name="label", position=1, data_type="text"),
+    )
+    first_view = View(
+        ref=_ref(ObjectKind.VIEW, "items_view"),
+        columns=(("label", "text"),),
+        definition="SELECT label FROM public.items",
+        prerequisites=(table.ref,),
+    )
+    dependent_view = View(
+        ref=_ref(ObjectKind.VIEW, "labels_view"),
+        columns=(("label", "text"),),
+        definition="SELECT label FROM public.items_view",
+        prerequisites=(first_view.ref,),
+    )
+    drop_first = DropView(target=first_view.ref, view=first_view)
+    drop_dependent = DropView(target=dependent_view.ref, view=dependent_view)
+
+    ordered = order_deltas(
+        DeltaSet.from_iterable((drop_table, drop_column, drop_first, drop_dependent))
+    ).deltas
+
+    _assert_precedes(ordered, drop_dependent, drop_first, drop_column, drop_table)

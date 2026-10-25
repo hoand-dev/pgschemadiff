@@ -19,6 +19,17 @@
     transactional=true new_unit=false isolated=false sql=CREATE OR REPLACE PROCEDURE "App ""Schema"."run""task"(value integer DEFAULT 7) LANGUAGE sql AS $procedure$ SELECT value + 1 $procedure$
   alter procedure owner: alter_procedure_owner target=procedure "App ""Schema"."run""task"
     transactional=true new_unit=false isolated=false sql=ALTER PROCEDURE "App ""Schema"."run""task"(IN integer) OWNER TO "New ""Owner"
+  create view: create_view target=view "App ""Schema"."Order""View"
+    transactional=true new_unit=false isolated=false sql=CREATE VIEW "App ""Schema"."Order""View" ("id", "select") WITH (security_barrier = true, security_invoker = true) AS SELECT "id", "select" FROM "App ""Schema"."Order""Items" WITH LOCAL CHECK OPTION
+    transactional=true new_unit=false isolated=false sql=ALTER VIEW "App ""Schema"."Order""View" OWNER TO "Role ""Owner"
+  drop view: drop_view target=view "App ""Schema"."Order""View"
+    transactional=true new_unit=false isolated=false sql=DROP VIEW "App ""Schema"."Order""View" RESTRICT
+  replace view: replace_view target=view "App ""Schema"."Order""View"
+    transactional=true new_unit=false isolated=false sql=CREATE OR REPLACE VIEW "App ""Schema"."Order""View" ("id", "select") WITH (security_barrier = true, security_invoker = true) AS SELECT "id" + 1 AS "id", "select" FROM "App ""Schema"."Order""Items" WITH LOCAL CHECK OPTION
+  replace view blocked: replace_view target=view "App ""Schema"."Order""View"
+    raises MigrationError
+  alter view owner: alter_view_owner target=view "App ""Schema"."Order""View"
+    transactional=true new_unit=false isolated=false sql=ALTER VIEW "App ""Schema"."Order""View" OWNER TO "New ""Owner"
   create sequence: create_sequence target=sequence "App ""Schema"."Serial""ID"
     transactional=true new_unit=false isolated=false sql=CREATE SEQUENCE "App ""Schema"."Serial""ID" AS bigint INCREMENT BY 5 MINVALUE 1 MAXVALUE 999 START WITH 7 CACHE 3 CYCLE
     transactional=true new_unit=false isolated=false sql=ALTER SEQUENCE "App ""Schema"."Serial""ID" OWNER TO "Role ""Owner"

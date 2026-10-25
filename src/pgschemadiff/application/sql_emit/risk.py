@@ -26,6 +26,7 @@ from pgschemadiff.domain.delta import (
     AlterSequenceOwnedBy,
     AlterSequenceOwner,
     AlterTableAttrs,
+    AlterViewOwner,
     CreateCompositeType,
     CreateDomain,
     CreateEnum,
@@ -36,6 +37,7 @@ from pgschemadiff.domain.delta import (
     CreateSchema,
     CreateSequence,
     CreateTable,
+    CreateView,
     DeltaBase,
     DropColumn,
     DropCompositeType,
@@ -50,6 +52,7 @@ from pgschemadiff.domain.delta import (
     DropSchema,
     DropSequence,
     DropTable,
+    DropView,
     RenameColumn,
     RenameTable,
     ReplaceCompositeType,
@@ -58,6 +61,7 @@ from pgschemadiff.domain.delta import (
     ReplaceFunction,
     ReplaceIndex,
     ReplaceProcedure,
+    ReplaceView,
     SetColumnDefault,
     SetColumnNullability,
     ValidateDomainCheck,
@@ -153,6 +157,10 @@ _SUPPORTED_DELTA_TYPES: tuple[type[DeltaBase], ...] = (
     AlterSequenceOptions,
     AlterSequenceOwner,
     AlterSequenceOwnedBy,
+    CreateView,
+    DropView,
+    ReplaceView,
+    AlterViewOwner,
 )
 
 
@@ -245,6 +253,30 @@ def classify_risk(  # noqa: PLR0912, PLR0915
             )
         else:
             level, reason = RiskLevel.SAFE, "Changes table owner or comment metadata only."
+    elif isinstance(delta, CreateView):
+        level, reason = (
+            RiskLevel.SAFE,
+            "Creates a view without storing rows or changing relation data.",
+        )
+    elif isinstance(delta, DropView):
+        level, reason = RiskLevel.DESTRUCTIVE, "Removes a view and its definition."
+    elif isinstance(delta, ReplaceView):
+        if delta.incompatible or not delta.old_view.can_be_replaced_by(delta.new_view):
+            level, reason = (
+                RiskLevel.BLOCKED,
+                "View output column names, order, and types must remain unchanged; "
+                "only append is supported.",
+            )
+        else:
+            level, reason = (
+                RiskLevel.DANGEROUS,
+                "Replaces view behavior or options and may change query results or access.",
+            )
+    elif isinstance(delta, AlterViewOwner):
+        level, reason = (
+            RiskLevel.DANGEROUS,
+            "Changes view ownership, which can change effective access to underlying relations.",
+        )
     elif isinstance(delta, AddColumn):
         conditions = []
         is_virtual_generated = (

@@ -43,6 +43,7 @@ from pgschemadiff.domain.delta import (
     AlterSequenceOwnedBy,
     AlterSequenceOwner,
     AlterTableAttrs,
+    AlterViewOwner,
     CreateCompositeType,
     CreateDomain,
     CreateEnum,
@@ -53,6 +54,7 @@ from pgschemadiff.domain.delta import (
     CreateSchema,
     CreateSequence,
     CreateTable,
+    CreateView,
     Delta,
     DeltaBase,
     DeltaSet,
@@ -69,6 +71,7 @@ from pgschemadiff.domain.delta import (
     DropSchema,
     DropSequence,
     DropTable,
+    DropView,
     RenameColumn,
     RenameTable,
     ReplaceCompositeType,
@@ -77,6 +80,7 @@ from pgschemadiff.domain.delta import (
     ReplaceFunction,
     ReplaceIndex,
     ReplaceProcedure,
+    ReplaceView,
     SetColumnDefault,
     SetColumnNullability,
     ValidateDomainCheck,
@@ -91,6 +95,7 @@ from pgschemadiff.domain.procedure import Procedure, ProcedureArgument
 from pgschemadiff.domain.schema import Schema
 from pgschemadiff.domain.sequence import Sequence
 from pgschemadiff.domain.table import PartitionInfo, PartitionOf, PartitionStrategy, Table
+from pgschemadiff.domain.view import View
 from pgschemadiff.shared.errors import MigrationError
 
 
@@ -409,6 +414,30 @@ def _emitter_cases() -> tuple[tuple[str, Delta], ...]:
         predicate='WHERE ("during" IS NOT NULL)',
         definition='EXCLUDE USING gist ("during" WITH &&) WHERE ("during" IS NOT NULL)',
     )
+    view_ref = ObjectRef(
+        kind=ObjectKind.VIEW,
+        qname=QualifiedName(namespace='App "Schema', name='Order"View'),
+    )
+    view = View(
+        ref=view_ref,
+        columns=(("id", "integer"), ("select", "text")),
+        definition='SELECT "id", "select" FROM "App ""Schema"."Order""Items"',
+        check_option="local",
+        security_barrier=True,
+        security_invoker=True,
+        owner='Role "Owner',
+    )
+    new_view = view.model_copy(
+        update={
+            "definition": ('SELECT "id" + 1 AS "id", "select" FROM "App ""Schema"."Order""Items"')
+        }
+    )
+    incompatible_view = view.model_copy(
+        update={
+            "columns": (("renamed", "integer"), ("select", "text")),
+            "definition": ('SELECT "id" AS "renamed", "select" FROM "App ""Schema"."Order""Items"'),
+        }
+    )
 
     return (
         ("create function", CreateFunction(target=function_ref, function=function)),
@@ -460,6 +489,25 @@ def _emitter_cases() -> tuple[tuple[str, Delta], ...]:
                 procedure=procedure,
                 new_owner='New "Owner',
             ),
+        ),
+        ("create view", CreateView(target=view_ref, view=view)),
+        ("drop view", DropView(target=view_ref, view=view)),
+        (
+            "replace view",
+            ReplaceView(target=view_ref, old_view=view, new_view=new_view),
+        ),
+        (
+            "replace view blocked",
+            ReplaceView(
+                target=view_ref,
+                old_view=view,
+                new_view=incompatible_view,
+                incompatible=True,
+            ),
+        ),
+        (
+            "alter view owner",
+            AlterViewOwner(target=view_ref, view=view, new_owner='New "Owner'),
         ),
         ("create sequence", CreateSequence(target=sequence_ref, sequence=sequence)),
         ("drop sequence", DropSequence(target=sequence_ref, sequence=sequence)),
@@ -940,7 +988,9 @@ def _render_emitter_corpus() -> str:
     lines: list[str] = []
     for label, delta in _EMITTER_CASES:
         lines.append(f"{label}: {_delta_kind(delta)} target={_target_text(delta.target)}")
-        if isinstance(delta, (ReplaceEnumLabels, ReplaceCompositeType, ReplaceDomainType)):
+        if isinstance(delta, (ReplaceEnumLabels, ReplaceCompositeType, ReplaceDomainType)) or (
+            isinstance(delta, ReplaceView) and delta.incompatible
+        ):
             with pytest.raises(MigrationError):
                 emitter.emit(DeltaSet.from_iterable((delta,)))
             lines.append("  raises MigrationError")

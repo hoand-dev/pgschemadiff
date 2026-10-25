@@ -21,11 +21,13 @@ from pgschemadiff.domain.delta import (
     DeltaBase,
     DeltaSet,
     DropSchema,
+    ReplaceView,
 )
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index, IndexKeyColumn
 from pgschemadiff.domain.schema import Schema
 from pgschemadiff.domain.table import Table
+from pgschemadiff.domain.view import View
 from pgschemadiff.shared.errors import MigrationError, RiskGateError
 
 
@@ -146,6 +148,38 @@ def test_empty_plan_has_no_risk_or_units() -> None:
     assert plan.assessments == ()
     assert plan.units == ()
     assert plan.overall_max_risk is None
+
+
+def test_generation_blocks_incompatible_view_replacement() -> None:
+    view_ref = ObjectRef(
+        kind=ObjectKind.VIEW,
+        qname=QualifiedName(namespace="public", name="account_view"),
+    )
+    old = View(
+        ref=view_ref,
+        columns=(("id", "integer"),),
+        definition="SELECT id FROM public.accounts",
+    )
+    new = View(
+        ref=view_ref,
+        columns=(("name", "text"),),
+        definition="SELECT name FROM public.accounts",
+    )
+    delta = ReplaceView(target=view_ref, old_view=old, new_view=new)
+
+    with pytest.raises(
+        RiskGateError,
+        match=(
+            "View output column names, order, and types must remain unchanged; "
+            "only append is supported"
+        ),
+    ):
+        generate_migration(
+            DeltaSet.from_iterable((delta,)),
+            max_risk=RiskLevel.BLOCKED,
+            clock=_clock,
+            id_factory=lambda: "blocked-view-replacement",
+        )
 
 
 def test_new_two_table_schema_with_constraints_and_index_has_safe_max_risk() -> None:

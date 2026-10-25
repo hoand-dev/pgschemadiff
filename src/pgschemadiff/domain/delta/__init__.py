@@ -120,6 +120,13 @@ from pgschemadiff.domain.delta.table import (
     RenameTable,
     TableDelta,
 )
+from pgschemadiff.domain.delta.view import (
+    AlterViewOwner,
+    CreateView,
+    DropView,
+    ReplaceView,
+    ViewDelta,
+)
 
 __all__ = [
     "AddColumn",
@@ -142,6 +149,7 @@ __all__ = [
     "AlterSequenceOwnedBy",
     "AlterSequenceOwner",
     "AlterTableAttrs",
+    "AlterViewOwner",
     "ColumnDelta",
     "CompositeTypeDelta",
     "ConstraintDelta",
@@ -155,6 +163,7 @@ __all__ = [
     "CreateSchema",
     "CreateSequence",
     "CreateTable",
+    "CreateView",
     "Delta",
     "DeltaBase",
     "DeltaOp",
@@ -173,6 +182,7 @@ __all__ = [
     "DropSchema",
     "DropSequence",
     "DropTable",
+    "DropView",
     "EnumDelta",
     "ExtensionDelta",
     "FunctionDelta",
@@ -186,10 +196,12 @@ __all__ = [
     "ReplaceFunction",
     "ReplaceIndex",
     "ReplaceProcedure",
+    "ReplaceView",
     "SchemaDelta",
     "SequenceDelta",
     "SetColumnDefault",
     "SetColumnNullability",
     "TableDelta",
     "ValidateDomainCheck",
+    "ViewDelta",
 ]

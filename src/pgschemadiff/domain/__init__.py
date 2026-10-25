@@ -42,6 +42,7 @@ from pgschemadiff.domain.table import (
     PartitionStrategy,
     Table,
 )
+from pgschemadiff.domain.view import View
 
 __all__ = [
     "SUB_OBJECT_KINDS",
@@ -84,4 +85,5 @@ __all__ = [
     "SortOrder",
     "Table",
     "UniqueConstraint",
+    "View",
 ]

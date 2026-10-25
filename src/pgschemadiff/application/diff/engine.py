@@ -79,6 +79,7 @@ _OBJECT_FETCHERS: dict[ObjectKind, _ObjectFetcher] = {
     ObjectKind.PROCEDURE: lambda db: db.all_procedures(),
     ObjectKind.TABLE: lambda db: db.all_tables(),
     ObjectKind.INDEX: lambda db: db.all_indexes(),
+    ObjectKind.VIEW: lambda db: db.all_views(),
 }
 
 

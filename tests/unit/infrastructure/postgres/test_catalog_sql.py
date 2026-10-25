@@ -52,6 +52,8 @@ _CATALOG_FILES = [
     "sequences.sql",
     "sequence_prerequisites.sql",
     "routines.sql",
+    "views.sql",
+    "view_prerequisites.sql",
 ]
 
 
@@ -381,6 +383,8 @@ def test_schemas_sql_selects_owner_and_comment() -> None:
         pytest.param("sequences.sql"),
         pytest.param("sequence_prerequisites.sql"),
         pytest.param("routines.sql"),
+        pytest.param("views.sql"),
+        pytest.param("view_prerequisites.sql"),
     ],
 )
 def test_catalog_sql_excludes_reserved_history_schema(filename: str) -> None:
@@ -612,6 +616,59 @@ def test_sequence_prerequisites_sql_uses_catalog_dependencies_not_default_parsin
     assert "sequence_schema" in sql
     assert "sequence_name" in sql
     assert "nextval" not in sql
+
+
+@pytest.mark.unit
+def test_views_sql_selects_view_options_and_ordered_output_columns() -> None:
+    sql = _load_sql("views.sql")
+
+    for expected in (
+        "relkind = 'v'",
+        "pg_get_viewdef",
+        "check_option",
+        "security_barrier",
+        "security_invoker",
+        "attnum AS column_position",
+        "attname AS column_name",
+        "format_type",
+        "ORDER BY",
+    ):
+        assert expected in sql
+
+
+@pytest.mark.unit
+def test_views_sql_excludes_system_reserved_and_extension_owned_views() -> None:
+    sql = _load_sql("views.sql")
+
+    assert "left(view_namespace.nspname, 3) != 'pg_'" in sql
+    assert "view_namespace.nspname != 'information_schema'" in sql
+    assert "view_namespace.nspname != 'pgschemadiff'" in sql
+    assert "deptype = 'e'" in sql
+
+
+@pytest.mark.unit
+def test_view_prerequisites_sql_maps_supported_dependency_kinds_and_excludes_extensions() -> None:
+    sql = _load_sql("view_prerequisites.sql")
+
+    for expected in (
+        "pg_rewrite",
+        "pg_depend",
+        "refclassid",
+        "'table'",
+        "'view'",
+        "'function'",
+        "'procedure'",
+        "'enum'",
+        "'composite_type'",
+        "'domain_type'",
+        "prerequisite_signature",
+        "left(view_namespace.nspname, 3) != 'pg_'",
+        "deptype = 'e'",
+    ):
+        assert expected in sql
+
+    assert "LIKE 'pg_%'" not in sql
+    assert "%s" not in sql
 
 
 # ---------------------------------------------------------------------------

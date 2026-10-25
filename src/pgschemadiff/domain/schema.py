@@ -24,6 +24,7 @@ from pgschemadiff.domain.index import Index
 from pgschemadiff.domain.procedure import Procedure
 from pgschemadiff.domain.sequence import Sequence
 from pgschemadiff.domain.table import Table
+from pgschemadiff.domain.view import View
 
 
 class Schema(BaseModel):
@@ -74,6 +75,9 @@ class Schema(BaseModel):
 
     procedures: tuple[Procedure, ...] = Field(default=())
     """Procedures owned by this schema, ordered by name and input signature."""
+
+    views: tuple[View, ...] = Field(default=())
+    """Views contained in this schema, ordered by view name."""
 
     comment: str | None = None
     """Optional ``COMMENT ON SCHEMA`` value."""
@@ -184,6 +188,20 @@ class Schema(BaseModel):
                 raise ValueError(
                     f"Procedure {procedure.ref.qname.fqn!r} belongs to namespace "
                     f"{procedure.ref.qname.namespace!r}, but schema is {self.name!r}"
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _check_view_refs(self) -> Self:
+        seen: set[ObjectRef] = set()
+        for view in self.views:
+            if view.ref in seen:
+                raise ValueError(f"Duplicate view ref {view.ref!r} in schema {self.name!r}")
+            seen.add(view.ref)
+            if view.ref.qname.namespace != self.name:
+                raise ValueError(
+                    f"View {view.ref.qname.fqn!r} belongs to namespace "
+                    f"{view.ref.qname.namespace!r}, but schema is {self.name!r}"
                 )
         return self
 

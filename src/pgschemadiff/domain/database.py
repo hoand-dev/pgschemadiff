@@ -29,6 +29,7 @@ from pgschemadiff.domain.procedure import Procedure
 from pgschemadiff.domain.schema import Schema
 from pgschemadiff.domain.sequence import Sequence
 from pgschemadiff.domain.table import Table
+from pgschemadiff.domain.view import View
 
 
 class Database(BaseModel):
@@ -181,6 +182,13 @@ class Database(BaseModel):
         result: list[Procedure] = []
         for schema in self.schemas:
             result.extend(schema.procedures)
+        return tuple(result)
+
+    def all_views(self) -> tuple[View, ...]:
+        """Return all views across every schema."""
+        result: list[View] = []
+        for schema in self.schemas:
+            result.extend(schema.views)
         return tuple(result)
 
     def all_indexes(self) -> tuple[Index, ...]:

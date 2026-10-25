@@ -40,6 +40,7 @@ from pgschemadiff.domain.delta import (
     AlterSequenceOwnedBy,
     AlterSequenceOwner,
     AlterTableAttrs,
+    AlterViewOwner,
     CreateCompositeType,
     CreateDomain,
     CreateEnum,
@@ -49,6 +50,7 @@ from pgschemadiff.domain.delta import (
     CreateSchema,
     CreateSequence,
     CreateTable,
+    CreateView,
     DeltaBase,
     DeltaOp,
     DropColumn,
@@ -63,6 +65,7 @@ from pgschemadiff.domain.delta import (
     DropSchema,
     DropSequence,
     DropTable,
+    DropView,
     RenameColumn,
     RenameTable,
     ReplaceCompositeType,
@@ -70,6 +73,7 @@ from pgschemadiff.domain.delta import (
     ReplaceEnumLabels,
     ReplaceFunction,
     ReplaceIndex,
+    ReplaceView,
     SetColumnDefault,
     SetColumnNullability,
     ValidateDomainCheck,
@@ -83,6 +87,7 @@ from pgschemadiff.domain.index import Index, IndexKeyColumn, IndexMethod
 from pgschemadiff.domain.schema import Schema
 from pgschemadiff.domain.sequence import Sequence
 from pgschemadiff.domain.table import PartitionInfo, PartitionOf, PartitionStrategy, Table
+from pgschemadiff.domain.view import View
 
 _SCHEMA_REF = ObjectRef(
     kind=ObjectKind.SCHEMA,
@@ -126,6 +131,10 @@ _FUNCTION_REF = ObjectRef(
     kind=ObjectKind.FUNCTION,
     qname=QualifiedName(namespace="public", name="sample"),
     arg_signature=("integer",),
+)
+_VIEW_REF = ObjectRef(
+    kind=ObjectKind.VIEW,
+    qname=QualifiedName(namespace="public", name="active_users"),
 )
 
 
@@ -187,6 +196,10 @@ def _function(
         definition=f"CREATE OR REPLACE FUNCTION public.sample(integer) AS $$ {body} $$",
         owner="app_owner",
     )
+
+
+def _view(*, definition: str = "SELECT id FROM public.users") -> View:
+    return View(ref=_VIEW_REF, columns=(("id", "integer"),), definition=definition)
 
 
 def _add_constraint(table_ref: ObjectRef, constraint: Constraint) -> AddConstraint:
@@ -284,6 +297,36 @@ RISK_CASES = (
     ),
     pytest.param(
         DropTable(target=_TABLE_REF, table=_table()), RiskLevel.DESTRUCTIVE, id="drop-table"
+    ),
+    pytest.param(CreateView(target=_VIEW_REF, view=_view()), RiskLevel.SAFE, id="create-view"),
+    pytest.param(DropView(target=_VIEW_REF, view=_view()), RiskLevel.DESTRUCTIVE, id="drop-view"),
+    pytest.param(
+        ReplaceView(
+            target=_VIEW_REF,
+            old_view=_view(),
+            new_view=_view(definition="SELECT id + 1 AS id FROM public.users"),
+        ),
+        RiskLevel.DANGEROUS,
+        id="replace-view",
+    ),
+    pytest.param(
+        ReplaceView(
+            target=_VIEW_REF,
+            old_view=_view(),
+            new_view=View(
+                ref=_VIEW_REF,
+                columns=(("name", "text"),),
+                definition="SELECT name FROM public.users",
+            ),
+            incompatible=True,
+        ),
+        RiskLevel.BLOCKED,
+        id="incompatible-view-replacement",
+    ),
+    pytest.param(
+        AlterViewOwner(target=_VIEW_REF, view=_view(), new_owner="app_owner"),
+        RiskLevel.DANGEROUS,
+        id="alter-view-owner",
     ),
     pytest.param(
         RenameTable(

@@ -12,7 +12,12 @@ from pgschemadiff.application.migration.apply import ApplyResult, apply_migratio
 from pgschemadiff.application.migration.bundle import load_bundle
 from pgschemadiff.application.migration.generate import generate_migration
 from pgschemadiff.application.sql_emit.risk import RiskLevel, classify_risk
-from pgschemadiff.domain.delta import AlterSequenceOptions, CreateSequence, CreateTable
+from pgschemadiff.domain.delta import (
+    AlterSequenceOptions,
+    CreateSequence,
+    CreateTable,
+    ReplaceView,
+)
 from pgschemadiff.infrastructure.fs.bundle_reader import FilesystemBundleReader
 from pgschemadiff.infrastructure.fs.migration_writer import FilesystemMigrationWriter
 from pgschemadiff.infrastructure.postgres.applier import open_executor
@@ -665,6 +670,68 @@ def _seed(dsn: str, statements: list[str]) -> None:
             ],
         ),
         pytest.param(
+            "create-view",
+            [_APP, _ITEMS],
+            [_APP, _ITEMS, "CREATE VIEW app.active_items AS SELECT id FROM app.items"],
+        ),
+        pytest.param(
+            "replace-view-definition",
+            [
+                _APP,
+                _ITEMS,
+                "CREATE VIEW app.active_items AS SELECT id FROM app.items",
+            ],
+            [
+                _APP,
+                _ITEMS,
+                "CREATE VIEW app.active_items AS SELECT id + 1 AS id FROM app.items",
+            ],
+        ),
+        pytest.param(
+            "append-view-output-column",
+            [
+                _APP,
+                _ITEMS,
+                "CREATE VIEW app.item_values AS SELECT id FROM app.items",
+            ],
+            [
+                _APP,
+                _ITEMS,
+                "CREATE VIEW app.item_values AS SELECT id, value FROM app.items",
+            ],
+        ),
+        pytest.param(
+            "view-options-and-check-option",
+            [_APP, _ITEMS],
+            [
+                _APP,
+                _ITEMS,
+                "CREATE VIEW app.positive_items WITH "
+                "(security_barrier = true, security_invoker = true) AS "
+                "SELECT id FROM app.items WHERE id > 0 WITH LOCAL CHECK OPTION",
+            ],
+        ),
+        pytest.param(
+            "drop-dependent-view-chain",
+            [
+                _APP,
+                _ITEMS,
+                "CREATE VIEW app.item_ids AS SELECT id FROM app.items",
+                "CREATE VIEW app.nested_item_ids AS SELECT id FROM app.item_ids",
+            ],
+            [_APP, _ITEMS],
+        ),
+        pytest.param(
+            "quoted-mixed-case-view-chain",
+            [_APP],
+            [
+                _APP,
+                'CREATE TABLE app."MixedCase" ("select" integer)',
+                'CREATE VIEW app."MixedView" AS SELECT "select" FROM app."MixedCase"',
+                'CREATE VIEW app."Dependent View" AS SELECT "select" FROM app."MixedView"',
+            ],
+        ),
+        pytest.param(
             "unlogged-table-persistence",
             [_APP, "CREATE TABLE app.items (id integer)"],
             [
@@ -792,6 +859,44 @@ async def test_unsupported_procedure_changes_fail_risk_gate_before_emission(
     delta_set = await compare_urls(pg_test_dsn, pg_test_dsn2, schemas=None)
 
     assert any(classify_risk(delta).level is RiskLevel.BLOCKED for delta in delta_set)
+    with pytest.raises(RiskGateError):
+        generate_migration(delta_set, max_risk=RiskLevel.DESTRUCTIVE)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("current_view", "desired_view"),
+    [
+        pytest.param(
+            "CREATE VIEW app.item_view AS SELECT id, value FROM app.items",
+            "CREATE VIEW app.item_view AS SELECT id, value AS label FROM app.items",
+            id="renamed-output-column",
+        ),
+        pytest.param(
+            "CREATE VIEW app.item_view AS SELECT id, value FROM app.items",
+            "CREATE VIEW app.item_view AS SELECT value, id FROM app.items",
+            id="reordered-output-columns",
+        ),
+        pytest.param(
+            "CREATE VIEW app.item_view AS SELECT id FROM app.items",
+            "CREATE VIEW app.item_view AS SELECT id::text AS id FROM app.items",
+            id="changed-output-type",
+        ),
+    ],
+)
+async def test_incompatible_view_changes_fail_risk_gate_before_emission(
+    current_view: str,
+    desired_view: str,
+    pg_test_dsn: str,
+    pg_test_dsn2: str,
+) -> None:
+    common = [_APP, _ITEMS]
+    _seed(pg_test_dsn, [*common, current_view])
+    _seed(pg_test_dsn2, [*common, desired_view])
+
+    delta_set = await compare_urls(pg_test_dsn, pg_test_dsn2, schemas=None)
+
+    assert any(isinstance(delta, ReplaceView) and delta.incompatible for delta in delta_set)
     with pytest.raises(RiskGateError):
         generate_migration(delta_set, max_risk=RiskLevel.DESTRUCTIVE)
 

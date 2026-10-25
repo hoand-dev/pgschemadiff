@@ -50,6 +50,7 @@ from pgschemadiff.domain.table import (
     PartitionStrategy,
     Table,
 )
+from pgschemadiff.domain.view import View
 from pgschemadiff.infrastructure.postgres.type_normalizer import normalize_type
 from pgschemadiff.shared.errors import InspectionError
 
@@ -91,6 +92,8 @@ _SQL_TYPE_PREREQUISITES: str = _load_sql("type_prerequisites.sql")
 _SQL_SEQUENCES: str = _load_sql("sequences.sql")
 _SQL_SEQUENCE_PREREQUISITES: str = _load_sql("sequence_prerequisites.sql")
 _SQL_ROUTINES: str = _load_sql("routines.sql")
+_SQL_VIEWS: str = _load_sql("views.sql")
+_SQL_VIEW_PREREQUISITES: str = _load_sql("view_prerequisites.sql")
 
 # ---------------------------------------------------------------------------
 # Regex helpers for parsing pg_get_constraintdef output
@@ -641,6 +644,12 @@ class PgCatalogInspector:
 
                     await cur.execute(_SQL_ROUTINES)
                     routines_rows = await cur.fetchall()
+
+                    await cur.execute(_SQL_VIEWS)
+                    views_rows = await cur.fetchall()
+
+                    await cur.execute(_SQL_VIEW_PREREQUISITES)
+                    view_prerequisites_rows = await cur.fetchall()
             finally:
                 await conn.execute("ROLLBACK")
 
@@ -658,6 +667,8 @@ class PgCatalogInspector:
             sequences_rows=sequences_rows,
             sequence_prerequisites_rows=sequence_prerequisites_rows,
             routines_rows=routines_rows,
+            views_rows=views_rows,
+            view_prerequisites_rows=view_prerequisites_rows,
         )
 
     def _assemble(
@@ -676,6 +687,8 @@ class PgCatalogInspector:
         sequences_rows: list[Any] | None = None,
         sequence_prerequisites_rows: list[Any] | None = None,
         routines_rows: list[Any] | None = None,
+        views_rows: list[Any] | None = None,
+        view_prerequisites_rows: list[Any] | None = None,
     ) -> Database:
         """Assemble domain objects from raw catalog rows."""
         extensions = self._build_extensions(extensions_rows)
@@ -712,6 +725,10 @@ class PgCatalogInspector:
         procedures_by_schema = self._group_procedures(
             routines_rows or [], allowed, prerequisites_by_object
         )
+        view_prerequisites_by_view = self._group_view_prerequisites(
+            view_prerequisites_rows or [], allowed
+        )
+        views_by_schema = self._group_views(views_rows or [], allowed, view_prerequisites_by_view)
 
         tables_by_schema, idxs_by_schema = self._build_tables(
             tables_rows,
@@ -736,6 +753,7 @@ class PgCatalogInspector:
                     sequences_by_schema,
                     functions_by_schema,
                     procedures_by_schema,
+                    views_by_schema,
                 )
             ),
             extensions=tuple(extensions),
@@ -868,6 +886,137 @@ class PgCatalogInspector:
             result.setdefault(row.schema_name, []).append(enum)
         for enums in result.values():
             enums.sort(key=lambda enum: enum.ref.qname.name)
+        return result
+
+    @staticmethod
+    def _group_view_prerequisites(
+        rows: list[Any],
+        allowed: set[str] | None,
+    ) -> dict[tuple[str, str], list[ObjectRef]]:
+        supported_kinds = {
+            ObjectKind.TABLE,
+            ObjectKind.VIEW,
+            ObjectKind.FUNCTION,
+            ObjectKind.PROCEDURE,
+            ObjectKind.ENUM,
+            ObjectKind.COMPOSITE_TYPE,
+            ObjectKind.DOMAIN_TYPE,
+        }
+        routine_kinds = {ObjectKind.FUNCTION, ObjectKind.PROCEDURE}
+        grouped: dict[tuple[str, str], set[ObjectRef]] = {}
+        for row in rows:
+            if allowed is not None and row.dependent_schema not in allowed:
+                continue
+            try:
+                kind = ObjectKind(row.prerequisite_kind)
+            except ValueError as error:
+                raise InspectionError(
+                    f"View {row.dependent_schema}.{row.dependent_name} has unsupported "
+                    f"prerequisite kind {row.prerequisite_kind!r}"
+                ) from error
+            if kind not in supported_kinds:
+                raise InspectionError(f"Unsupported view prerequisite kind {kind!r}")
+            raw_signature = row.prerequisite_signature
+            if kind in routine_kinds:
+                if raw_signature is None:
+                    raise InspectionError(
+                        f"View prerequisite routine {row.prerequisite_schema}."
+                        f"{row.prerequisite_name} has no overload signature"
+                    )
+                signature = tuple(raw_signature)
+            else:
+                if raw_signature is not None:
+                    raise InspectionError(
+                        f"Non-routine view prerequisite {row.prerequisite_schema}."
+                        f"{row.prerequisite_name} has an overload signature"
+                    )
+                signature = None
+            ref = ObjectRef(
+                kind=kind,
+                qname=QualifiedName(
+                    namespace=row.prerequisite_schema,
+                    name=row.prerequisite_name,
+                ),
+                arg_signature=signature,
+            )
+            grouped.setdefault((row.dependent_schema, row.dependent_name), set()).add(ref)
+        return {
+            key: sorted(
+                refs,
+                key=lambda ref: (
+                    ref.kind.value,
+                    ref.qname.namespace,
+                    ref.qname.name,
+                    ref.arg_signature or (),
+                ),
+            )
+            for key, refs in grouped.items()
+        }
+
+    @staticmethod
+    def _group_views(
+        rows: list[Any],
+        allowed: set[str] | None,
+        prerequisites: dict[tuple[str, str], list[ObjectRef]],
+    ) -> dict[str, list[View]]:
+        metadata: dict[tuple[str, str], tuple[Any, ...]] = {}
+        columns: dict[tuple[str, str], list[tuple[int, str, str]]] = {}
+        for row in rows:
+            schema_name = row.schema_name
+            if allowed is not None and schema_name not in allowed:
+                continue
+            key = (schema_name, row.view_name)
+            current_metadata = (
+                row.definition,
+                row.check_option,
+                row.security_barrier,
+                row.security_invoker,
+                row.owner,
+            )
+            previous_metadata = metadata.setdefault(key, current_metadata)
+            if previous_metadata != current_metadata:
+                raise InspectionError(
+                    f"View {schema_name}.{row.view_name} has inconsistent catalog metadata"
+                )
+            if (
+                row.column_position is None
+                or not isinstance(row.column_name, str)
+                or not row.column_name
+                or not isinstance(row.column_type, str)
+                or not row.column_type.strip()
+            ):
+                raise InspectionError(
+                    f"View {schema_name}.{row.view_name} has incomplete output-column metadata"
+                )
+            columns.setdefault(key, []).append(
+                (int(row.column_position), row.column_name, row.column_type)
+            )
+
+        result: dict[str, list[View]] = {}
+        for (schema_name, view_name), metadata_values in metadata.items():
+            view_columns = sorted(columns[(schema_name, view_name)], key=lambda item: item[0])
+            positions = [position for position, _, _ in view_columns]
+            if len(positions) != len(set(positions)):
+                raise InspectionError(
+                    f"View {schema_name}.{view_name} has duplicate column positions"
+                )
+            definition, check_option, security_barrier, security_invoker, owner = metadata_values
+            view = View(
+                ref=ObjectRef(
+                    kind=ObjectKind.VIEW,
+                    qname=QualifiedName(namespace=schema_name, name=view_name),
+                ),
+                columns=tuple((name, data_type) for _, name, data_type in view_columns),
+                definition=definition,
+                check_option=check_option,
+                security_barrier=security_barrier,
+                security_invoker=security_invoker,
+                owner=owner,
+                prerequisites=tuple(prerequisites.get((schema_name, view_name), ())),
+            )
+            result.setdefault(schema_name, []).append(view)
+        for views in result.values():
+            views.sort(key=lambda view: view.ref.qname.name)
         return result
 
     @staticmethod
@@ -1322,6 +1471,7 @@ class PgCatalogInspector:
         sequences_by_schema: dict[str, list[Sequence]],
         functions_by_schema: dict[str, list[Function]],
         procedures_by_schema: dict[str, list[Procedure]],
+        views_by_schema: dict[str, list[View]],
     ) -> list[Schema]:
         result: list[Schema] = []
         for name in schema_names:
@@ -1341,6 +1491,7 @@ class PgCatalogInspector:
                     sequences=tuple(sequences_by_schema.get(name, [])),
                     functions=tuple(functions_by_schema.get(name, [])),
                     procedures=tuple(procedures_by_schema.get(name, [])),
+                    views=tuple(views_by_schema.get(name, [])),
                     comment=row.comment,
                 )
             )

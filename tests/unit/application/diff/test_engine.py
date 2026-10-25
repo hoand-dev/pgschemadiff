@@ -271,7 +271,7 @@ def test_engine_duplicate_kind_error_names_the_kind() -> None:
 @pytest.mark.unit
 def test_engine_rejects_comparator_without_fetcher() -> None:
     with pytest.raises(DiffError, match="No object fetcher registered"):
-        DiffEngine(comparators=[_RecordingComparator(kind=ObjectKind.VIEW)])
+        DiffEngine(comparators=[_RecordingComparator(kind=ObjectKind.MATERIALIZED_VIEW)])
 
 
 # ---------------------------------------------------------------------------
@@ -725,7 +725,7 @@ def test_fetch_unregistered_kind_raises_diff_error() -> None:
     db = _make_db(schemas=(_make_schema("public"),))
 
     with pytest.raises(DiffError, match="No object fetcher registered"):
-        _fetch_objects_for_kind(db, ObjectKind.VIEW)
+        _fetch_objects_for_kind(db, ObjectKind.MATERIALIZED_VIEW)
 
 
 @pytest.mark.unit

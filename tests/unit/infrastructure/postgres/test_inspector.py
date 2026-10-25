@@ -42,6 +42,7 @@ from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import IndexMethod, NullsOrder, SortOrder
 from pgschemadiff.domain.ports import SchemaInspector
 from pgschemadiff.domain.table import PartitionStrategy
+from pgschemadiff.domain.view import View
 from pgschemadiff.infrastructure.postgres.inspector import (
     PgCatalogInspector,
     _build_partition_info,
@@ -214,6 +215,32 @@ _SequencePrerequisiteRow = namedtuple(
         "dependent_column",
         "sequence_schema",
         "sequence_name",
+    ],
+)
+_ViewRow = namedtuple(
+    "_ViewRow",
+    [
+        "schema_name",
+        "view_name",
+        "definition",
+        "check_option",
+        "security_barrier",
+        "security_invoker",
+        "owner",
+        "column_position",
+        "column_name",
+        "column_type",
+    ],
+)
+_ViewPrerequisiteRow = namedtuple(
+    "_ViewPrerequisiteRow",
+    [
+        "dependent_schema",
+        "dependent_name",
+        "prerequisite_kind",
+        "prerequisite_schema",
+        "prerequisite_name",
+        "prerequisite_signature",
     ],
 )
 _FunctionRow = namedtuple(
@@ -535,6 +562,52 @@ def _make_sequence_prerequisite_row(
     )
 
 
+def _make_view_row(
+    schema: str = "public",
+    name: str = "items_view",
+    *,
+    position: int = 1,
+    column: str = "id",
+    data_type: str = "integer",
+    definition: str = "SELECT items.id FROM public.items",
+    check_option: str = "none",
+    security_barrier: bool = False,
+    security_invoker: bool = False,
+    owner: str | None = "postgres",
+) -> Any:
+    return _ViewRow(
+        schema,
+        name,
+        definition,
+        check_option,
+        security_barrier,
+        security_invoker,
+        owner,
+        position,
+        column,
+        data_type,
+    )
+
+
+def _make_view_prerequisite_row(
+    kind: str,
+    name: str,
+    *,
+    schema: str = "public",
+    dependent_schema: str = "public",
+    dependent_name: str = "items_view",
+    signature: tuple[str, ...] | None = None,
+) -> Any:
+    return _ViewPrerequisiteRow(
+        dependent_schema,
+        dependent_name,
+        kind,
+        schema,
+        name,
+        signature,
+    )
+
+
 def _make_composite_type_row(
     schema: str = "public",
     name: str = "address",
@@ -597,6 +670,8 @@ def _build_mock_pool(
     sequences_rows: list[Any] | None = None,
     sequence_prerequisites_rows: list[Any] | None = None,
     routines_rows: list[Any] | None = None,
+    views_rows: list[Any] | None = None,
+    view_prerequisites_rows: list[Any] | None = None,
 ) -> MagicMock:
     """Build a mock Pool that yields a mocked psycopg connection.
 
@@ -616,6 +691,8 @@ def _build_mock_pool(
         sequences_rows or [],
         sequence_prerequisites_rows or [],
         routines_rows or [],
+        views_rows or [],
+        view_prerequisites_rows or [],
     ]
 
     cur = AsyncMock()
@@ -666,7 +743,7 @@ def test_inspector_is_importable() -> None:
 
 
 @pytest.mark.unit
-async def test_inspect_calls_all_thirteen_queries() -> None:
+async def test_inspect_calls_all_fifteen_queries() -> None:
     """inspect() must execute one query per catalog file."""
     pool = _build_mock_pool(
         schemas_rows=[_SchemaRow("public")],
@@ -681,7 +758,7 @@ async def test_inspect_calls_all_thirteen_queries() -> None:
 
     # fetchall should have been called once per catalog SQL file.
     cur = pool.acquire.return_value.__aenter__.return_value.cursor.return_value
-    assert cur.fetchall.call_count == 13
+    assert cur.fetchall.call_count == 15
     assert isinstance(result, Database)
 
 
@@ -723,7 +800,7 @@ async def test_inspect_sets_local_search_path_before_catalog_queries() -> None:
     assert [mock_call[0] for mock_call in statements] == [
         "execute",
         "execute",
-        *("catalog_cursor.execute" for _ in range(13)),
+        *("catalog_cursor.execute" for _ in range(15)),
         "execute",
     ]
     assert statements[0].args == ("BEGIN ISOLATION LEVEL REPEATABLE READ",)
@@ -1984,3 +2061,82 @@ async def test_inspect_database_is_frozen() -> None:
 
     with pytest.raises((TypeError, AttributeError, ValidationError)):
         db.name = "should_not_work"  # type: ignore[misc]
+
+
+@pytest.mark.unit
+async def test_inspect_maps_view_columns_options_prerequisites_and_schema_filter() -> None:
+    pool = _build_mock_pool(
+        schemas_rows=[_SchemaRow("public"), _SchemaRow("audit")],
+        views_rows=[
+            _make_view_row("audit", "hidden"),
+            _make_view_row(
+                "public",
+                "MixedView",
+                position=2,
+                column="label",
+                data_type="text",
+                definition='SELECT "MixedCase"."select" FROM public."MixedCase"',
+                check_option="local",
+                security_barrier=True,
+                security_invoker=True,
+                owner="view_owner",
+            ),
+            _make_view_row(
+                "public",
+                "MixedView",
+                position=1,
+                column="select",
+                data_type="integer",
+                definition='SELECT "MixedCase"."select" FROM public."MixedCase"',
+                check_option="local",
+                security_barrier=True,
+                security_invoker=True,
+                owner="view_owner",
+            ),
+        ],
+        view_prerequisites_rows=[
+            _make_view_prerequisite_row("table", "MixedCase", dependent_name="MixedView"),
+            _make_view_prerequisite_row("view", "source_view", dependent_name="MixedView"),
+            _make_view_prerequisite_row(
+                "function", "normalize", dependent_name="MixedView", signature=("text",)
+            ),
+            _make_view_prerequisite_row("enum", "mood", schema="types", dependent_name="MixedView"),
+            _make_view_prerequisite_row(
+                "table", "hidden", dependent_schema="audit", dependent_name="hidden"
+            ),
+        ],
+    )
+
+    database = await PgCatalogInspector(pool, schemas=["public"]).inspect()
+
+    assert [schema.name for schema in database.schemas] == ["public"]
+    assert len(database.all_views()) == 1
+    view = database.all_views()[0]
+    assert isinstance(view, View)
+    assert view.columns == (("select", "integer"), ("label", "text"))
+    assert view.definition == 'SELECT "MixedCase"."select" FROM public."MixedCase"'
+    assert (view.check_option, view.security_barrier, view.security_invoker, view.owner) == (
+        "local",
+        True,
+        True,
+        "view_owner",
+    )
+    assert view.prerequisites == tuple(
+        sorted(
+            view.prerequisites,
+            key=lambda ref: (
+                ref.kind.value,
+                ref.qname.namespace,
+                ref.qname.name,
+                ref.arg_signature or (),
+            ),
+        )
+    )
+    assert {(ref.kind, ref.qname.namespace, ref.qname.name) for ref in view.prerequisites} == {
+        (ObjectKind.TABLE, "public", "MixedCase"),
+        (ObjectKind.VIEW, "public", "source_view"),
+        (ObjectKind.FUNCTION, "public", "normalize"),
+        (ObjectKind.ENUM, "types", "mood"),
+    }
+    function_ref = next(ref for ref in view.prerequisites if ref.kind is ObjectKind.FUNCTION)
+    assert function_ref.arg_signature == ("text",)

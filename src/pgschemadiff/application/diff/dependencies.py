@@ -58,12 +58,14 @@ from pgschemadiff.domain.delta.sequence import (
     DropSequence,
 )
 from pgschemadiff.domain.delta.table import AlterTableAttrs, CreateTable, DropTable, RenameTable
+from pgschemadiff.domain.delta.view import CreateView, DropView, ReplaceView
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
     from pgschemadiff.domain.index import Index
+    from pgschemadiff.domain.view import View
 
 
 def order_deltas(delta_set: DeltaSet) -> DeltaSet:
@@ -134,6 +136,8 @@ def _add_enum_dependencies(
                 ReplaceFunction,
                 CreateProcedure,
                 ReplaceProcedure,
+                CreateView,
+                ReplaceView,
             ),
         )
     )
@@ -187,6 +191,8 @@ def _add_enum_drop_dependencies(
                 ReplaceFunction,
                 DropProcedure,
                 ReplaceProcedure,
+                DropView,
+                ReplaceView,
             ),
         )
     )
@@ -221,6 +227,7 @@ def _collect_resources(
                 CreateSequence,
                 CreateFunction,
                 CreateProcedure,
+                CreateView,
                 AddColumn,
                 AddConstraint,
             ),
@@ -241,10 +248,11 @@ def _collect_resources(
                 DropSequence,
                 DropFunction,
                 DropProcedure,
+                DropView,
             ),
         ):
             drops[delta.target].append(delta)
-        elif isinstance(delta, (ReplaceFunction, ReplaceProcedure)):
+        elif isinstance(delta, (ReplaceFunction, ReplaceProcedure, ReplaceView)):
             creates[delta.target].append(delta)
             drops[delta.target].append(delta)
     return creates, drops, schema_creates
@@ -288,6 +296,10 @@ def _add_create_dependencies(
                 _add_create_prerequisites(delta, (parent_ref,), creates, add)
         elif isinstance(delta, SetColumnDefault):
             _add_create_prerequisites(delta, delta.new_sequence_prerequisites, creates, add)
+        elif isinstance(delta, CreateView):
+            _add_view_create_dependencies(delta, delta.view, nodes, creates, add)
+        elif isinstance(delta, ReplaceView):
+            _add_view_create_dependencies(delta, delta.new_view, nodes, creates, add)
 
     _add_sequence_dependencies(nodes, creates, add)
     _add_composite_create_dependencies(nodes, creates, add)
@@ -298,6 +310,14 @@ def _add_create_dependencies(
     _add_fk_unique_dependencies(nodes, add)
     _add_constraint_identity_dependencies(nodes, add)
 
+    _add_schema_create_dependencies(nodes, schema_creates, add)
+
+
+def _add_schema_create_dependencies(
+    nodes: tuple[DeltaBase, ...],
+    schema_creates: dict[str, list[DeltaBase]],
+    add: Callable[[DeltaBase, DeltaBase], None],
+) -> None:
     for delta in nodes:
         if delta.op is DeltaOp.CREATE and delta.target.kind not in {
             ObjectKind.SCHEMA,
@@ -497,6 +517,20 @@ def _add_index_create_dependencies(
             _add_create_prerequisites(delta, _index_refs(delta.new_index), creates, add)
 
 
+def _add_view_create_dependencies(
+    delta: CreateView | ReplaceView,
+    view: View,
+    nodes: tuple[DeltaBase, ...],
+    creates: dict[ObjectRef, list[DeltaBase]],
+    add: Callable[[DeltaBase, DeltaBase], None],
+) -> None:
+    _add_create_prerequisites(delta, view.prerequisites, creates, add)
+    table_refs = {ref for ref in view.prerequisites if ref.kind is ObjectKind.TABLE}
+    for prerequisite in nodes:
+        if isinstance(prerequisite, AddColumn) and prerequisite.target.parent in table_refs:
+            add(prerequisite, delta)
+
+
 def _add_fk_unique_dependencies(
     nodes: tuple[DeltaBase, ...],
     add: Callable[[DeltaBase, DeltaBase], None],
@@ -642,20 +676,32 @@ def _add_drop_dependencies(
         elif isinstance(delta, ReplaceIndex):
             _add_drop_prerequisites(delta, _index_refs(delta.old_index), drops, add)
         elif isinstance(delta, DropTable):
-            sequence_prerequisites = tuple(
-                ref for column in delta.table.columns for ref in column.sequence_prerequisites
-            )
-            _add_drop_prerequisites(
-                delta,
-                (*delta.table.type_prerequisites, *sequence_prerequisites),
-                drops,
-                add,
-            )
-            for constraint in delta.table.constraints:
-                if isinstance(constraint, ForeignKeyConstraint):
-                    _add_drop_prerequisites(delta, _fk_remote_refs(constraint), drops, add)
+            _add_table_drop_dependencies(delta, drops, add)
+        elif isinstance(delta, DropView):
+            _add_view_drop_dependencies(delta, delta.view, nodes, drops, add)
+        elif isinstance(delta, ReplaceView):
+            _add_view_drop_dependencies(delta, delta.old_view, nodes, drops, add)
 
     _add_sequence_drop_dependencies(nodes, drops, add)
+
+
+def _add_table_drop_dependencies(
+    delta: DropTable,
+    drops: dict[ObjectRef, list[DeltaBase]],
+    add: Callable[[DeltaBase, DeltaBase], None],
+) -> None:
+    sequence_prerequisites = tuple(
+        ref for column in delta.table.columns for ref in column.sequence_prerequisites
+    )
+    _add_drop_prerequisites(
+        delta,
+        (*delta.table.type_prerequisites, *sequence_prerequisites),
+        drops,
+        add,
+    )
+    for constraint in delta.table.constraints:
+        if isinstance(constraint, ForeignKeyConstraint):
+            _add_drop_prerequisites(delta, _fk_remote_refs(constraint), drops, add)
 
 
 def _routine_type_prerequisites(
@@ -681,6 +727,20 @@ def _add_sequence_drop_dependencies(
             and delta.old_owned_by is not None
         ):
             _add_drop_prerequisites(delta, (delta.old_owned_by,), drops, add)
+
+
+def _add_view_drop_dependencies(
+    delta: DropView | ReplaceView,
+    view: View,
+    nodes: tuple[DeltaBase, ...],
+    drops: dict[ObjectRef, list[DeltaBase]],
+    add: Callable[[DeltaBase, DeltaBase], None],
+) -> None:
+    _add_drop_prerequisites(delta, view.prerequisites, drops, add)
+    table_refs = {ref for ref in view.prerequisites if ref.kind is ObjectKind.TABLE}
+    for dependent in nodes:
+        if isinstance(dependent, DropColumn) and dependent.target.parent in table_refs:
+            add(delta, dependent)
 
 
 def _add_constraint_drop_dependencies(
@@ -826,6 +886,19 @@ def _referenced_tables(delta: DeltaBase) -> set[QualifiedName]:
     for constraint in constraints:
         if isinstance(constraint, ForeignKeyConstraint):
             refs.add(QualifiedName(namespace=constraint.ref_namespace, name=constraint.ref_table))
+    views: tuple[View, ...]
+    if isinstance(delta, CreateView | DropView):
+        views = (delta.view,)
+    elif isinstance(delta, ReplaceView):
+        views = (delta.old_view, delta.new_view)
+    else:
+        views = ()
+    refs.update(
+        prerequisite.qname
+        for view in views
+        for prerequisite in view.prerequisites
+        if prerequisite.kind is ObjectKind.TABLE
+    )
     return refs
 
 
