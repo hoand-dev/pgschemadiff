@@ -75,6 +75,7 @@ _OBJECT_FETCHERS: dict[ObjectKind, _ObjectFetcher] = {
     ObjectKind.COMPOSITE_TYPE: lambda db: db.all_composite_types(),
     ObjectKind.DOMAIN_TYPE: lambda db: db.all_domain_types(),
     ObjectKind.SEQUENCE: lambda db: db.all_sequences(),
+    ObjectKind.FUNCTION: lambda db: db.all_functions(),
     ObjectKind.TABLE: lambda db: db.all_tables(),
     ObjectKind.INDEX: lambda db: db.all_indexes(),
 }

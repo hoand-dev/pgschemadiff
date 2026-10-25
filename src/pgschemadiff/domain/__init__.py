@@ -18,6 +18,7 @@ from pgschemadiff.domain.database import Database
 from pgschemadiff.domain.domain_type import DomainCheck, DomainType
 from pgschemadiff.domain.enum_type import EnumType
 from pgschemadiff.domain.extension import Extension
+from pgschemadiff.domain.function import Function, FunctionArgument
 from pgschemadiff.domain.identity import (
     SUB_OBJECT_KINDS,
     ObjectKind,
@@ -59,6 +60,8 @@ __all__ = [
     "FKAction",
     "FKMatch",
     "ForeignKeyConstraint",
+    "Function",
+    "FunctionArgument",
     "GeneratedTiming",
     "IdentitySpec",
     "Index",

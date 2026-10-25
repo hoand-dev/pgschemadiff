@@ -35,6 +35,7 @@ from pgschemadiff.domain.delta import (
     AlterDomainNullability,
     AlterEnumAttrs,
     AlterExtension,
+    AlterFunctionOwner,
     AlterSequenceOptions,
     AlterSequenceOwnedBy,
     AlterSequenceOwner,
@@ -43,6 +44,7 @@ from pgschemadiff.domain.delta import (
     CreateDomain,
     CreateEnum,
     CreateExtension,
+    CreateFunction,
     CreateIndex,
     CreateSchema,
     CreateSequence,
@@ -56,6 +58,7 @@ from pgschemadiff.domain.delta import (
     DropDomainCheck,
     DropEnum,
     DropExtension,
+    DropFunction,
     DropIndex,
     DropSchema,
     DropSequence,
@@ -65,6 +68,7 @@ from pgschemadiff.domain.delta import (
     ReplaceCompositeType,
     ReplaceDomainType,
     ReplaceEnumLabels,
+    ReplaceFunction,
     ReplaceIndex,
     SetColumnDefault,
     SetColumnNullability,
@@ -73,6 +77,7 @@ from pgschemadiff.domain.delta import (
 from pgschemadiff.domain.domain_type import DomainCheck, DomainType
 from pgschemadiff.domain.enum_type import EnumType
 from pgschemadiff.domain.extension import Extension
+from pgschemadiff.domain.function import Function, FunctionArgument
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index, IndexKeyColumn, IndexMethod
 from pgschemadiff.domain.schema import Schema
@@ -117,6 +122,11 @@ _SEQUENCE_REF = ObjectRef(
     kind=ObjectKind.SEQUENCE,
     qname=QualifiedName(namespace="public", name="users_id_seq"),
 )
+_FUNCTION_REF = ObjectRef(
+    kind=ObjectKind.FUNCTION,
+    qname=QualifiedName(namespace="public", name="sample"),
+    arg_signature=("integer",),
+)
 
 
 def _table(*, partition_of: PartitionOf | None = None, unlogged: bool = False) -> Table:
@@ -151,6 +161,31 @@ def _sequence(*, owned_by: ObjectRef | None = None) -> Sequence:
         cycle=False,
         owner="app_owner",
         owned_by=owned_by,
+    )
+
+
+def _function(
+    *,
+    body: str = "SELECT 1",
+    language: str = "sql",
+    security_definer: bool = False,
+    return_type: str = "integer",
+) -> Function:
+    return Function(
+        ref=_FUNCTION_REF,
+        arguments=(FunctionArgument(name="value", data_type="integer"),),
+        return_type=return_type,
+        language=language,
+        volatility="immutable",
+        strict=False,
+        security_definer=security_definer,
+        leakproof=False,
+        parallel="unsafe",
+        cost=100,
+        rows=0,
+        body=body,
+        definition=f"CREATE OR REPLACE FUNCTION public.sample(integer) AS $$ {body} $$",
+        owner="app_owner",
     )
 
 
@@ -679,6 +714,34 @@ RISK_CASES = (
         RiskLevel.WARNING,
         id="alter-sequence-owned-by",
     ),
+    pytest.param(
+        CreateFunction(target=_FUNCTION_REF, function=_function()),
+        RiskLevel.WARNING,
+        id="create-function",
+    ),
+    pytest.param(
+        DropFunction(target=_FUNCTION_REF, function=_function()),
+        RiskLevel.DESTRUCTIVE,
+        id="drop-function",
+    ),
+    pytest.param(
+        ReplaceFunction(
+            target=_FUNCTION_REF,
+            old_function=_function(),
+            new_function=_function(body="SELECT 2"),
+        ),
+        RiskLevel.DANGEROUS,
+        id="replace-function",
+    ),
+    pytest.param(
+        AlterFunctionOwner(
+            target=_FUNCTION_REF,
+            function=_function(),
+            new_owner="other_owner",
+        ),
+        RiskLevel.DANGEROUS,
+        id="alter-function-owner",
+    ),
 )
 
 
@@ -721,6 +784,71 @@ def test_replacing_composite_layout_has_precise_blocked_reason() -> None:
     assert assessment.reason == (
         "Composite attribute reorder or middle insertion has no safe in-place DDL."
     )
+
+
+def test_new_security_definer_function_is_blocked() -> None:
+    delta = CreateFunction(
+        target=_FUNCTION_REF,
+        function=_function(security_definer=True),
+    )
+
+    assessment = classify_risk(delta)
+
+    assert assessment.level is RiskLevel.BLOCKED
+    assert "SECURITY DEFINER" in assessment.reason
+    assert not passes_risk_limit((assessment,), max_risk=RiskLevel.BLOCKED)
+
+
+def test_unsupported_function_languages_are_blocked_for_every_delta() -> None:
+    supported = _function()
+    unsupported = _function(language="c")
+    deltas = (
+        CreateFunction(target=_FUNCTION_REF, function=unsupported),
+        DropFunction(target=_FUNCTION_REF, function=unsupported),
+        ReplaceFunction(
+            target=_FUNCTION_REF,
+            old_function=supported,
+            new_function=unsupported,
+        ),
+        ReplaceFunction(
+            target=_FUNCTION_REF,
+            old_function=unsupported,
+            new_function=supported,
+        ),
+        AlterFunctionOwner(
+            target=_FUNCTION_REF,
+            function=unsupported,
+            new_owner="other_owner",
+        ),
+    )
+
+    for delta in deltas:
+        assessment = classify_risk(delta)
+        assert assessment.level is RiskLevel.BLOCKED
+        assert "sql and plpgsql" in assessment.reason
+
+
+@pytest.mark.parametrize(
+    "delta",
+    [
+        CreateFunction(target=_FUNCTION_REF, function=_function(), default_conflict=True),
+        ReplaceFunction(
+            target=_FUNCTION_REF,
+            old_function=_function(),
+            new_function=_function(body="SELECT 2"),
+            default_conflict=True,
+        ),
+        ReplaceFunction(
+            target=_FUNCTION_REF,
+            old_function=_function(),
+            new_function=_function(return_type="text"),
+            incompatible=True,
+        ),
+    ],
+    ids=("create-default-conflict", "replace-default-conflict", "incompatible-replace"),
+)
+def test_unsafe_function_delta_shapes_are_blocked(delta: DeltaBase) -> None:
+    assert classify_risk(delta).level is RiskLevel.BLOCKED
 
 
 @pytest.mark.parametrize(

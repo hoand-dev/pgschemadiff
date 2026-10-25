@@ -22,6 +22,7 @@ from pgschemadiff.domain.composite_type import CompositeType
 from pgschemadiff.domain.domain_type import DomainType
 from pgschemadiff.domain.enum_type import EnumType
 from pgschemadiff.domain.extension import Extension
+from pgschemadiff.domain.function import Function
 from pgschemadiff.domain.identity import ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index
 from pgschemadiff.domain.schema import Schema
@@ -165,6 +166,13 @@ class Database(BaseModel):
         result: list[Sequence] = []
         for schema in self.schemas:
             result.extend(schema.sequences)
+        return tuple(result)
+
+    def all_functions(self) -> tuple[Function, ...]:
+        """Return all functions across every schema."""
+        result: list[Function] = []
+        for schema in self.schemas:
+            result.extend(schema.functions)
         return tuple(result)
 
     def all_indexes(self) -> tuple[Index, ...]:

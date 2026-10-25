@@ -37,6 +37,7 @@ from pgschemadiff.domain.delta import (
     AlterDomainNullability,
     AlterEnumAttrs,
     AlterExtension,
+    AlterFunctionOwner,
     AlterSequenceOptions,
     AlterSequenceOwnedBy,
     AlterSequenceOwner,
@@ -45,6 +46,7 @@ from pgschemadiff.domain.delta import (
     CreateDomain,
     CreateEnum,
     CreateExtension,
+    CreateFunction,
     CreateIndex,
     CreateSchema,
     CreateSequence,
@@ -59,6 +61,7 @@ from pgschemadiff.domain.delta import (
     DropDomainCheck,
     DropEnum,
     DropExtension,
+    DropFunction,
     DropIndex,
     DropSchema,
     DropSequence,
@@ -68,6 +71,7 @@ from pgschemadiff.domain.delta import (
     ReplaceCompositeType,
     ReplaceDomainType,
     ReplaceEnumLabels,
+    ReplaceFunction,
     ReplaceIndex,
     SetColumnDefault,
     SetColumnNullability,
@@ -76,6 +80,7 @@ from pgschemadiff.domain.delta import (
 from pgschemadiff.domain.domain_type import DomainCheck, DomainType
 from pgschemadiff.domain.enum_type import EnumType
 from pgschemadiff.domain.extension import Extension
+from pgschemadiff.domain.function import Function, FunctionArgument
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index, IndexKeyColumn, IndexMethod, SortOrder
 from pgschemadiff.domain.schema import Schema
@@ -180,6 +185,34 @@ def _emitter_cases() -> tuple[tuple[str, Delta], ...]:
         max_value=999,
         cache=3,
         cycle=True,
+        owner='Role "Owner',
+    )
+    function_ref = ObjectRef(
+        kind=ObjectKind.FUNCTION,
+        qname=QualifiedName(namespace='App "Schema', name='sum"One'),
+        arg_signature=("integer",),
+    )
+    function_definition = (
+        'CREATE OR REPLACE FUNCTION "App ""Schema"."sum""One"('
+        "value integer DEFAULT 7) RETURNS integer LANGUAGE sql IMMUTABLE "
+        "AS $function$ SELECT value $function$"
+    )
+    function = Function(
+        ref=function_ref,
+        arguments=(FunctionArgument(name="value", data_type="integer", default_expr="7"),),
+        return_type="integer",
+        language="sql",
+        volatility="immutable",
+        strict=False,
+        security_definer=False,
+        leakproof=False,
+        parallel="unsafe",
+        cost=100,
+        rows=0,
+        default_expressions="7",
+        default_count=1,
+        body="SELECT value",
+        definition=function_definition,
         owner='Role "Owner',
     )
     empty_enum = EnumType(
@@ -353,6 +386,31 @@ def _emitter_cases() -> tuple[tuple[str, Delta], ...]:
     )
 
     return (
+        ("create function", CreateFunction(target=function_ref, function=function)),
+        ("drop function overload", DropFunction(target=function_ref, function=function)),
+        (
+            "replace function",
+            ReplaceFunction(
+                target=function_ref,
+                old_function=function,
+                new_function=function.model_copy(
+                    update={
+                        "body": "SELECT value + 1",
+                        "definition": function_definition.replace(
+                            "SELECT value", "SELECT value + 1"
+                        ),
+                    }
+                ),
+            ),
+        ),
+        (
+            "alter function owner",
+            AlterFunctionOwner(
+                target=function_ref,
+                function=function,
+                new_owner='New "Owner',
+            ),
+        ),
         ("create sequence", CreateSequence(target=sequence_ref, sequence=sequence)),
         ("drop sequence", DropSequence(target=sequence_ref, sequence=sequence)),
         (

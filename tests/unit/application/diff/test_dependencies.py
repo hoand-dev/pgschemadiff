@@ -32,6 +32,7 @@ from pgschemadiff.domain.delta.composite_type import (
 from pgschemadiff.domain.delta.constraint import AddConstraint, DropConstraint
 from pgschemadiff.domain.delta.domain_type import CreateDomain, DropDomain
 from pgschemadiff.domain.delta.enum import AddEnumValue, CreateEnum, DropEnum
+from pgschemadiff.domain.delta.function import CreateFunction, DropFunction
 from pgschemadiff.domain.delta.index import CreateIndex, DropIndex, ReplaceIndex
 from pgschemadiff.domain.delta.schema import (
     AlterExtension,
@@ -44,6 +45,7 @@ from pgschemadiff.domain.delta.table import CreateTable, DropTable, RenameTable
 from pgschemadiff.domain.domain_type import DomainType
 from pgschemadiff.domain.enum_type import EnumType
 from pgschemadiff.domain.extension import Extension
+from pgschemadiff.domain.function import Function, FunctionArgument
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index, IndexKeyColumn
 from pgschemadiff.domain.schema import Schema
@@ -278,6 +280,42 @@ def test_domain_base_type_and_domain_users_order_create_and_drop() -> None:
 
     _assert_precedes(created, create_enum, create_domain, create_table)
     _assert_precedes(dropped, drop_table, drop_domain, drop_enum)
+
+
+def test_function_signature_types_order_before_create_and_after_drop() -> None:
+    enum_ref = _ref(ObjectKind.ENUM, "state", namespace="types")
+    enum = EnumType(ref=enum_ref, labels=("ready",))
+    create_enum = CreateEnum(target=enum_ref, enum=enum)
+    drop_enum = DropEnum(target=enum_ref, enum=enum)
+    function_ref = ObjectRef(
+        kind=ObjectKind.FUNCTION,
+        qname=QualifiedName(namespace="public", name="use_state"),
+        arg_signature=("types.state",),
+    )
+    function = Function(
+        ref=function_ref,
+        arguments=(FunctionArgument(name="state", data_type="types.state"),),
+        return_type="integer",
+        language="sql",
+        volatility="immutable",
+        strict=False,
+        security_definer=False,
+        leakproof=False,
+        parallel="unsafe",
+        cost=100,
+        rows=0,
+        body="SELECT 1",
+        definition="CREATE OR REPLACE FUNCTION public.use_state(types.state) ...",
+        type_prerequisites=(enum_ref,),
+    )
+    create_function = CreateFunction(target=function_ref, function=function)
+    drop_function = DropFunction(target=function_ref, function=function)
+
+    created = order_deltas(DeltaSet.from_iterable((create_function, create_enum))).deltas
+    dropped = order_deltas(DeltaSet.from_iterable((drop_enum, drop_function))).deltas
+
+    _assert_precedes(created, create_enum, create_function)
+    _assert_precedes(dropped, drop_function, drop_enum)
 
 
 def test_domain_ordering_covers_column_add_type_change_and_removal() -> None:

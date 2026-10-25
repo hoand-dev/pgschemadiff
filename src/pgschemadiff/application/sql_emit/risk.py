@@ -20,6 +20,7 @@ from pgschemadiff.domain.delta import (
     AlterDomainNullability,
     AlterEnumAttrs,
     AlterExtension,
+    AlterFunctionOwner,
     AlterSequenceOptions,
     AlterSequenceOwnedBy,
     AlterSequenceOwner,
@@ -28,6 +29,7 @@ from pgschemadiff.domain.delta import (
     CreateDomain,
     CreateEnum,
     CreateExtension,
+    CreateFunction,
     CreateIndex,
     CreateSchema,
     CreateSequence,
@@ -40,6 +42,7 @@ from pgschemadiff.domain.delta import (
     DropDomainCheck,
     DropEnum,
     DropExtension,
+    DropFunction,
     DropIndex,
     DropSchema,
     DropSequence,
@@ -49,6 +52,7 @@ from pgschemadiff.domain.delta import (
     ReplaceCompositeType,
     ReplaceDomainType,
     ReplaceEnumLabels,
+    ReplaceFunction,
     ReplaceIndex,
     SetColumnDefault,
     SetColumnNullability,
@@ -94,8 +98,11 @@ _SUPPORTED_DELTA_TYPES: tuple[type[DeltaBase], ...] = (
     CreateSchema,
     DropSchema,
     CreateExtension,
+    CreateFunction,
     DropExtension,
+    DropFunction,
     AlterExtension,
+    AlterFunctionOwner,
     CreateTable,
     DropTable,
     RenameTable,
@@ -116,6 +123,7 @@ _SUPPORTED_DELTA_TYPES: tuple[type[DeltaBase], ...] = (
     AddEnumValue,
     AlterEnumAttrs,
     ReplaceEnumLabels,
+    ReplaceFunction,
     CreateCompositeType,
     DropCompositeType,
     AlterCompositeAddAttribute,
@@ -455,6 +463,53 @@ def classify_risk(  # noqa: PLR0912, PLR0915
             RiskLevel.BLOCKED,
             "Changing a domain base type or collation has no safe in-place DDL.",
         )
+    elif isinstance(delta, (CreateFunction, DropFunction, ReplaceFunction, AlterFunctionOwner)):
+        functions = (
+            (delta.old_function, delta.new_function)
+            if isinstance(delta, ReplaceFunction)
+            else (delta.function,)
+        )
+        unsupported = next((function for function in functions if not function.is_supported), None)
+        if unsupported is not None:
+            level, reason = (
+                RiskLevel.BLOCKED,
+                f"Function language {unsupported.language!r} is unsupported; "
+                "only sql and plpgsql are supported.",
+            )
+        elif isinstance(delta, CreateFunction) and delta.function.security_definer:
+            level, reason = (
+                RiskLevel.BLOCKED,
+                "Creating a SECURITY DEFINER function is blocked because routine ACLs "
+                "are not modeled.",
+            )
+        elif isinstance(delta, (CreateFunction, ReplaceFunction)) and delta.default_conflict:
+            level, reason = (
+                RiskLevel.BLOCKED,
+                "Function default arguments conflict with an overload and may make calls "
+                "ambiguous.",
+            )
+        elif isinstance(delta, ReplaceFunction) and delta.incompatible:
+            level, reason = (
+                RiskLevel.BLOCKED,
+                "Function return or parameter shape cannot be changed safely in place.",
+            )
+        elif isinstance(delta, CreateFunction):
+            level, reason = (
+                RiskLevel.WARNING,
+                "Creates a function and installs its executable body.",
+            )
+        elif isinstance(delta, DropFunction):
+            level, reason = RiskLevel.DESTRUCTIVE, "Removes a function and its callable behavior."
+        elif isinstance(delta, ReplaceFunction):
+            level, reason = (
+                RiskLevel.DANGEROUS,
+                "Replaces function behavior and may change runtime results.",
+            )
+        else:
+            level, reason = (
+                RiskLevel.DANGEROUS,
+                "Changes function owner, which can change effective access.",
+            )
     elif isinstance(delta, CreateSequence):
         if delta.sequence.owned_by is None:
             level, reason = RiskLevel.SAFE, "Creates an unowned sequence."

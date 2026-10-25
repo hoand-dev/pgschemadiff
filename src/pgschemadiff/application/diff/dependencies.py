@@ -40,6 +40,7 @@ from pgschemadiff.domain.delta.domain_type import (
     ValidateDomainCheck,
 )
 from pgschemadiff.domain.delta.enum import AddEnumValue, CreateEnum, DropEnum
+from pgschemadiff.domain.delta.function import CreateFunction, DropFunction, ReplaceFunction
 from pgschemadiff.domain.delta.index import CreateIndex, DropIndex, ReplaceIndex
 from pgschemadiff.domain.delta.schema import (
     AlterExtension,
@@ -126,6 +127,8 @@ def _add_enum_dependencies(
                 AlterDomainNullability,
                 AddDomainCheck,
                 ValidateDomainCheck,
+                CreateFunction,
+                ReplaceFunction,
             ),
         )
     )
@@ -175,6 +178,8 @@ def _add_enum_drop_dependencies(
                 DropIndex,
                 DropDomain,
                 DropDomainCheck,
+                DropFunction,
+                ReplaceFunction,
             ),
         )
     )
@@ -207,6 +212,7 @@ def _collect_resources(
                 CreateCompositeType,
                 CreateDomain,
                 CreateSequence,
+                CreateFunction,
                 AddColumn,
                 AddConstraint,
             ),
@@ -218,8 +224,19 @@ def _collect_resources(
                 drops[_column_ref(delta.table.ref, column.name)].append(delta)
         elif isinstance(
             delta,
-            (DropColumn, DropConstraint, DropEnum, DropCompositeType, DropDomain, DropSequence),
+            (
+                DropColumn,
+                DropConstraint,
+                DropEnum,
+                DropCompositeType,
+                DropDomain,
+                DropSequence,
+                DropFunction,
+            ),
         ):
+            drops[delta.target].append(delta)
+        elif isinstance(delta, ReplaceFunction):
+            creates[delta.target].append(delta)
             drops[delta.target].append(delta)
     return creates, drops, schema_creates
 
@@ -266,6 +283,7 @@ def _add_create_dependencies(
     _add_sequence_dependencies(nodes, creates, add)
     _add_composite_create_dependencies(nodes, creates, add)
     _add_domain_create_dependencies(nodes, creates, add)
+    _add_function_create_dependencies(nodes, creates, add)
     _add_index_create_dependencies(nodes, creates, add)
     _add_fk_unique_dependencies(nodes, add)
     _add_constraint_identity_dependencies(nodes, add)
@@ -387,6 +405,18 @@ def _add_domain_create_dependencies(
     for domain_drop in domain_drops:
         for column_removal in column_removals:
             add(column_removal, domain_drop)
+
+
+def _add_function_create_dependencies(
+    nodes: tuple[DeltaBase, ...],
+    creates: dict[ObjectRef, list[DeltaBase]],
+    add: Callable[[DeltaBase, DeltaBase], None],
+) -> None:
+    for delta in nodes:
+        if isinstance(delta, CreateFunction):
+            _add_create_prerequisites(delta, delta.function.type_prerequisites, creates, add)
+        elif isinstance(delta, ReplaceFunction):
+            _add_create_prerequisites(delta, delta.new_function.type_prerequisites, creates, add)
 
 
 def _add_index_create_dependencies(
@@ -526,14 +556,20 @@ def _add_drop_dependencies(
                 drops,
                 add,
             )
-        elif isinstance(delta, AlterCompositeDropAttribute):
-            _add_drop_prerequisites(delta, delta.type_prerequisites, drops, add)
-        elif isinstance(delta, AlterCompositeAttributeType):
-            _add_drop_prerequisites(delta, delta.old_type_prerequisites, drops, add)
+        elif isinstance(delta, (AlterCompositeDropAttribute, AlterCompositeAttributeType)):
+            refs = (
+                delta.type_prerequisites
+                if isinstance(delta, AlterCompositeDropAttribute)
+                else delta.old_type_prerequisites
+            )
+            _add_drop_prerequisites(delta, refs, drops, add)
         elif isinstance(delta, DropCompositeType):
             _add_drop_prerequisites(delta, delta.composite.type_prerequisites, drops, add)
         elif isinstance(delta, DropDomain):
             _add_drop_prerequisites(delta, delta.domain.type_prerequisites, drops, add)
+        elif isinstance(delta, (DropFunction, ReplaceFunction)):
+            function = delta.old_function if isinstance(delta, ReplaceFunction) else delta.function
+            _add_drop_prerequisites(delta, function.type_prerequisites, drops, add)
         elif isinstance(delta, DropConstraint):
             _add_constraint_drop_dependencies(delta, drops, add)
         elif isinstance(delta, DropIndex):

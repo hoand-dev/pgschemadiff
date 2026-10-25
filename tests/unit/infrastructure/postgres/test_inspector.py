@@ -185,6 +185,7 @@ _TypePrerequisiteRow = namedtuple(
         "type_kind",
         "type_schema",
         "type_name",
+        "dependent_signature",
     ],
 )
 _SequenceRow = namedtuple(
@@ -213,6 +214,35 @@ _SequencePrerequisiteRow = namedtuple(
         "dependent_column",
         "sequence_schema",
         "sequence_name",
+    ],
+)
+_FunctionRow = namedtuple(
+    "_FunctionRow",
+    [
+        "schema_name",
+        "function_name",
+        "input_types",
+        "all_argument_types",
+        "argument_modes",
+        "argument_names",
+        "default_expressions",
+        "default_count",
+        "return_type",
+        "returns_set",
+        "language",
+        "volatility",
+        "strict",
+        "security_definer",
+        "leakproof",
+        "parallel",
+        "cost",
+        "rows",
+        "support_function",
+        "transforms",
+        "config",
+        "body",
+        "definition",
+        "owner",
     ],
 )
 
@@ -366,6 +396,7 @@ def _make_type_prerequisite_row(
     dependent_schema: str | None = None,
     dependent_name: str | None = None,
     type_kind: str = "enum",
+    dependent_signature: tuple[str, ...] | None = None,
 ) -> Any:
     return _TypePrerequisiteRow(
         dependent_kind,
@@ -374,6 +405,64 @@ def _make_type_prerequisite_row(
         type_kind,
         type_schema,
         type_name,
+        dependent_signature,
+    )
+
+
+def _make_function_row(
+    schema: str = "public",
+    name: str = "lookup",
+    *,
+    input_types: tuple[str, ...] = (),
+    all_argument_types: tuple[str, ...] = (),
+    argument_modes: tuple[str, ...] | None = None,
+    argument_names: tuple[str | None, ...] | None = None,
+    default_expressions: str | None = None,
+    default_count: int = 0,
+    return_type: str = "integer",
+    returns_set: bool = False,
+    language: str = "sql",
+    volatility: str = "immutable",
+    strict: bool = False,
+    security_definer: bool = False,
+    leakproof: bool = False,
+    parallel: str = "unsafe",
+    cost: float = 100,
+    rows: float = 0,
+    support_function: str | None = None,
+    transforms: tuple[str, ...] = (),
+    config: tuple[str, ...] = (),
+    body: str = "SELECT 1",
+    definition: str | None = None,
+    owner: str | None = "postgres",
+) -> Any:
+    modes = argument_modes or tuple("i" for _ in all_argument_types)
+    names = argument_names or tuple(None for _ in all_argument_types)
+    return _FunctionRow(
+        schema,
+        name,
+        input_types,
+        all_argument_types,
+        modes,
+        names,
+        default_expressions,
+        default_count,
+        return_type,
+        returns_set,
+        language,
+        volatility,
+        strict,
+        security_definer,
+        leakproof,
+        parallel,
+        cost,
+        rows,
+        support_function,
+        transforms,
+        config,
+        body,
+        definition or f"CREATE OR REPLACE FUNCTION {schema}.{name}() RETURNS {return_type}",
+        owner,
     )
 
 
@@ -487,6 +576,7 @@ def _build_mock_pool(
     type_prerequisites_rows: list[Any] | None = None,
     sequences_rows: list[Any] | None = None,
     sequence_prerequisites_rows: list[Any] | None = None,
+    routines_rows: list[Any] | None = None,
 ) -> MagicMock:
     """Build a mock Pool that yields a mocked psycopg connection.
 
@@ -505,6 +595,7 @@ def _build_mock_pool(
         type_prerequisites_rows or [],
         sequences_rows or [],
         sequence_prerequisites_rows or [],
+        routines_rows or [],
     ]
 
     cur = AsyncMock()
@@ -555,7 +646,7 @@ def test_inspector_is_importable() -> None:
 
 
 @pytest.mark.unit
-async def test_inspect_calls_all_twelve_queries() -> None:
+async def test_inspect_calls_all_thirteen_queries() -> None:
     """inspect() must execute one query per catalog file."""
     pool = _build_mock_pool(
         schemas_rows=[_SchemaRow("public")],
@@ -570,7 +661,7 @@ async def test_inspect_calls_all_twelve_queries() -> None:
 
     # fetchall should have been called once per catalog SQL file.
     cur = pool.acquire.return_value.__aenter__.return_value.cursor.return_value
-    assert cur.fetchall.call_count == 12
+    assert cur.fetchall.call_count == 13
     assert isinstance(result, Database)
 
 
@@ -612,7 +703,7 @@ async def test_inspect_sets_local_search_path_before_catalog_queries() -> None:
     assert [mock_call[0] for mock_call in statements] == [
         "execute",
         "execute",
-        *("catalog_cursor.execute" for _ in range(12)),
+        *("catalog_cursor.execute" for _ in range(13)),
         "execute",
     ]
     assert statements[0].args == ("BEGIN ISOLATION LEVEL REPEATABLE READ",)
@@ -766,6 +857,74 @@ async def test_inspect_maps_enum_and_cross_schema_type_prerequisite() -> None:
     table = database.table_by_qname(QualifiedName(namespace="public", name="users"))
     assert table is not None
     assert table.type_prerequisites == (enum.ref,)
+
+
+@pytest.mark.unit
+async def test_inspect_maps_function_overloads_defaults_and_schema_filter() -> None:
+    pool = _build_mock_pool(
+        schemas_rows=[_SchemaRow("public"), _SchemaRow("audit")],
+        routines_rows=[
+            _make_function_row("audit", "hidden"),
+            _make_function_row(
+                "public",
+                "lookup",
+                input_types=("integer",),
+                all_argument_types=("integer",),
+                argument_modes=("i",),
+                argument_names=("value",),
+                default_expressions="7",
+                default_count=1,
+                body="SELECT $1",
+            ),
+            _make_function_row("public", "lookup"),
+        ],
+    )
+
+    database = await PgCatalogInspector(pool, schemas=["public"]).inspect()
+
+    functions = database.all_functions()
+    assert len(functions) == 2
+    assert tuple(function.ref.arg_signature for function in functions) == ((), ("integer",))
+    assert functions[1].arguments[0].name == "value"
+    assert functions[1].default_expressions == "7"
+    assert functions[1].default_count == 1
+    assert functions[1].body == "SELECT $1"
+
+
+@pytest.mark.unit
+async def test_inspect_maps_function_type_prerequisites_by_overload_signature() -> None:
+    pool = _build_mock_pool(
+        schemas_rows=[_SchemaRow("public"), _SchemaRow("types")],
+        routines_rows=[
+            _make_function_row(
+                "public",
+                "lookup",
+                input_types=("types.mood",),
+                all_argument_types=("types.mood",),
+                argument_modes=("i",),
+                argument_names=("value",),
+            ),
+        ],
+        type_prerequisites_rows=[
+            _make_type_prerequisite_row(
+                type_schema="types",
+                dependent_kind="function",
+                dependent_schema="public",
+                dependent_name="lookup",
+                dependent_signature=("types.mood",),
+            ),
+        ],
+    )
+
+    database = await PgCatalogInspector(pool).inspect()
+
+    function = database.all_functions()[0]
+    assert function.type_prerequisites == (
+        ObjectRef(
+            kind=ObjectKind.ENUM,
+            qname=QualifiedName(namespace="types", name="mood"),
+        ),
+    )
 
 
 @pytest.mark.unit

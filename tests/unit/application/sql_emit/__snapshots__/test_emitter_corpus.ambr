@@ -1,6 +1,15 @@
 # serializer version: 1
 # name: test_emitter_corpus
   '''
+  create function: create_function target=function "App ""Schema"."sum""One"
+    transactional=true new_unit=false isolated=false sql=CREATE FUNCTION "App ""Schema"."sum""One"(value integer DEFAULT 7) RETURNS integer LANGUAGE sql IMMUTABLE AS $function$ SELECT value $function$
+    transactional=true new_unit=false isolated=false sql=ALTER FUNCTION "App ""Schema"."sum""One"(integer) OWNER TO "Role ""Owner"
+  drop function overload: drop_function target=function "App ""Schema"."sum""One"
+    transactional=true new_unit=false isolated=false sql=DROP FUNCTION "App ""Schema"."sum""One"(integer) RESTRICT
+  replace function: replace_function target=function "App ""Schema"."sum""One"
+    transactional=true new_unit=false isolated=false sql=CREATE OR REPLACE FUNCTION "App ""Schema"."sum""One"(value integer DEFAULT 7) RETURNS integer LANGUAGE sql IMMUTABLE AS $function$ SELECT value + 1 $function$
+  alter function owner: alter_function_owner target=function "App ""Schema"."sum""One"
+    transactional=true new_unit=false isolated=false sql=ALTER FUNCTION "App ""Schema"."sum""One"(integer) OWNER TO "New ""Owner"
   create sequence: create_sequence target=sequence "App ""Schema"."Serial""ID"
     transactional=true new_unit=false isolated=false sql=CREATE SEQUENCE "App ""Schema"."Serial""ID" AS bigint INCREMENT BY 5 MINVALUE 1 MAXVALUE 999 START WITH 7 CACHE 3 CYCLE
     transactional=true new_unit=false isolated=false sql=ALTER SEQUENCE "App ""Schema"."Serial""ID" OWNER TO "Role ""Owner"

@@ -660,13 +660,17 @@ async def open_executor(
                 "set_config('lock_timeout', %s, false), "
                 "set_config('statement_timeout', %s, false), "
                 "set_config('application_name', %s, false), "
-                "set_config('search_path', %s, false)",
+                "set_config('search_path', %s, false), "
+                # Like pg_dump: functions are created before the tables their
+                # string bodies may reference, so defer body validation.
+                "set_config('check_function_bodies', %s, false)",
                 (
                     "on",
                     f"{lock_timeout_ms}ms",
                     f"{statement_timeout_ms}ms",
                     "pgschemadiff apply",
                     "pg_catalog",
+                    "off",
                 ),
             )
             try:

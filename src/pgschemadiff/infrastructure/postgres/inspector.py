@@ -38,6 +38,7 @@ from pgschemadiff.domain.database import Database
 from pgschemadiff.domain.domain_type import DomainCheck, DomainType
 from pgschemadiff.domain.enum_type import EnumType
 from pgschemadiff.domain.extension import Extension
+from pgschemadiff.domain.function import Function, FunctionArgument
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index, IndexKeyColumn, IndexMethod, NullsOrder, SortOrder
 from pgschemadiff.domain.schema import Schema
@@ -88,6 +89,7 @@ _SQL_DOMAIN_TYPES: str = _load_sql("domain_types.sql")
 _SQL_TYPE_PREREQUISITES: str = _load_sql("type_prerequisites.sql")
 _SQL_SEQUENCES: str = _load_sql("sequences.sql")
 _SQL_SEQUENCE_PREREQUISITES: str = _load_sql("sequence_prerequisites.sql")
+_SQL_ROUTINES: str = _load_sql("routines.sql")
 
 # ---------------------------------------------------------------------------
 # Regex helpers for parsing pg_get_constraintdef output
@@ -635,6 +637,9 @@ class PgCatalogInspector:
 
                     await cur.execute(_SQL_SEQUENCE_PREREQUISITES)
                     sequence_prerequisites_rows = await cur.fetchall()
+
+                    await cur.execute(_SQL_ROUTINES)
+                    routines_rows = await cur.fetchall()
             finally:
                 await conn.execute("ROLLBACK")
 
@@ -651,6 +656,7 @@ class PgCatalogInspector:
             type_prerequisites_rows=type_prerequisites_rows,
             sequences_rows=sequences_rows,
             sequence_prerequisites_rows=sequence_prerequisites_rows,
+            routines_rows=routines_rows,
         )
 
     def _assemble(
@@ -668,6 +674,7 @@ class PgCatalogInspector:
         type_prerequisites_rows: list[Any],
         sequences_rows: list[Any] | None = None,
         sequence_prerequisites_rows: list[Any] | None = None,
+        routines_rows: list[Any] | None = None,
     ) -> Database:
         """Assemble domain objects from raw catalog rows."""
         extensions = self._build_extensions(extensions_rows)
@@ -689,14 +696,17 @@ class PgCatalogInspector:
         prerequisites_by_object = self._group_type_prerequisites(type_prerequisites_rows, allowed)
         prerequisites_by_table = {
             (schema_name, object_name): refs
-            for (kind, schema_name, object_name), refs in prerequisites_by_object.items()
-            if kind is ObjectKind.TABLE
+            for (kind, schema_name, object_name, signature), refs in prerequisites_by_object.items()
+            if kind is ObjectKind.TABLE and signature is None
         }
         composite_types_by_schema = self._group_composite_types(
             composite_types_rows, allowed, prerequisites_by_object
         )
         domain_types_by_schema = self._group_domain_types(
             domain_types_rows, allowed, prerequisites_by_object
+        )
+        functions_by_schema = self._group_functions(
+            routines_rows or [], allowed, prerequisites_by_object
         )
 
         tables_by_schema, idxs_by_schema = self._build_tables(
@@ -720,6 +730,7 @@ class PgCatalogInspector:
                     composite_types_by_schema,
                     domain_types_by_schema,
                     sequences_by_schema,
+                    functions_by_schema,
                 )
             ),
             extensions=tuple(extensions),
@@ -855,10 +866,113 @@ class PgCatalogInspector:
         return result
 
     @staticmethod
+    def _group_functions(
+        rows: list[Any],
+        allowed: set[str] | None,
+        prerequisites: dict[tuple[ObjectKind, str, str, tuple[str, ...] | None], list[ObjectRef]],
+    ) -> dict[str, list[Function]]:
+        mode_by_code: dict[str, Literal["IN", "OUT", "INOUT", "VARIADIC", "TABLE"]] = {
+            "i": "IN",
+            "o": "OUT",
+            "b": "INOUT",
+            "v": "VARIADIC",
+            "t": "TABLE",
+        }
+        result: dict[str, list[Function]] = {}
+        for row in rows:
+            schema_name = row.schema_name
+            if allowed is not None and schema_name not in allowed:
+                continue
+
+            input_types = tuple(row.input_types or ())
+            argument_types = tuple(row.all_argument_types or ())
+            raw_modes = tuple(row.argument_modes or ("i" for _ in argument_types))
+            raw_names = tuple(row.argument_names or (None for _ in argument_types))
+            if len(argument_types) != len(raw_modes) or len(argument_types) != len(raw_names):
+                raise InspectionError(
+                    f"Function {schema_name}.{row.function_name} has inconsistent argument metadata"
+                )
+
+            arguments: list[FunctionArgument] = []
+            for name, mode, data_type in zip(raw_names, raw_modes, argument_types, strict=True):
+                mode_code = mode.decode() if isinstance(mode, bytes) else mode
+                mapped_mode = mode_by_code.get(mode_code)
+                if mapped_mode is None:
+                    raise InspectionError(
+                        f"Function {schema_name}.{row.function_name} has unsupported "
+                        f"argument mode {mode!r}"
+                    )
+                if not isinstance(data_type, str) or not data_type.strip():
+                    raise InspectionError(
+                        f"Function {schema_name}.{row.function_name} has an unusable argument type"
+                    )
+                arguments.append(FunctionArgument(name=name, mode=mapped_mode, data_type=data_type))
+
+            default_expressions = row.default_expressions
+            if row.default_count and default_expressions is None:
+                raise InspectionError(
+                    f"Function {schema_name}.{row.function_name} has missing default expressions"
+                )
+            if default_expressions is not None and (
+                not default_expressions.strip() or default_expressions.strip() == "?"
+            ):
+                raise InspectionError(
+                    f"Function {schema_name}.{row.function_name} has unusable default expressions"
+                )
+            definition = row.definition
+            if (
+                not isinstance(definition, str)
+                or not definition.strip()
+                or definition.strip() == "?"
+            ):
+                raise InspectionError(
+                    f"Function {schema_name}.{row.function_name} has no usable definition"
+                )
+
+            ref = ObjectRef(
+                kind=ObjectKind.FUNCTION,
+                qname=QualifiedName(namespace=schema_name, name=row.function_name),
+                arg_signature=input_types,
+            )
+            function = Function(
+                ref=ref,
+                arguments=tuple(arguments),
+                return_type=row.return_type,
+                returns_set=row.returns_set,
+                language=row.language,
+                volatility=row.volatility,
+                strict=row.strict,
+                security_definer=row.security_definer,
+                leakproof=row.leakproof,
+                parallel=row.parallel,
+                cost=row.cost,
+                rows=row.rows,
+                support_function=row.support_function,
+                transforms=tuple(row.transforms or ()),
+                config=tuple(row.config or ()),
+                default_expressions=default_expressions,
+                default_count=row.default_count,
+                body=row.body,
+                definition=definition,
+                owner=row.owner,
+                type_prerequisites=tuple(
+                    prerequisites.get(
+                        (ObjectKind.FUNCTION, schema_name, row.function_name, input_types), []
+                    )
+                ),
+            )
+            result.setdefault(schema_name, []).append(function)
+        for functions in result.values():
+            functions.sort(
+                key=lambda function: (function.ref.qname.name, function.ref.arg_signature)
+            )
+        return result
+
+    @staticmethod
     def _group_composite_types(
         rows: list[Any],
         allowed: set[str] | None,
-        prerequisites: dict[tuple[ObjectKind, str, str], list[ObjectRef]],
+        prerequisites: dict[tuple[ObjectKind, str, str, tuple[str, ...] | None], list[ObjectRef]],
     ) -> dict[str, list[CompositeType]]:
         grouped: dict[tuple[str, str], list[tuple[int, CompositeAttribute]]] = {}
         owners: dict[tuple[str, str], str | None] = {}
@@ -903,7 +1017,7 @@ class PgCatalogInspector:
                 ref=ref,
                 attributes=tuple(attribute for _, attribute in attributes),
                 type_prerequisites=tuple(
-                    prerequisites.get((ObjectKind.COMPOSITE_TYPE, schema_name, type_name), [])
+                    prerequisites.get((ObjectKind.COMPOSITE_TYPE, schema_name, type_name, None), [])
                 ),
                 owner=owners[(schema_name, type_name)],
             )
@@ -916,7 +1030,7 @@ class PgCatalogInspector:
     def _group_domain_types(
         rows: list[Any],
         allowed: set[str] | None,
-        prerequisites: dict[tuple[ObjectKind, str, str], list[ObjectRef]],
+        prerequisites: dict[tuple[ObjectKind, str, str, tuple[str, ...] | None], list[ObjectRef]],
     ) -> dict[str, list[DomainType]]:
         metadata: dict[tuple[str, str], tuple[Any, ...]] = {}
         checks: dict[tuple[str, str], list[DomainCheck]] = {}
@@ -984,7 +1098,7 @@ class PgCatalogInspector:
                     sorted(checks[(schema_name, domain_name)], key=lambda check: check.name)
                 ),
                 type_prerequisites=tuple(
-                    prerequisites.get((ObjectKind.DOMAIN_TYPE, schema_name, domain_name), [])
+                    prerequisites.get((ObjectKind.DOMAIN_TYPE, schema_name, domain_name, None), [])
                 ),
                 used_in_container=used_in_container,
                 owner=owner,
@@ -998,8 +1112,8 @@ class PgCatalogInspector:
     def _group_type_prerequisites(
         rows: list[Any],
         allowed: set[str] | None,
-    ) -> dict[tuple[ObjectKind, str, str], list[ObjectRef]]:
-        result: dict[tuple[ObjectKind, str, str], set[ObjectRef]] = {}
+    ) -> dict[tuple[ObjectKind, str, str, tuple[str, ...] | None], list[ObjectRef]]:
+        result: dict[tuple[ObjectKind, str, str, tuple[str, ...] | None], set[ObjectRef]] = {}
         for row in rows:
             if allowed is not None and row.dependent_schema not in allowed:
                 continue
@@ -1008,6 +1122,7 @@ class PgCatalogInspector:
                 ObjectKind.TABLE,
                 ObjectKind.COMPOSITE_TYPE,
                 ObjectKind.DOMAIN_TYPE,
+                ObjectKind.FUNCTION,
             }:
                 raise InspectionError(f"Unsupported type prerequisite dependent {dependent_kind!r}")
             type_kind = ObjectKind(row.type_kind)
@@ -1021,8 +1136,16 @@ class PgCatalogInspector:
                 kind=type_kind,
                 qname=QualifiedName(namespace=row.type_schema, name=row.type_name),
             )
+            signature = None
+            if dependent_kind is ObjectKind.FUNCTION:
+                if row.dependent_signature is None:
+                    raise InspectionError(
+                        f"Function type prerequisite {row.dependent_schema}.{row.dependent_name} "
+                        "has no overload signature"
+                    )
+                signature = tuple(row.dependent_signature)
             result.setdefault(
-                (dependent_kind, row.dependent_schema, row.dependent_name), set()
+                (dependent_kind, row.dependent_schema, row.dependent_name, signature), set()
             ).add(ref)
         return {
             key: sorted(refs, key=lambda ref: (ref.qname.namespace, ref.qname.name))
@@ -1091,6 +1214,7 @@ class PgCatalogInspector:
         composite_types_by_schema: dict[str, list[CompositeType]],
         domain_types_by_schema: dict[str, list[DomainType]],
         sequences_by_schema: dict[str, list[Sequence]],
+        functions_by_schema: dict[str, list[Function]],
     ) -> list[Schema]:
         result: list[Schema] = []
         for name in schema_names:
@@ -1108,6 +1232,7 @@ class PgCatalogInspector:
                     composite_types=tuple(composite_types_by_schema.get(name, [])),
                     domain_types=tuple(domain_types_by_schema.get(name, [])),
                     sequences=tuple(sequences_by_schema.get(name, [])),
+                    functions=tuple(functions_by_schema.get(name, [])),
                     comment=row.comment,
                 )
             )

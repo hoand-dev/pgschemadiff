@@ -31,6 +31,7 @@ from pgschemadiff.application.diff.comparators.constraint import ConstraintCompa
 from pgschemadiff.application.diff.comparators.domain_type import DomainTypeComparator
 from pgschemadiff.application.diff.comparators.enum import EnumComparator
 from pgschemadiff.application.diff.comparators.extension import ExtensionComparator
+from pgschemadiff.application.diff.comparators.function import FunctionComparator
 from pgschemadiff.application.diff.comparators.index import IndexComparator
 from pgschemadiff.application.diff.comparators.schema import SchemaComparator
 from pgschemadiff.application.diff.comparators.sequence import SequenceComparator
@@ -49,6 +50,7 @@ __all__ = [
     "DomainTypeComparator",
     "EnumComparator",
     "ExtensionComparator",
+    "FunctionComparator",
     "IndexComparator",
     "SchemaComparator",
     "SequenceComparator",

@@ -1,20 +1,22 @@
 -- catalog/type_prerequisites.sql
 -- Returns enum/composite/domain types required by table columns, composite
--- attributes, and domain base types.
+-- attributes, domain base types, and function arguments/returns.
 -- Array columns depend on their element type. System, reserved, and extension-owned
 -- objects are excluded on both sides of each dependency.
 -- Result columns:
---   dependent_kind   text -- 'table', 'composite_type', or 'domain_type'
+--   dependent_kind   text -- table, composite_type, domain_type, or function
 --   dependent_schema text -- schema owning the dependent object
 --   dependent_name   text -- dependent table or composite type name
 --   type_kind        text -- 'enum', 'composite_type', or 'domain_type'
 --   type_schema      text -- schema owning the prerequisite type
 --   type_name        text -- prerequisite type name
+--   dependent_signature text[] -- function identity input types, otherwise NULL
 WITH dependent_columns AS (
     SELECT
         'table'::text AS dependent_kind,
         table_namespace.nspname AS dependent_schema,
         table_class.relname AS dependent_name,
+        NULL::text[] AS dependent_signature,
         CASE WHEN column_type.typelem <> 0 THEN column_type.typelem ELSE column_type.oid END
             AS prerequisite_type_oid
     FROM pg_catalog.pg_attribute AS a
@@ -44,6 +46,7 @@ WITH dependent_columns AS (
         'composite_type'::text AS dependent_kind,
         dependent_namespace.nspname AS dependent_schema,
         dependent_type.typname AS dependent_name,
+        NULL::text[] AS dependent_signature,
         CASE WHEN attribute_type.typelem <> 0 THEN attribute_type.typelem ELSE attribute_type.oid END
             AS prerequisite_type_oid
     FROM pg_catalog.pg_type AS dependent_type
@@ -76,6 +79,7 @@ WITH dependent_columns AS (
         'domain_type'::text AS dependent_kind,
         domain_namespace.nspname AS dependent_schema,
         domain_type.typname AS dependent_name,
+        NULL::text[] AS dependent_signature,
         CASE
             WHEN base_type.typelem <> 0 THEN base_type.typelem
             ELSE domain_type.typbasetype
@@ -95,12 +99,53 @@ WITH dependent_columns AS (
           WHERE d.classid = 'pg_catalog.pg_type'::regclass
             AND d.objid = domain_type.oid
             AND d.deptype = 'e'
+    )
+
+    UNION ALL
+
+    SELECT
+        'function'::text AS dependent_kind,
+        function_namespace.nspname AS dependent_schema,
+        routine.proname AS dependent_name,
+        ARRAY(
+            SELECT pg_catalog.format_type(input_argument.type_oid, NULL)
+            FROM unnest(routine.proargtypes) WITH ORDINALITY
+                AS input_argument(type_oid, ordinal)
+            ORDER BY input_argument.ordinal
+        ) AS dependent_signature,
+        CASE
+            WHEN referenced_type.typelem <> 0 THEN referenced_type.typelem
+            ELSE referenced_type.oid
+        END AS prerequisite_type_oid
+    FROM pg_catalog.pg_proc AS routine
+    JOIN pg_catalog.pg_namespace AS function_namespace
+        ON function_namespace.oid = routine.pronamespace
+    CROSS JOIN LATERAL (
+        SELECT routine.prorettype AS type_oid
+        UNION ALL
+        SELECT all_argument.type_oid
+        FROM unnest(COALESCE(routine.proallargtypes, routine.proargtypes::oid[]))
+            AS all_argument(type_oid)
+    ) AS routine_type
+    JOIN pg_catalog.pg_type AS referenced_type
+        ON referenced_type.oid = routine_type.type_oid
+    WHERE routine.prokind = 'f'
+      AND left(function_namespace.nspname, 3) != 'pg_'
+      AND function_namespace.nspname != 'information_schema'
+      AND function_namespace.nspname != 'pgschemadiff'
+      AND NOT EXISTS (
+          SELECT 1
+          FROM pg_catalog.pg_depend AS extension_dependency
+          WHERE extension_dependency.classid = 'pg_catalog.pg_proc'::regclass
+            AND extension_dependency.objid = routine.oid
+            AND extension_dependency.deptype = 'e'
       )
 )
 SELECT DISTINCT
     dependencies.dependent_kind,
     dependencies.dependent_schema,
     dependencies.dependent_name,
+    dependencies.dependent_signature,
     CASE prerequisite_type.typtype
         WHEN 'e' THEN 'enum'
         WHEN 'c' THEN 'composite_type'
@@ -131,4 +176,4 @@ WHERE (
         AND d.deptype = 'e'
   )
 ORDER BY dependencies.dependent_kind, dependencies.dependent_schema,
-         dependencies.dependent_name, type_schema, type_name;
+         dependencies.dependent_name, dependencies.dependent_signature, type_schema, type_name;

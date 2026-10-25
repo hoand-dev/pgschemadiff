@@ -11,7 +11,7 @@ import pytest
 from pgschemadiff.application.migration.apply import ApplyResult, apply_migration
 from pgschemadiff.application.migration.bundle import load_bundle
 from pgschemadiff.application.migration.generate import generate_migration
-from pgschemadiff.application.sql_emit.risk import RiskLevel
+from pgschemadiff.application.sql_emit.risk import RiskLevel, classify_risk
 from pgschemadiff.domain.delta import AlterSequenceOptions, CreateSequence, CreateTable
 from pgschemadiff.infrastructure.fs.bundle_reader import FilesystemBundleReader
 from pgschemadiff.infrastructure.fs.migration_writer import FilesystemMigrationWriter
@@ -522,6 +522,84 @@ def _seed(dsn: str, statements: list[str]) -> None:
             ],
         ),
         pytest.param(
+            "create-zero-arg-overloaded-sql-and-plpgsql-functions",
+            [_APP],
+            [
+                _APP,
+                "CREATE FUNCTION app.current_version() RETURNS integer LANGUAGE sql "
+                "IMMUTABLE AS $$ SELECT 18 $$",
+                "CREATE FUNCTION app.echo(value integer) RETURNS integer LANGUAGE plpgsql "
+                "IMMUTABLE AS $$ BEGIN RETURN value; END $$",
+                "CREATE FUNCTION app.echo(value text) RETURNS text LANGUAGE sql "
+                "IMMUTABLE AS $$ SELECT value $$",
+            ],
+        ),
+        pytest.param(
+            # Functions are created before tables; the applier disables
+            # check_function_bodies so this body may reference a new table.
+            "sql-function-reading-a-new-table",
+            [_APP],
+            [
+                _APP,
+                "CREATE TABLE app.counters (value integer)",
+                "CREATE FUNCTION app.counter_total() RETURNS bigint LANGUAGE sql "
+                "STABLE AS $$ SELECT count(*) FROM app.counters $$",
+            ],
+        ),
+        pytest.param(
+            "replace-function-body-and-default",
+            [
+                _APP,
+                "CREATE FUNCTION app.decorate(value integer, suffix text DEFAULT '!') "
+                "RETURNS text LANGUAGE sql IMMUTABLE AS $$ "
+                "SELECT value::text || suffix $$",
+            ],
+            [
+                _APP,
+                "CREATE FUNCTION app.decorate(value integer, suffix text DEFAULT '?') "
+                "RETURNS text LANGUAGE sql IMMUTABLE AS $$ "
+                "SELECT upper(value::text) || suffix $$",
+            ],
+        ),
+        pytest.param(
+            "drop-exact-function-overload",
+            [
+                _APP,
+                "CREATE FUNCTION app.pick(value integer) RETURNS text LANGUAGE sql "
+                "IMMUTABLE AS $$ SELECT value::text $$",
+                "CREATE FUNCTION app.pick(value text) RETURNS text LANGUAGE sql "
+                "IMMUTABLE AS $$ SELECT value $$",
+            ],
+            [
+                _APP,
+                "CREATE FUNCTION app.pick(value text) RETURNS text LANGUAGE sql "
+                "IMMUTABLE AS $$ SELECT value $$",
+            ],
+        ),
+        pytest.param(
+            "input-type-change-is-overload-add-drop",
+            [
+                _APP,
+                "CREATE FUNCTION app.convert_value(value integer) RETURNS text LANGUAGE sql "
+                "IMMUTABLE AS $$ SELECT value::text $$",
+            ],
+            [
+                _APP,
+                "CREATE FUNCTION app.convert_value(value text) RETURNS text LANGUAGE sql "
+                "IMMUTABLE AS $$ SELECT value $$",
+            ],
+        ),
+        pytest.param(
+            "quoted-function-and-custom-type-prerequisite",
+            [_APP],
+            [
+                _APP,
+                "CREATE TYPE app.\"Mood Type\" AS ENUM ('calm', 'bold')",
+                'CREATE FUNCTION app."Echo Mood"(value app."Mood Type") '
+                'RETURNS app."Mood Type" LANGUAGE sql IMMUTABLE AS $$ SELECT $1 $$',
+            ],
+        ),
+        pytest.param(
             "unlogged-table-persistence",
             [_APP, "CREATE TABLE app.items (id integer)"],
             [
@@ -563,6 +641,50 @@ async def test_pg18_round_trip_corpus(
 
     remaining = await compare_urls(pg_test_dsn, pg_test_dsn2, schemas=None)
     assert remaining.is_empty(), scenario
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("current_sql", "desired_sql"),
+    [
+        pytest.param(
+            [_APP],
+            [
+                _APP,
+                "CREATE FUNCTION app.private_value() RETURNS integer LANGUAGE sql "
+                "SECURITY DEFINER AS $$ SELECT 1 $$",
+            ],
+            id="new-security-definer",
+        ),
+        pytest.param(
+            [
+                _APP,
+                "CREATE FUNCTION app.change_result(value integer) RETURNS integer LANGUAGE sql "
+                "IMMUTABLE AS $$ SELECT value $$",
+            ],
+            [
+                _APP,
+                "CREATE FUNCTION app.change_result(value integer) RETURNS text LANGUAGE sql "
+                "IMMUTABLE AS $$ SELECT value::text $$",
+            ],
+            id="changed-return-type",
+        ),
+    ],
+)
+async def test_unsupported_function_changes_fail_risk_gate_before_emission(
+    current_sql: list[str],
+    desired_sql: list[str],
+    pg_test_dsn: str,
+    pg_test_dsn2: str,
+) -> None:
+    _seed(pg_test_dsn, current_sql)
+    _seed(pg_test_dsn2, desired_sql)
+
+    delta_set = await compare_urls(pg_test_dsn, pg_test_dsn2, schemas=None)
+
+    assert any(classify_risk(delta).level is RiskLevel.BLOCKED for delta in delta_set)
+    with pytest.raises(RiskGateError):
+        generate_migration(delta_set, max_risk=RiskLevel.DESTRUCTIVE)
 
 
 @pytest.mark.integration

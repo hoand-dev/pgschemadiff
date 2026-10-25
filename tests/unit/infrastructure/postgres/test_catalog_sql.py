@@ -51,6 +51,7 @@ _CATALOG_FILES = [
     "type_prerequisites.sql",
     "sequences.sql",
     "sequence_prerequisites.sql",
+    "routines.sql",
 ]
 
 
@@ -379,6 +380,7 @@ def test_schemas_sql_selects_owner_and_comment() -> None:
         pytest.param("type_prerequisites.sql"),
         pytest.param("sequences.sql"),
         pytest.param("sequence_prerequisites.sql"),
+        pytest.param("routines.sql"),
     ],
 )
 def test_catalog_sql_excludes_reserved_history_schema(filename: str) -> None:
@@ -481,6 +483,18 @@ def test_type_prerequisites_sql_follows_enum_array_element_types() -> None:
 
 
 @pytest.mark.unit
+def test_type_prerequisites_sql_includes_function_argument_and_return_types() -> None:
+    sql = _load_sql("type_prerequisites.sql")
+
+    assert "pg_proc" in sql
+    assert "proargtypes" in sql
+    assert "proallargtypes" in sql
+    assert "prorettype" in sql
+    assert "dependent_signature" in sql
+    assert "'function'::text AS dependent_kind" in sql
+
+
+@pytest.mark.unit
 def test_type_prerequisites_sql_excludes_system_and_extension_types() -> None:
     sql = _load_sql("type_prerequisites.sql")
     assert "3) != 'pg_'" in sql
@@ -518,6 +532,39 @@ def test_sequences_sql_excludes_identity_extension_and_system_sequences() -> Non
     assert "left(sequence_namespace.nspname, 3) != 'pg_'" in sql
     assert "nspname != 'information_schema'" in sql
     assert "nspname != 'pgschemadiff'" in sql
+
+
+@pytest.mark.unit
+def test_routines_sql_selects_function_semantics_and_definition() -> None:
+    sql = _load_sql("routines.sql")
+
+    for expected in (
+        "pg_proc",
+        "prokind = 'f'",
+        "proargtypes",
+        "proallargtypes",
+        "proargmodes",
+        "proargdefaults",
+        "prorettype",
+        "protrftypes",
+        "prosupport",
+        "proconfig",
+        "pg_get_functiondef",
+        "pg_get_expr",
+    ):
+        assert expected in sql
+
+
+@pytest.mark.unit
+def test_routines_sql_excludes_system_reserved_and_extension_functions() -> None:
+    sql = _load_sql("routines.sql")
+
+    assert "left(function_namespace.nspname, 3) != 'pg_'" in sql
+    assert "function_namespace.nspname != 'information_schema'" in sql
+    assert "function_namespace.nspname != 'pgschemadiff'" in sql
+    assert "classid = 'pg_catalog.pg_proc'::regclass" in sql
+    assert "deptype = 'e'" in sql
+    assert "prokind = 'p'" not in sql
 
 
 @pytest.mark.unit

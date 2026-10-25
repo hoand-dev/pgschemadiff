@@ -56,7 +56,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from pgschemadiff.domain.identity import ObjectRef
+from pgschemadiff.domain.identity import ObjectKind, ObjectRef
 
 # ---------------------------------------------------------------------------
 # DeltaOp — discriminator enum
@@ -192,6 +192,15 @@ class DeltaBase(BaseModel):
                 self.target.qname.name,
                 self.op.value,
             )
+        if self.target.kind in {ObjectKind.FUNCTION, ObjectKind.PROCEDURE}:
+            return (
+                self.target.qname.namespace,
+                self.target.qname.name,
+                "(",
+                *(self.target.arg_signature or ()),
+                ")",
+                self.op.value,
+            )
         return (
             self.target.qname.namespace,
             self.target.qname.name,
@@ -299,6 +308,7 @@ from pgschemadiff.domain.delta.composite_type import CompositeTypeDelta  # noqa:
 from pgschemadiff.domain.delta.constraint import ConstraintDelta  # noqa: E402
 from pgschemadiff.domain.delta.domain_type import DomainTypeDelta  # noqa: E402
 from pgschemadiff.domain.delta.enum import EnumDelta  # noqa: E402
+from pgschemadiff.domain.delta.function import FunctionDelta  # noqa: E402
 from pgschemadiff.domain.delta.index import IndexDelta  # noqa: E402
 from pgschemadiff.domain.delta.schema import ExtensionDelta, SchemaDelta  # noqa: E402
 from pgschemadiff.domain.delta.sequence import SequenceDelta  # noqa: E402
@@ -314,6 +324,7 @@ Delta = Annotated[
     | SchemaDelta
     | ExtensionDelta
     | EnumDelta
+    | FunctionDelta
     | SequenceDelta,
     Field(discriminator="kind"),
 ]
