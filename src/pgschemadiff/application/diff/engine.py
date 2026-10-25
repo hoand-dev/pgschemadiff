@@ -11,15 +11,14 @@ into a single :class:`~pgschemadiff.domain.delta.DeltaSet`.
 
 Design notes
 ------------
-Open/Closed principle
-    Adding a new object kind requires only registering one more ``Comparator``
-    instance — zero edits to ``DiffEngine`` itself (ADR-0006 "Positive").
+Explicit registry
+    Every supported kind has one fetcher and comparator. Adding a kind requires
+    registering both; unsupported kinds fail instead of producing empty diffs.
 
 Determinism
-    Objects within each kind are sorted by their :class:`QualifiedName`
-    ``(namespace, name)`` tuple before dispatch, so the resulting
-    :class:`DeltaSet` is built in a stable, reproducible order regardless of
-    the order schemas/tables/indexes happen to be stored in a :class:`Database`.
+    Objects are keyed by :class:`ObjectRef` and sorted by qualified name,
+    signature, and parent identity before dispatch. Results are stable
+    regardless of object order in a :class:`Database`.
 
     This pre-sort is intentionally lightweight — it is **not** a dependency-
     aware topological sort.  Downstream topo-ordering is a separate step
@@ -48,19 +47,33 @@ Layer contract
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
 from pgschemadiff.domain.delta import DeltaBase, DeltaSet
-from pgschemadiff.domain.identity import ObjectKind, QualifiedName
+from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.shared.errors import DiffError
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
-
     from pgschemadiff.application.diff.ignore import IgnoreRules
     from pgschemadiff.application.diff.renames import RenameAnnotations
     from pgschemadiff.domain.database import Database
     from pgschemadiff.domain.index import Index
+
+
+class _ObjectWithRef(Protocol):
+    @property
+    def ref(self) -> ObjectRef: ...
+
+
+_ObjectFetcher = Callable[["Database"], Iterable[_ObjectWithRef]]
+
+_OBJECT_FETCHERS: dict[ObjectKind, _ObjectFetcher] = {
+    ObjectKind.SCHEMA: lambda db: db.schemas,
+    ObjectKind.EXTENSION: lambda db: db.extensions,
+    ObjectKind.TABLE: lambda db: db.all_tables(),
+    ObjectKind.INDEX: lambda db: db.all_indexes(),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -109,8 +122,8 @@ class Comparator(Protocol):
     covariant narrowing that mypy accepts when the Protocol is used
     structurally (duck-typed).  The engine is responsible for passing the
     correct domain object for the declared ``kind``; type safety at the call
-    site is enforced by :meth:`DiffEngine._fetch_objects` which pairs objects
-    keyed by ``ObjectKind``.
+    site is enforced by the registry's per-kind fetcher, which returns objects
+    keyed by their full :class:`ObjectRef` identity.
     """
 
     kind: ObjectKind
@@ -151,35 +164,39 @@ def _qname_sort_key(qname: QualifiedName) -> tuple[str, str]:
 def _fetch_objects_for_kind(
     db: Database,
     kind: ObjectKind,
-) -> dict[QualifiedName, object]:
-    """Return a mapping of :class:`QualifiedName` → domain object for *kind*.
+    fetcher: _ObjectFetcher | None = None,
+) -> dict[ObjectRef, object]:
+    """Fetch a kind's objects into an identity-keyed map, rejecting duplicates."""
+    if fetcher is None:
+        fetcher = _OBJECT_FETCHERS.get(kind)
+    if fetcher is None:
+        raise DiffError(f"No object fetcher registered for ObjectKind {kind!r}")
+    return _index_objects(fetcher(db), kind)
 
-    Only the object kinds that the MVP-A diff engine knows about are
-    enumerated.  Unknown kinds return an empty dict so that newly-registered
-    comparators for not-yet-introspected kinds produce an empty diff rather
-    than an error.
 
-    This function is intentionally a pure helper — it performs no IO and
-    carries no per-kind comparison semantics.
-    """
-    if kind is ObjectKind.SCHEMA:
-        return {s.ref.qname: s for s in db.schemas}
+def _index_objects(
+    objects: Iterable[_ObjectWithRef],
+    kind: ObjectKind,
+) -> dict[ObjectRef, object]:
+    """Index fetched objects by stable identity and reject duplicate refs."""
+    indexed: dict[ObjectRef, object] = {}
+    for obj in objects:
+        if obj.ref in indexed:
+            raise DiffError(f"Duplicate object identity {obj.ref!r} in {kind!r} snapshot")
+        indexed[obj.ref] = obj
+    return indexed
 
-    if kind is ObjectKind.EXTENSION:
-        return {e.ref.qname: e for e in db.extensions}
 
-    if kind is ObjectKind.TABLE:
-        return {t.ref.qname: t for t in db.all_tables()}
-
-    if kind is ObjectKind.INDEX:
-        return {i.ref.qname: i for i in db.all_indexes()}
-
-    # Other kinds (VIEW, FUNCTION, etc.) are not yet introspected.
-    # Return empty — the engine will generate no pairs, so the comparator
-    # will never be called and will emit no deltas.  This is the correct
-    # behaviour during incremental MVP-A roll-out; add fetchers here as each
-    # kind gains introspection support.
-    return {}
+def _object_ref_sort_key(ref: ObjectRef) -> tuple[str, str, tuple[str, ...], str, str]:
+    """Return a stable order including overload signatures and parent identity."""
+    parent = ref.parent
+    return (
+        ref.qname.namespace,
+        ref.qname.name,
+        ref.arg_signature or (),
+        parent.qname.namespace if parent is not None else "",
+        parent.qname.name if parent is not None else "",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -200,8 +217,8 @@ class DiffEngine:
 
         engine = DiffEngine(comparators=[table_cmp, schema_cmp, extension_cmp])
 
-    Registering two comparators for the same ``kind`` raises :exc:`DiffError`
-    at construction time so misconfigurations are caught eagerly.
+    Registering two comparators for the same ``kind``, or registering a kind
+    without a fetcher, raises :exc:`DiffError` at construction time.
 
     Usage
     -----
@@ -209,22 +226,14 @@ class DiffEngine:
 
         delta_set = engine.diff(source_db, target_db)
 
+    The registry maps each supported kind to its fetcher and comparator.
+    Registering a comparator without a fetcher, or requesting an unregistered
+    kind, raises :exc:`DiffError`.
+
     The returned :class:`~pgschemadiff.domain.delta.DeltaSet` collects every
     delta emitted by every registered comparator in a deterministic,
-    reproducible order (sorted by qualified name within each kind, kinds
+    reproducible order (sorted by object identity within each kind, kinds
     iterated in the order they were registered).
-
-    Unknown kind
-    ------------
-    If a comparator is registered for a kind that has no object fetcher
-    (e.g. a future ``VIEW`` comparator before the inspector supports views),
-    the engine will call ``compare(None, None)`` zero times — the comparator
-    simply never fires.  This is the documented "no pairs → no deltas"
-    behaviour and is NOT an error.  An error IS raised if you call
-    :meth:`diff` and there is NO registered comparator for a kind that
-    *does* have objects — but currently we only raise on duplicate-kind
-    registration, trusting callers to register exactly the kinds they care
-    about.
     """
 
     def __init__(self, comparators: Iterable[Comparator]) -> None:
@@ -233,23 +242,27 @@ class DiffEngine:
         Parameters
         ----------
         comparators:
-            An iterable of :class:`Comparator` instances.  Each must declare a
-            unique ``kind``.  Duplicates raise :exc:`DiffError` immediately.
+            An iterable of :class:`Comparator` instances. Each must declare a
+            unique kind with a registered fetcher. Duplicates or missing
+            fetchers raise :exc:`DiffError` immediately.
 
         Raises
         ------
         pgschemadiff.shared.errors.DiffError
-            If two comparators declare the same
-            :class:`~pgschemadiff.domain.identity.ObjectKind`.
+            If two comparators declare the same kind or a kind has no
+            registered object fetcher.
         """
-        self._registry: dict[ObjectKind, Comparator] = {}
+        self._registry: dict[ObjectKind, tuple[_ObjectFetcher, Comparator]] = {}
         for cmp in comparators:
             if cmp.kind in self._registry:
                 raise DiffError(
                     f"Duplicate comparator registration for ObjectKind {cmp.kind!r}.  "
                     f"Each kind may have at most one comparator."
                 )
-            self._registry[cmp.kind] = cmp
+            fetcher = _OBJECT_FETCHERS.get(cmp.kind)
+            if fetcher is None:
+                raise DiffError(f"No object fetcher registered for ObjectKind {cmp.kind!r}")
+            self._registry[cmp.kind] = (fetcher, cmp)
 
     # ------------------------------------------------------------------
     # Public API
@@ -265,16 +278,15 @@ class DiffEngine:
     ) -> DeltaSet:
         """Compare two database snapshots and return the collected deltas.
 
-        For each registered :class:`Comparator` (in registration order):
+        For each registered kind (in registration order):
 
-        1. Fetch all objects of that kind from both *source* and *target*.
-        2. Build the union of all qualified names across both sides.
-        3. Sort the union by ``(namespace, name)`` for determinism.
-        4. For each name, call ``comparator.compare(source_obj, target_obj)``
-           where either argument is ``None`` when the name is absent on that
-           side.
-        5. Accumulate all returned deltas into the result.
-        6. Apply *ignore* rules to the completed result when provided.
+        1. Fetch objects from both snapshots using the registered fetcher;
+           duplicate identities raise :exc:`DiffError`.
+        2. Build and sort the union of :class:`ObjectRef` identities.
+        3. For each identity, call ``comparator.compare(source_obj, target_obj)``
+           where either argument is ``None`` when it is absent on that side.
+        4. Accumulate all returned deltas into the result.
+        5. Apply *ignore* rules to the completed result when provided.
 
         The result is a :class:`~pgschemadiff.domain.delta.DeltaSet` in a
         stable, reproducible order.  **This is NOT a topological sort** — the
@@ -304,9 +316,9 @@ class DiffEngine:
 
         all_deltas: list[DeltaBase] = []
 
-        for kind, comparator in self._registry.items():
-            source_objects = _fetch_objects_for_kind(source, kind)
-            target_objects = _fetch_objects_for_kind(target, kind)
+        for kind, (fetcher, comparator) in self._registry.items():
+            source_objects = _fetch_objects_for_kind(source, kind, fetcher)
+            target_objects = _fetch_objects_for_kind(target, kind, fetcher)
 
             if kind is ObjectKind.INDEX and renames is not None and renames.tables:
                 source_index_list = [cast("Index", item) for item in source_objects.values()]
@@ -334,29 +346,31 @@ class DiffEngine:
                     )
                 continue
 
-            consumed_source: set[QualifiedName] = set()
-            consumed_target: set[QualifiedName] = set()
+            consumed_source: set[ObjectRef] = set()
+            consumed_target: set[ObjectRef] = set()
 
             if kind is ObjectKind.TABLE and renames is not None:
                 for table_rename in sorted(
                     renames.tables,
                     key=lambda item: _qname_sort_key(item.source),
                 ):
-                    src_obj = source_objects[table_rename.source]
-                    tgt_obj = target_objects[table_rename.target]
+                    source_ref = ObjectRef(kind=ObjectKind.TABLE, qname=table_rename.source)
+                    target_ref = ObjectRef(kind=ObjectKind.TABLE, qname=table_rename.target)
+                    src_obj = source_objects[source_ref]
+                    tgt_obj = target_objects[target_ref]
                     all_deltas.extend(_compare_with_renames(comparator, src_obj, tgt_obj, renames))
-                    consumed_source.add(table_rename.source)
-                    consumed_target.add(table_rename.target)
+                    consumed_source.add(source_ref)
+                    consumed_target.add(target_ref)
 
-            all_qnames = set(source_objects) | set(target_objects)
-            sorted_qnames = sorted(
-                all_qnames - consumed_source - consumed_target,
-                key=_qname_sort_key,
+            all_refs = set(source_objects) | set(target_objects)
+            sorted_refs = sorted(
+                all_refs - consumed_source - consumed_target,
+                key=_object_ref_sort_key,
             )
 
-            for qname in sorted_qnames:
-                src_obj = source_objects.get(qname)
-                tgt_obj = target_objects.get(qname)
+            for ref in sorted_refs:
+                src_obj = source_objects.get(ref)
+                tgt_obj = target_objects.get(ref)
                 if (
                     kind in {ObjectKind.TABLE, ObjectKind.INDEX}
                     and renames is not None

@@ -11,7 +11,7 @@ Covers:
 - Deterministic ordering: shuffled input → same DeltaSet
 - Empty-vs-empty → empty DeltaSet
 - Objects only on source side (all dropped), objects only on target (all created)
-- ``_fetch_objects_for_kind`` helper covers all known kinds + unknown kind
+- ``_fetch_objects_for_kind`` keys objects by ObjectRef and rejects unknown kinds
 - Engine does not encode per-kind semantics (stub returning () → no deltas)
 - ``Comparator`` re-export from ``application.diff`` package init
 """
@@ -266,6 +266,12 @@ def test_engine_duplicate_kind_error_names_the_kind() -> None:
     cmp2 = _RecordingComparator(kind=ObjectKind.INDEX)
     with pytest.raises(DiffError, match="index"):
         DiffEngine(comparators=[cmp1, cmp2])
+
+
+@pytest.mark.unit
+def test_engine_rejects_comparator_without_fetcher() -> None:
+    with pytest.raises(DiffError, match="No object fetcher registered"):
+        DiffEngine(comparators=[_RecordingComparator(kind=ObjectKind.VIEW)])
 
 
 # ---------------------------------------------------------------------------
@@ -653,7 +659,7 @@ def test_index_kind_dispatched_to_index_comparator() -> None:
 
 @pytest.mark.unit
 def test_fetch_schema_objects() -> None:
-    """Schema kind returns a mapping of QualifiedName → Schema."""
+    """Schema kind returns a mapping of ObjectRef → Schema."""
     s1 = _make_schema("alpha")
     s2 = _make_schema("beta")
     db = _make_db(schemas=(s1, s2))
@@ -662,13 +668,13 @@ def test_fetch_schema_objects() -> None:
 
     assert len(fetched) == 2
     assert all(isinstance(v, Schema) for v in fetched.values())
-    assert _qname("alpha", "alpha") in fetched
-    assert _qname("beta", "beta") in fetched
+    assert s1.ref in fetched
+    assert s2.ref in fetched
 
 
 @pytest.mark.unit
 def test_fetch_extension_objects() -> None:
-    """Extension kind returns a mapping of QualifiedName → Extension."""
+    """Extension kind returns a mapping of ObjectRef → Extension."""
     ext = _make_extension("pgcrypto")
     db = _make_db(extensions=(ext,))
 
@@ -714,13 +720,43 @@ def test_fetch_index_objects() -> None:
 
 
 @pytest.mark.unit
-def test_fetch_unknown_kind_returns_empty_dict() -> None:
-    """An ObjectKind that has no fetcher returns an empty dict (not an error)."""
+def test_fetch_unregistered_kind_raises_diff_error() -> None:
+    """Requesting objects for a kind without a fetcher must fail closed."""
     db = _make_db(schemas=(_make_schema("public"),))
 
-    # VIEW is not yet introspected — must return {} not raise
-    result = _fetch_objects_for_kind(db, ObjectKind.VIEW)
-    assert result == {}
+    with pytest.raises(DiffError, match="No object fetcher registered"):
+        _fetch_objects_for_kind(db, ObjectKind.VIEW)
+
+
+@pytest.mark.unit
+def test_duplicate_object_identity_in_snapshot_raises_diff_error() -> None:
+    table = _make_table("public", "users")
+    db = _make_db(schemas=(_make_schema("public", tables=(table, table)),))
+
+    with pytest.raises(DiffError, match="Duplicate object identity"):
+        DiffEngine(comparators=[_RecordingComparator(kind=ObjectKind.TABLE)]).diff(db, db)
+
+
+@pytest.mark.unit
+def test_same_qname_with_different_object_refs_is_compared_independently() -> None:
+    source_schema = _make_schema("public", tables=(_make_table("public", "public"),))
+    target_schema = _make_schema("public", tables=(_make_table("public", "public"),))
+    source_table = source_schema.tables[0]
+    target_table = target_schema.tables[0]
+    source = _make_db(schemas=(source_schema,))
+    target = _make_db(schemas=(target_schema,))
+    schema_comparator = _RecordingComparator(kind=ObjectKind.SCHEMA)
+    table_comparator = _RecordingComparator(kind=ObjectKind.TABLE)
+
+    assert source_schema.ref.qname == source_table.ref.qname
+    assert source_schema.ref != source_table.ref
+    assert _fetch_objects_for_kind(source, ObjectKind.SCHEMA) == {source_schema.ref: source_schema}
+    assert _fetch_objects_for_kind(source, ObjectKind.TABLE) == {source_table.ref: source_table}
+
+    DiffEngine(comparators=[schema_comparator, table_comparator]).diff(source, target)
+
+    assert schema_comparator.calls == [(source_schema, target_schema)]
+    assert table_comparator.calls == [(source_table, target_table)]
 
 
 @pytest.mark.unit
@@ -758,20 +794,6 @@ def test_diff_engine_exported_from_package() -> None:
 # ---------------------------------------------------------------------------
 # Edge cases
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-def test_engine_with_no_objects_comparator_never_called() -> None:
-    """A comparator for VIEW (no fetcher objects) is never invoked."""
-    cmp = _RecordingComparator(kind=ObjectKind.VIEW)
-    engine = DiffEngine(comparators=[cmp])
-
-    src = _make_db(schemas=(_make_schema("public"),))
-    tgt = _make_db(schemas=(_make_schema("public"),))
-
-    result = engine.diff(src, tgt)
-    assert cmp.calls == []
-    assert result.is_empty()
 
 
 @pytest.mark.unit
