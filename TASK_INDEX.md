@@ -136,8 +136,8 @@ per-type comparators per ADR-0006; explicit-annotation renames per ADR-0007.
 | P3-OUT-01 | Multi-file migration writer (plan, renderer, atomic writer; `MigrationWriter` moved to application) | done | P3-SQL-01..05, P3-TX-01 | src/pgschemadiff/application/migration/, src/pgschemadiff/infrastructure/fs/migration_writer.py | 0 | high |
 | P3-APPLY-01 | Bundle applier (validator, use case, executor, history schema) | done | P3-OUT-01 | src/pgschemadiff/infrastructure/postgres/applier.py | 0 | high |
 | P3-CLI-01 | `pgsd generate` + `pgsd apply` | done | P3-OUT-01, P3-APPLY-01 | src/pgschemadiff/presentation/cli/commands/ | 0 | high |
-| P3-TEST-01 | Round-trip integration test (M3 gate); seed tests green, corpus pending | in-progress | P3-APPLY-01 | — | 0 | high |
-| P3-TEST-02 | Emitter snapshot tests | todo | P3-SQL-02..05 | — | 0 | high |
+| P3-TEST-01 | Round-trip integration test (M3 gate); seed + 37-scenario corpus | done | P3-APPLY-01 | — | 0 | high |
+| P3-TEST-02 | Emitter snapshot corpus | done | P3-SQL-02..05 | — | 0 | high |
 
 ## Phase 4 — TUI
 P4-UX-01 and P4-TUI-01 DONE. The shell and all seven views are implemented on mock data (`presentation/tui/_mock.py`); P4-TUI-02..08 real-use-case wiring remains TODO.
@@ -151,4 +151,4 @@ P4-UX-01 and P4-TUI-01 DONE. The shell and all seven views are implemented on mo
 | M0 | CI green; layered arch enforced | Phase 0 done except open P0-CI-03 coverage gate; CI fixes committed locally as `5f34d3f`, remote CI not rechecked |
 | M1 | `pgsd inspect` dumps schema JSON | Feature shipped; exit caveat: P1-TEST-02 needs-human and 1000-object benchmark unmeasured |
 | M2 | `pgsd diff` emits typed DeltaSet | ✅ Phase 2 complete; 1,338 unit tests pass; Docker integration not run locally |
-| M3 | round-trip integration test green | Near: round trip + `pgsd generate`/`apply` end-to-end green on PG18 CI; open: P3-TEST-02 emitter snapshots, P3-TEST-01 corpus, risk corpus (TD-RISK-01) |
+| M3 | round-trip integration test green | ✅ Reached 2026-10-26 (CI `aeef321`): 43 passed, 3 strict xfail for TD-EMIT-01 / TD-INSPECT-01 / TD-INSPECT-02 |

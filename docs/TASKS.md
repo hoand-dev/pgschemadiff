@@ -101,7 +101,7 @@
 | [x] | P3-OUT-01 | Multi-file migration writer (plan, bundle renderer, atomic fs writer) | backend-engineer | P0 | P3-SQL-01..05, P3-TX-01 | M |
 | [x] | P3-APPLY-01 | Bundle applier (validator, use case, psycopg executor + `pgschemadiff` history schema) | backend-engineer | P0 | P3-OUT-01 | M |
 | [x] | P3-CLI-01 | `pgsd generate` + `pgsd apply` | backend-engineer | P0 | P3-OUT-01, P3-APPLY-01 | M |
-| [ ] | P3-TEST-01 | **Round-trip integration test (CORE)** — seed API + CLI round trip green on CI; broader MVP-A corpus pending | qa-engineer | P0 | P3-APPLY-01 | L |
+| [x] | P3-TEST-01 | **Round-trip integration test (CORE)** — API + CLI seed and 37-scenario PG18 corpus green on CI | qa-engineer | P0 | P3-APPLY-01 | L |
 | [x] | P3-TEST-02 | Emitter snapshot tests | qa-engineer | P0 | P3-SQL-02..05 | M |
 
 ## Phase 3b — MVP-B object types

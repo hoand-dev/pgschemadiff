@@ -19,7 +19,7 @@ Goal: inspect two Postgres DBs, show schema diff, generate safe migration SQL.
 - Phase 0 done except open P0-CI-03 coverage gate.
 - Phase 1 domain/infrastructure done; `pgsd inspect` shipped. M1 caveat: P1-TEST-02 needs-human; 1000-object benchmark not measured; P1-INFRA-07 deferred.
 - Phase 2 complete: `pgsd diff`, comparators, rename/ignore rules, dependencies, topo-sort, and tests done. M2 reached at unit level; Docker integration not run locally.
-- P3-RISK-01, P3-SQL-01..06, P3-TX-01, P3-OUT-01, P3-APPLY-01, P3-CLI-01 done; `pgsd generate` and `pgsd apply` shipped; PG18 API + CLI round trip green on CI. M3 open items: P3-TEST-02, P3-TEST-01 corpus, TD-RISK-01.
+- P3-RISK-01, P3-SQL-01..06, P3-TX-01, P3-OUT-01, P3-APPLY-01, P3-CLI-01 done; `pgsd generate` and `pgsd apply` shipped; TD-RISK-01, P3-TEST-01 and P3-TEST-02 done. **M3 reached 2026-10-26** (CI `aeef321`: PG18 corpus 43 passed, 3 strict xfail).
 - Phase 4 TUI shell and seven views run on mock data; not wired to real use cases.
 
 ---
@@ -35,11 +35,11 @@ Goal: inspect two Postgres DBs, show schema diff, generate safe migration SQL.
 ---
 
 ## Execution Queue
-1. **P3-TEST-01** — extend the PG18 round-trip corpus to all MVP-A objects (M3 gate); **P3-TEST-02** — extend emitter snapshot corpus.
-2. Tech debt: TD-INSPECT-01 (UNLOGGED), TD-INSPECT-02 (virtual generated columns), TD-EMIT-01 (indexes on partitioned tables), TD-RISK-01 (new-table constraints rated DANGEROUS).
+1. Tech debt that the round-trip corpus xfails: TD-EMIT-01 (indexes on partitioned tables), TD-INSPECT-01 (UNLOGGED), TD-INSPECT-02 (virtual generated columns).
+2. Phase 3b (MVP-B object types, M4) or Phase 4 TUI wiring (P4-TUI-05..07) — order to be decided; P4 views still run on mock data.
 
 ## Next Actions
-- P3-TEST-02 emitter snapshot corpus and P3-TEST-01 round-trip corpus; then TD-RISK-01; then M3 sign-off.
+- Fix the three corpus xfail TD items, then start Phase 3b MVP-B object types.
 
 ## Ready To Merge
 - None.

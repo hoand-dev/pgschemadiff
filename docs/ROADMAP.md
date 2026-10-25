@@ -5,7 +5,7 @@
 | **Phase 0** | Stabilization | M0: CI green on empty project; layered architecture enforced | Done except open P0-CI-03 coverage gate |
 | Phase 1 | Domain & Infrastructure (MVP-A) | M1: `pgsd inspect` dumps a JSON snapshot of a real PG18 database for tables/columns/indexes/FKs/constraints/schemas/extensions | Feature shipped; M1 caveat: P1-TEST-02 needs-human and 1000-object benchmark unmeasured |
 | Phase 2 | Diff engine | M2: `pgsd diff` outputs a typed `DeltaSet` JSON; hypothesis idempotent-diff property passes | Done; M2 reached at unit level; Docker integration not run locally |
-| Phase 3a | Migration generator (MVP-A) | M3: round-trip integration test green for MVP-A scope; `pgsd generate` + `pgsd apply` end-to-end | Near M3: emitters, transaction units, bundles, applier, `pgsd generate`/`apply`, PG18 round trip done; open: P3-TEST-02, P3-TEST-01 corpus, TD-RISK-01 |
+| Phase 3a | Migration generator (MVP-A) | M3: round-trip integration test green for MVP-A scope; `pgsd generate` + `pgsd apply` end-to-end | ✅ M3 reached 2026-10-26: PG18 round-trip corpus 43 passed / 3 strict xfail (TD-EMIT-01, TD-INSPECT-01, TD-INSPECT-02) |
 | Phase 3b | MVP-B object types | M4: views, matviews, functions, procedures, sequences, enums, triggers, RLS policies, composite/domain types all covered with round-trip tests | _not started_ |
 | Phase 4 | TUI | M5: Textual TUI ships with the screens specified in `docs/ui-design.md` | Shell and seven views implemented on mock data; real-use-case wiring remains |
 | Phase 5 | Production readiness | M6: HTML report, i18n, benchmark suite (10k objects < 10s), PyPI release, safe-migration cookbook | _not started_ |
@@ -38,10 +38,10 @@
 
 ### M3 (Phase 3a) — go/no-go gate
 
-- [ ] All MVP-A emitters implemented with snapshot tests
-- [ ] Risk classifier assigns correct levels for the canonical test corpus
+- [x] All MVP-A emitters implemented with snapshot tests
+- [x] Risk classifier assigns correct levels for the canonical test corpus
 - [x] Multi-file migration output validates against schema
-- [x] **Core round-trip integration test green** (seed schema; corpus pending in P3-TEST-01):
+- [x] **Core round-trip integration test green** (37-scenario PG18 corpus; known gaps tracked as TD items):
       `apply(emit(diff(∅, S)))` → `inspect()` → equal to `S`
 - [x] `pgsd generate` + `pgsd apply` end-to-end on a real PG18 container
 
