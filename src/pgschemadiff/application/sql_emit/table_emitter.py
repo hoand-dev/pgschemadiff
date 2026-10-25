@@ -31,6 +31,10 @@ def emit_create_table(delta: DeltaBase) -> tuple[SqlStatement, ...]:
         raise MigrationError("Create-table handler received a different delta type.")
 
     table = delta.table
+    if table.unlogged and (table.partition_info is not None or table.partition_of is not None):
+        raise MigrationError(
+            "UNLOGGED tables with partition metadata are unsupported by PostgreSQL 18."
+        )
     table_name = quote_qualified(table.qname)
     if table.partition_of is not None:
         parent = QualifiedName(
@@ -45,7 +49,8 @@ def emit_create_table(delta: DeltaBase) -> tuple[SqlStatement, ...]:
             render_column_definition(column)
             for column in sorted(table.columns, key=lambda column: column.position)
         )
-        create_sql = f"CREATE TABLE {table_name} ({columns})"
+        create_keyword = "CREATE UNLOGGED TABLE" if table.unlogged else "CREATE TABLE"
+        create_sql = f"{create_keyword} {table_name} ({columns})"
 
     if table.partition_info is not None:
         partition_key = catalog_fragment(table.partition_info.partition_key, "Partition key")
@@ -120,6 +125,9 @@ def emit_alter_table_attrs(delta: DeltaBase) -> tuple[SqlStatement, ...]:
                 delta,
             )
         )
+    if delta.new_unlogged is not None:
+        persistence = "UNLOGGED" if delta.new_unlogged else "LOGGED"
+        statements.append(_statement(f"ALTER TABLE {table_name} SET {persistence}", delta))
     if delta.new_comment is not None:
         comment = "NULL" if delta.new_comment == "" else quote_literal(delta.new_comment)
         statements.append(_statement(f"COMMENT ON TABLE {table_name} IS {comment}", delta))

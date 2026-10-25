@@ -73,8 +73,8 @@ _EXTENSION_REF = ObjectRef(
 )
 
 
-def _table(*, partition_of: PartitionOf | None = None) -> Table:
-    return Table(ref=_TABLE_REF, partition_of=partition_of)
+def _table(*, partition_of: PartitionOf | None = None, unlogged: bool = False) -> Table:
+    return Table(ref=_TABLE_REF, partition_of=partition_of, unlogged=unlogged)
 
 
 def _add_constraint(table_ref: ObjectRef, constraint: Constraint) -> AddConstraint:
@@ -436,6 +436,26 @@ def test_virtual_generated_column_addition_has_precise_safe_reason() -> None:
     assert assessment.level is RiskLevel.SAFE
     assert assessment.reason == (
         "Adds a virtual generated column; existing row values are computed on read, not rewritten."
+    )
+
+
+@pytest.mark.unit
+def test_unlogged_table_creation_stays_safe() -> None:
+    delta = CreateTable(target=_TABLE_REF, table=_table(unlogged=True))
+
+    assert classify_risk(delta).level is RiskLevel.SAFE
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("unlogged", [True, False], ids=["set-unlogged", "set-logged"])
+def test_table_persistence_change_is_dangerous_with_lock_reason(unlogged: bool) -> None:
+    delta = AlterTableAttrs(target=_TABLE_REF, new_unlogged=unlogged)
+
+    assessment = classify_risk(delta)
+
+    assert assessment.level is RiskLevel.DANGEROUS
+    assert assessment.reason == (
+        "Changing table persistence rewrites the table under an ACCESS EXCLUSIVE lock."
     )
 
 

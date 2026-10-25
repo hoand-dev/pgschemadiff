@@ -127,6 +127,9 @@ class Table(BaseModel):
     tablespace: str | None = None
     """Tablespace name.  ``None`` → default tablespace."""
 
+    unlogged: bool = False
+    """Whether the table is UNLOGGED and not crash-safe/replicated."""
+
     partition_info: PartitionInfo | None = None
     """Present when this table is itself a partitioned table (the root)."""
 

@@ -64,6 +64,24 @@ def test_attribute_rule_removes_only_named_bundled_table_attribute() -> None:
     assert delta.new_owner == "app_owner"
 
 
+def test_ignoring_owner_keeps_persistence_change() -> None:
+    table = _table_ref()
+    delta = AlterTableAttrs(target=table, new_owner="app_owner", new_unlogged=True)
+    deltas = DeltaSet.from_iterable((delta,))
+
+    kept = IgnoreRules(attributes=frozenset({(table, "owner")})).apply(deltas)
+    dropped = IgnoreRules(attributes=frozenset({(table, "owner"), (table, "unlogged")})).apply(
+        deltas
+    )
+
+    assert len(kept) == 1
+    kept_delta = kept.deltas[0]
+    assert isinstance(kept_delta, AlterTableAttrs)
+    assert kept_delta.new_owner is None
+    assert kept_delta.new_unlogged is True
+    assert len(dropped) == 0
+
+
 def test_attribute_rule_filters_atomic_column_delta_only() -> None:
     table = _table_ref()
     column = _column_ref(table, "status")

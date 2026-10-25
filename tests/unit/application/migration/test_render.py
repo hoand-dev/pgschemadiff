@@ -16,6 +16,7 @@ from pgschemadiff.domain.column import Column
 from pgschemadiff.domain.constraint import PrimaryKeyConstraint
 from pgschemadiff.domain.delta import (
     AddConstraint,
+    AlterTableAttrs,
     CreateIndex,
     CreateSchema,
     CreateTable,
@@ -110,6 +111,27 @@ def test_deltas_json_matches_diff_cli_serialization() -> None:
     content = dict(render_bundle(plan).files)["deltas.json"]
 
     assert content == (plan.delta_set.model_dump_json(indent=2) + "\n").encode("utf-8")
+
+
+def test_unlogged_delta_is_serialized_and_manifest_assesses_rewrite_risk() -> None:
+    delta = AlterTableAttrs(
+        target=_ref(ObjectKind.TABLE, "app", "events"),
+        new_unlogged=True,
+    )
+    plan = generate_migration(
+        DeltaSet.from_iterable((delta,)),
+        clock=lambda: _CREATED_AT,
+        id_factory=lambda: "unlogged-persistence",
+    )
+
+    files = dict(render_bundle(plan).files)
+    manifest = json.loads(files["manifest.json"])
+
+    assert b'"new_unlogged": true' in files["deltas.json"]
+    assert manifest["assessments"][0]["level"] == "dangerous"
+    assert manifest["assessments"][0]["reason"] == (
+        "Changing table persistence rewrites the table under an ACCESS EXCLUSIVE lock."
+    )
 
 
 def test_manifest_ranges_and_checksums_match_up_sql() -> None:

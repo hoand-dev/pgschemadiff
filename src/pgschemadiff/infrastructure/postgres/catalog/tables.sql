@@ -4,7 +4,7 @@
 -- Result columns:
 --   schema_name          text      -- owning schema
 --   table_name           text      -- table name
---   persistence          text      -- 'p' permanent / 't' temp / 'u' unlogged
+--   unlogged             bool      -- true when pg_class.relpersistence = 'u'
 --   partition_strategy   text|null -- 'h' hash / 'l' list / 'r' range, null if not partitioned
 --   partition_expr       text|null -- pg_get_partkeydef(c.oid) or null
 --   partition_of_schema  text|null -- parent schema if this table IS a partition
@@ -13,7 +13,7 @@
 SELECT
     n.nspname                                          AS schema_name,
     c.relname                                          AS table_name,
-    c.relpersistence::text                             AS persistence,
+    c.relpersistence = 'u'                              AS unlogged,
     pt.partstrat::text                                 AS partition_strategy,
     CASE
         WHEN pt.partrelid IS NOT NULL

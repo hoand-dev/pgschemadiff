@@ -74,7 +74,7 @@ _TableRow = namedtuple(
     [
         "schema_name",
         "table_name",
-        "persistence",
+        "unlogged",
         "partition_strategy",
         "partition_expr",
         "partition_of_schema",
@@ -144,6 +144,7 @@ def _make_table_row(
     schema: str = "public",
     table: str = "users",
     *,
+    unlogged: bool = False,
     partition_strategy: str | None = None,
     partition_expr: str | None = None,
     partition_of_schema: str | None = None,
@@ -153,7 +154,7 @@ def _make_table_row(
     return _TableRow(
         schema_name=schema,
         table_name=table,
-        persistence="p",
+        unlogged=unlogged,
         partition_strategy=partition_strategy,
         partition_expr=partition_expr,
         partition_of_schema=partition_of_schema,
@@ -437,6 +438,19 @@ async def test_schema_filter_none_includes_all() -> None:
     schema_names = [s.name for s in result.schemas]
     assert "public" in schema_names
     assert "audit" in schema_names
+
+
+@pytest.mark.unit
+def test_build_tables_maps_unlogged_state() -> None:
+    tables_by_schema, _ = PgCatalogInspector._build_tables(
+        [_make_table_row(unlogged=True)],
+        ["public"],
+        {},
+        {},
+        {},
+    )
+
+    assert tables_by_schema["public"][0].unlogged is True
 
 
 @pytest.mark.unit

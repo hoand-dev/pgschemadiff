@@ -283,11 +283,11 @@ def _seed(dsn: str, statements: list[str]) -> None:
         pytest.param(
             "unlogged-table-persistence",
             [_APP, "CREATE TABLE app.items (id integer)"],
-            [_APP, "CREATE UNLOGGED TABLE app.items (id integer)"],
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason="TD-INSPECT-01: table persistence is not preserved by inspection.",
-            ),
+            [
+                _APP,
+                "CREATE UNLOGGED TABLE app.items (id integer)",
+                "CREATE UNLOGGED TABLE app.unlogged_items (id integer)",
+            ],
         ),
     ],
 )

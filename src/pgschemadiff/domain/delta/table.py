@@ -208,6 +208,7 @@ class AlterTableAttrs(DeltaBase):
     * ``ALTER TABLE … OWNER TO new_owner``
     * ``ALTER TABLE … SET TABLESPACE new_tablespace``
     * ``COMMENT ON TABLE … IS '…'``
+    * ``ALTER TABLE … SET LOGGED`` / ``SET UNLOGGED``
     * Partition metadata (strategy / partition_of) changes are expressed
       here at the table-level; column/constraint payload is handled in
       P2-DOM-01c/d/e.
@@ -238,6 +239,9 @@ class AlterTableAttrs(DeltaBase):
     interpret that as ``COMMENT ON TABLE … IS NULL``.
     """
 
+    new_unlogged: bool | None = None
+    """New persistence state, or ``None`` if persistence has not changed."""
+
     new_partition_info: PartitionInfo | None = None
     """New partition root metadata, or ``None`` if not changed."""
 
@@ -250,12 +254,13 @@ class AlterTableAttrs(DeltaBase):
             self.new_owner is None
             and self.new_tablespace is None
             and self.new_comment is None
+            and self.new_unlogged is None
             and self.new_partition_info is None
             and self.new_partition_of is None
         ):
             raise ValueError(
                 "AlterTableAttrs must change at least one attribute; "
-                "all five new_* fields are None (no-op)"
+                "all six new_* fields are None (no-op)"
             )
         return self
 

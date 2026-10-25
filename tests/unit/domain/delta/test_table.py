@@ -409,6 +409,12 @@ def test_rename_table_allows_cross_schema_rename() -> None:
 
 
 @pytest.mark.unit
+def test_alter_table_attrs_declares_optional_unlogged_change() -> None:
+    assert "new_unlogged" in AlterTableAttrs.model_fields
+    assert AlterTableAttrs.model_fields["new_unlogged"].default is None
+
+
+@pytest.mark.unit
 def test_alter_table_attrs_all_none_rejected(users_ref: ObjectRef) -> None:
     """AlterTableAttrs with all optional fields None is a no-op and is REJECTED."""
     with pytest.raises(ValidationError, match="at least one attribute"):
@@ -433,6 +439,13 @@ def test_alter_table_attrs_tablespace_only(users_ref: ObjectRef) -> None:
 def test_alter_table_attrs_comment_only(users_ref: ObjectRef) -> None:
     delta = AlterTableAttrs(target=users_ref, new_comment="Stores user accounts")
     assert delta.new_comment == "Stores user accounts"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("unlogged", [True, False], ids=["unlogged", "logged"])
+def test_alter_table_attrs_persistence_only(users_ref: ObjectRef, unlogged: bool) -> None:
+    delta = AlterTableAttrs(target=users_ref, new_unlogged=unlogged)
+    assert delta.new_unlogged is unlogged
 
 
 @pytest.mark.unit
@@ -510,6 +523,7 @@ def test_alter_table_attrs_json_round_trip(users_ref: ObjectRef) -> None:
         new_tablespace="big_ssd",
         new_comment="main users",
         new_partition_info=pi,
+        new_unlogged=True,
     )
     payload = delta.model_dump_json()
     restored = AlterTableAttrs.model_validate_json(payload)

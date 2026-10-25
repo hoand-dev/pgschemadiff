@@ -20,6 +20,8 @@
     transactional=true new_unit=false sql=ALTER TABLE "App Schema"."Order""Items" OWNER TO "Role ""Owner"
     transactional=true new_unit=false sql=ALTER TABLE "App Schema"."Order""Items" SET TABLESPACE "fast space"
     transactional=true new_unit=false sql=COMMENT ON TABLE "App Schema"."Order""Items" IS 'Customer''s order table'
+  create unlogged table: create_table target=table "App Schema"."Order""Items"
+    transactional=true new_unit=false sql=CREATE UNLOGGED TABLE "App Schema"."Order""Items" ("id" integer)
   create table with virtual generated column: create_table target=table "App Schema"."accounts"
     transactional=true new_unit=false sql=CREATE TABLE "App Schema"."accounts" ("value" integer, "doubled" integer GENERATED ALWAYS AS (value * 2) VIRTUAL)
   create partitioned parent: create_table target=table "App Schema"."events"
@@ -35,6 +37,8 @@
     transactional=true new_unit=false sql=ALTER TABLE "App Schema"."Order""Items" OWNER TO "New Owner"
     transactional=true new_unit=false sql=ALTER TABLE "App Schema"."Order""Items" SET TABLESPACE "archive"
     transactional=true new_unit=false sql=COMMENT ON TABLE "App Schema"."Order""Items" IS NULL
+  set table unlogged: alter_table_attrs target=table "App Schema"."Order""Items"
+    transactional=true new_unit=false sql=ALTER TABLE "App Schema"."Order""Items" SET UNLOGGED
   add nullable column: add_column target=column "App Schema"."accounts"."optional_note"
     transactional=true new_unit=false sql=ALTER TABLE "App Schema"."accounts" ADD COLUMN "optional_note" text
   add not-null column with default: add_column target=column "App Schema"."accounts"."priority"

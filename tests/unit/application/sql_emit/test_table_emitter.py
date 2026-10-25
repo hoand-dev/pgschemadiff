@@ -31,6 +31,7 @@ def _table(
     partition_info: PartitionInfo | None = None,
     partition_of: PartitionOf | None = None,
     comment: str | None = None,
+    unlogged: bool = False,
 ) -> Table:
     return Table(
         ref=ref or _table_ref(),
@@ -41,6 +42,7 @@ def _table(
         partition_info=partition_info,
         partition_of=partition_of,
         comment=comment,
+        unlogged=unlogged,
     )
 
 
@@ -112,6 +114,75 @@ def test_create_table_sorts_columns_ignores_constraints_and_emits_followups(
     statements = _assert_emitted(handlers()[CreateTable](delta), delta, 4)
 
     assert tuple(statement.sql for statement in statements) == snapshot
+
+
+@pytest.mark.unit
+def test_create_unlogged_table_uses_unlogged_keyword() -> None:
+    ref = _table_ref()
+    table = _table(
+        ref=ref,
+        columns=(Column(name="id", position=1, data_type="integer"),),
+        unlogged=True,
+    )
+    delta = CreateTable(target=ref, table=table)
+
+    statements = _assert_emitted(handlers()[CreateTable](delta), delta, 1)
+
+    assert tuple(statement.sql for statement in statements) == (
+        'CREATE UNLOGGED TABLE "Sales"."Order""Items" ("id" integer)',
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("unlogged", "sql_action"),
+    [(True, "UNLOGGED"), (False, "LOGGED")],
+    ids=["set-unlogged", "set-logged"],
+)
+def test_alter_table_attrs_changes_persistence(unlogged: bool, sql_action: str) -> None:
+    delta = AlterTableAttrs(target=_table_ref(), new_unlogged=unlogged)
+
+    statements = _assert_emitted(handlers()[AlterTableAttrs](delta), delta, 1)
+
+    assert tuple(statement.sql for statement in statements) == (
+        f'ALTER TABLE "Sales"."Order""Items" SET {sql_action}',
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("partition_info", "partition_of"),
+    [
+        pytest.param(
+            PartitionInfo(strategy=PartitionStrategy.RANGE, partition_key="RANGE (id)"),
+            None,
+            id="partition-root",
+        ),
+        pytest.param(
+            None,
+            PartitionOf(parent_namespace="Sales", parent_name="events"),
+            id="partition-child",
+        ),
+    ],
+)
+def test_create_unlogged_partition_table_fails_closed(
+    partition_info: PartitionInfo | None,
+    partition_of: PartitionOf | None,
+) -> None:
+    ref = _table_ref()
+    table = _table(
+        ref=ref,
+        partition_info=partition_info,
+        partition_of=partition_of,
+        unlogged=True,
+    )
+    delta = CreateTable(target=ref, table=table)
+
+    with pytest.raises(
+        MigrationError,
+        match="UNLOGGED tables with partition metadata are unsupported by PostgreSQL 18",
+    ):
+        handlers()[CreateTable](delta)
 
 
 def test_create_partition_root_uses_full_pg_get_partkeydef_clause(

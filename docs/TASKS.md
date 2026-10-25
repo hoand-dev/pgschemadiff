@@ -91,7 +91,7 @@
 | [x] | P3-SQL-04 | `index_emitter.py` (CONCURRENTLY default) | backend-engineer | P0 | P3-SQL-01 | M |
 | [x] | P3-SQL-05 | `constraint_emitter.py` (NOT VALID + VALIDATE) | backend-engineer | P0 | P3-SQL-01 | M |
 | [x] | P3-SQL-06 | `schema_emitter.py` + `registry.py` (schema/extension DDL, `default_handlers()`) | backend-engineer | P0 | P3-SQL-01 | M |
-| [ ] | TD-INSPECT-01 | Capture `relpersistence` (UNLOGGED) in inspector/domain | backend-engineer | P2 | P3-SQL-02 | S |
+| [x] | TD-INSPECT-01 | Capture `relpersistence` (UNLOGGED) in inspector/domain | backend-engineer | P2 | P3-SQL-02 | S |
 | [x] | TD-INSPECT-03 | Inspector `SET LOCAL search_path = pg_catalog` (qualified deparser output), qualified collations | backend-engineer | P0 | P3-SQL-04 | S |
 | [x] | TD-INSPECT-02 | Support PG18 virtual generated columns (inspector + column emitter) | backend-engineer | P2 | TD-INSPECT-03 | S |
 | [ ] | TD-EMIT-01 | Indexes on partitioned tables (`ON ONLY`, no CONCURRENTLY) — emitter currently fails closed | backend-engineer | P2 | P3-SQL-04 | M |

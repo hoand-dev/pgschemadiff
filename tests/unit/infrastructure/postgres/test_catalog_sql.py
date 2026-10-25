@@ -77,6 +77,13 @@ def test_tables_sql_selects_from_pg_class() -> None:
 
 
 @pytest.mark.unit
+def test_tables_sql_projects_unlogged_persistence() -> None:
+    sql = _load_sql("tables.sql")
+    assert "c.relpersistence = 'u'" in sql
+    assert "AS unlogged" in sql
+
+
+@pytest.mark.unit
 def test_tables_sql_excludes_system_schemas() -> None:
     sql = _load_sql("tables.sql")
     # Must filter out pg_* schemas and information_schema

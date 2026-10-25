@@ -293,6 +293,17 @@ def _emitter_cases() -> tuple[tuple[str, Delta], ...]:
             CreateTable(target=plain_table_ref, table=plain_table),
         ),
         (
+            "create unlogged table",
+            CreateTable(
+                target=plain_table_ref,
+                table=Table(
+                    ref=plain_table_ref,
+                    columns=(Column(name="id", position=1, data_type="integer"),),
+                    unlogged=True,
+                ),
+            ),
+        ),
+        (
             "create table with virtual generated column",
             CreateTable(
                 target=account_ref,
@@ -359,6 +370,10 @@ def _emitter_cases() -> tuple[tuple[str, Delta], ...]:
                 new_tablespace="archive",
                 new_comment="",
             ),
+        ),
+        (
+            "set table unlogged",
+            AlterTableAttrs(target=plain_table_ref, new_unlogged=True),
         ),
         (
             "add nullable column",

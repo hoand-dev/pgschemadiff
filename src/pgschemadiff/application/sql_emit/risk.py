@@ -155,7 +155,12 @@ def classify_risk(  # noqa: PLR0912, PLR0915
         has_partition_change = (
             delta.new_partition_info is not None or delta.new_partition_of is not None
         )
-        if has_partition_change and delta.new_tablespace is not None:
+        if delta.new_unlogged is not None:
+            level, reason = (
+                RiskLevel.DANGEROUS,
+                "Changing table persistence rewrites the table under an ACCESS EXCLUSIVE lock.",
+            )
+        elif has_partition_change and delta.new_tablespace is not None:
             level, reason = (
                 RiskLevel.DANGEROUS,
                 "Changes partition metadata and tablespace; partition risk is highest.",

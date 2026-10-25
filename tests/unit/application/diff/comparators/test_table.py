@@ -61,6 +61,7 @@ from pgschemadiff.domain.table import (
     PartitionStrategy,
     Table,
 )
+from pgschemadiff.shared.errors import DiffError
 
 if TYPE_CHECKING:
     from pgschemadiff.domain.constraint import Constraint
@@ -104,6 +105,7 @@ def _make_table(
     constraints: tuple[Constraint, ...] = (),
     partition_info: PartitionInfo | None = None,
     partition_of: PartitionOf | None = None,
+    unlogged: bool = False,
 ) -> Table:
     return Table(
         ref=_table_ref(schema, name),
@@ -114,6 +116,7 @@ def _make_table(
         comment=comment,
         partition_info=partition_info,
         partition_of=partition_of,
+        unlogged=unlogged,
     )
 
 
@@ -419,6 +422,40 @@ def test_comment_change_emits_alter_table_attrs() -> None:
     assert delta.new_comment == "new comment"
     assert delta.new_owner is None
     assert delta.new_tablespace is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("source_unlogged", "target_unlogged"),
+    [(False, True), (True, False)],
+    ids=["set-unlogged", "set-logged"],
+)
+def test_persistence_change_emits_alter_table_attrs(
+    source_unlogged: bool,
+    target_unlogged: bool,
+) -> None:
+    source = _make_table_with_col(unlogged=source_unlogged)
+    target = _make_table_with_col(unlogged=target_unlogged)
+
+    result = TableComparator().compare(source, target)
+
+    assert len(result) == 1
+    delta = result[0]
+    assert isinstance(delta, AlterTableAttrs)
+    assert delta.new_unlogged is target_unlogged
+
+
+@pytest.mark.unit
+def test_persistence_change_on_partitioned_table_fails_closed() -> None:
+    partition_info = PartitionInfo(
+        strategy=PartitionStrategy.RANGE,
+        partition_key="RANGE (id)",
+    )
+    source = _make_table_with_col(partition_info=partition_info)
+    target = _make_table_with_col(partition_info=partition_info, unlogged=True)
+
+    with pytest.raises(DiffError, match=r"UNLOGGED persistence.*partitioned.*PostgreSQL 18"):
+        TableComparator().compare(source, target)
 
 
 @pytest.mark.unit

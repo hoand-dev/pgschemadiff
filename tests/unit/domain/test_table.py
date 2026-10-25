@@ -117,6 +117,7 @@ def test_table_minimal_construction() -> None:
     table = Table(ref=ref)
     assert table.columns == ()
     assert table.constraints == ()
+    assert table.unlogged is False
     assert table.owner is None
     assert table.tablespace is None
     assert table.partition_info is None

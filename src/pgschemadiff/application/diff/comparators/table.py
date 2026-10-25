@@ -429,12 +429,22 @@ class TableComparator:
         * ``owner``
         * ``tablespace``
         * ``comment``
+        * ``unlogged``
         * ``partition_info``
         * ``partition_of``
         """
         new_owner = target.owner if target.owner != source.owner else None
         new_tablespace = target.tablespace if target.tablespace != source.tablespace else None
         new_comment = target.comment if target.comment != source.comment else None
+        new_unlogged = target.unlogged if target.unlogged != source.unlogged else None
+        if new_unlogged is not None and any(
+            table.partition_info is not None or table.partition_of is not None
+            for table in (source, target)
+        ):
+            raise DiffError(
+                "UNLOGGED persistence changes for partitioned tables are unsupported "
+                "in PostgreSQL 18."
+            )
         new_partition_info = (
             target.partition_info if target.partition_info != source.partition_info else None
         )
@@ -461,6 +471,7 @@ class TableComparator:
             new_owner is None
             and new_tablespace is None
             and new_comment is None
+            and new_unlogged is None
             and new_partition_info is None
             and new_partition_of is None
         ):
@@ -471,6 +482,7 @@ class TableComparator:
             new_owner=new_owner,
             new_tablespace=new_tablespace,
             new_comment=new_comment,
+            new_unlogged=new_unlogged,
             new_partition_info=new_partition_info,
             new_partition_of=new_partition_of,
         )

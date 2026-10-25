@@ -721,6 +721,7 @@ class PgCatalogInspector:
                     ),
                     columns=tuple(cols),
                     constraints=tuple(_safe_map_constraints(cons_by_table.get(key, []), col_names)),
+                    unlogged=row.unlogged,
                     partition_info=_build_partition_info(row),
                     partition_of=_build_partition_of(row),
                 )
