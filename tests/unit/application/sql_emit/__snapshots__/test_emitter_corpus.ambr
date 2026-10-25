@@ -33,6 +33,128 @@
     transactional=true new_unit=false isolated=false sql=ALTER TYPE "App ""Schema"."Record""Type" OWNER TO "new_owner"
   replace composite type blocked: replace_composite_type target=composite_type "App ""Schema"."Record""Type"
     raises MigrationError
+  create domain: create_domain target=domain_type "App ""Schema"."Positive""Domain"
+    transactional=true new_unit=false isolated=false sql=CREATE DOMAIN "App ""Schema"."Positive""Domain" AS numeric(12, 2) COLLATE "App ""Schema""".case_insensitive DEFAULT 0 NOT NULL CONSTRAINT "nonzero ""value" CHECK (VALUE <> 0)
+    transactional=true new_unit=false isolated=false sql=ALTER DOMAIN "App ""Schema"."Positive""Domain" OWNER TO "Role ""Owner"
+  create domain with not-valid check: create_domain target=domain_type "App ""Schema"."Positive""Domain"
+    transactional=true new_unit=false isolated=false sql=CREATE DOMAIN "App ""Schema"."Positive""Domain" AS numeric(12, 2) COLLATE "App ""Schema""".case_insensitive DEFAULT 0 NOT NULL
+    transactional=true new_unit=false isolated=false sql=ALTER DOMAIN "App ""Schema"."Positive""Domain" ADD CONSTRAINT "new_check" CHECK (VALUE < 100) NOT VALID
+    transactional=true new_unit=false isolated=false sql=ALTER DOMAIN "App ""Schema"."Positive""Domain" OWNER TO "Role ""Owner"
+  drop domain: drop_domain target=domain_type "App ""Schema"."Positive""Domain"
+    transactional=true new_unit=false isolated=false sql=DROP DOMAIN "App ""Schema"."Positive""Domain" RESTRICT
+  set domain default: alter_domain_default target=domain_type "App ""Schema"."Positive""Domain"
+    transactional=true new_unit=false isolated=false sql=ALTER DOMAIN "App ""Schema"."Positive""Domain" SET DEFAULT 0
+  drop domain default: alter_domain_default target=domain_type "App ""Schema"."Positive""Domain"
+    transactional=true new_unit=false isolated=false sql=ALTER DOMAIN "App ""Schema"."Positive""Domain" DROP DEFAULT
+  set domain not null: alter_domain_nullability target=domain_type "App ""Schema"."Positive""Domain"
+    transactional=true new_unit=false isolated=false sql=ALTER DOMAIN "App ""Schema"."Positive""Domain" SET NOT NULL
+  drop domain not null: alter_domain_nullability target=domain_type "App ""Schema"."Positive""Domain"
+    transactional=true new_unit=false isolated=false sql=ALTER DOMAIN "App ""Schema"."Positive""Domain" DROP NOT NULL
+  add and validate domain check: add_domain_check target=domain_type "App ""Schema"."Positive""Domain"
+    transactional=true new_unit=false isolated=true sql=ALTER DOMAIN "App ""Schema"."Positive""Domain" ADD CONSTRAINT "positive" CHECK (VALUE > 0) NOT VALID
+    transactional=true new_unit=false isolated=true sql=DO $pgschemadiff$
+  DECLARE
+      old_transaction record;
+  BEGIN
+      IF EXISTS (
+          SELECT 1
+          FROM pg_catalog.pg_stat_activity
+          WHERE datname = pg_catalog.current_database()
+            AND pid <> pg_catalog.pg_backend_pid()
+            AND state IS DISTINCT FROM 'idle'
+            AND xact_start IS NULL
+      ) THEN
+          RAISE EXCEPTION USING MESSAGE =
+              'Cannot safely validate a domain check without visibility into all '
+              || 'active transactions; grant pg_read_all_stats or drain transactions manually.';
+      END IF;
+  
+      IF EXISTS (
+          SELECT 1
+          FROM pg_catalog.pg_prepared_xacts
+          WHERE database = pg_catalog.current_database()
+      ) THEN
+          RAISE EXCEPTION 'Cannot safely validate a domain check while prepared transactions exist.';
+      END IF;
+  
+      FOR old_transaction IN
+          SELECT pid, backend_start, xact_start
+          FROM pg_catalog.pg_stat_activity
+          WHERE datname = pg_catalog.current_database()
+            AND pid <> pg_catalog.pg_backend_pid()
+            AND xact_start IS NOT NULL
+      LOOP
+          LOOP
+              PERFORM pg_catalog.pg_stat_clear_snapshot();
+              EXIT WHEN NOT EXISTS (
+                  SELECT 1
+                  FROM pg_catalog.pg_stat_activity
+                  WHERE pid = old_transaction.pid
+                    AND backend_start = old_transaction.backend_start
+                    AND xact_start = old_transaction.xact_start
+              );
+              PERFORM pg_catalog.pg_sleep(0.1);
+          END LOOP;
+      END LOOP;
+  END
+  $pgschemadiff$
+    transactional=true new_unit=false isolated=true sql=ALTER DOMAIN "App ""Schema"."Positive""Domain" VALIDATE CONSTRAINT "positive"
+  add not-valid domain check: add_domain_check target=domain_type "App ""Schema"."Positive""Domain"
+    transactional=true new_unit=false isolated=true sql=ALTER DOMAIN "App ""Schema"."Positive""Domain" ADD CONSTRAINT "new_check" CHECK (VALUE < 100) NOT VALID
+  validate domain check: validate_domain_check target=domain_type "App ""Schema"."Positive""Domain"
+    transactional=true new_unit=false isolated=true sql=DO $pgschemadiff$
+  DECLARE
+      old_transaction record;
+  BEGIN
+      IF EXISTS (
+          SELECT 1
+          FROM pg_catalog.pg_stat_activity
+          WHERE datname = pg_catalog.current_database()
+            AND pid <> pg_catalog.pg_backend_pid()
+            AND state IS DISTINCT FROM 'idle'
+            AND xact_start IS NULL
+      ) THEN
+          RAISE EXCEPTION USING MESSAGE =
+              'Cannot safely validate a domain check without visibility into all '
+              || 'active transactions; grant pg_read_all_stats or drain transactions manually.';
+      END IF;
+  
+      IF EXISTS (
+          SELECT 1
+          FROM pg_catalog.pg_prepared_xacts
+          WHERE database = pg_catalog.current_database()
+      ) THEN
+          RAISE EXCEPTION 'Cannot safely validate a domain check while prepared transactions exist.';
+      END IF;
+  
+      FOR old_transaction IN
+          SELECT pid, backend_start, xact_start
+          FROM pg_catalog.pg_stat_activity
+          WHERE datname = pg_catalog.current_database()
+            AND pid <> pg_catalog.pg_backend_pid()
+            AND xact_start IS NOT NULL
+      LOOP
+          LOOP
+              PERFORM pg_catalog.pg_stat_clear_snapshot();
+              EXIT WHEN NOT EXISTS (
+                  SELECT 1
+                  FROM pg_catalog.pg_stat_activity
+                  WHERE pid = old_transaction.pid
+                    AND backend_start = old_transaction.backend_start
+                    AND xact_start = old_transaction.xact_start
+              );
+              PERFORM pg_catalog.pg_sleep(0.1);
+          END LOOP;
+      END LOOP;
+  END
+  $pgschemadiff$
+    transactional=true new_unit=false isolated=true sql=ALTER DOMAIN "App ""Schema"."Positive""Domain" VALIDATE CONSTRAINT "new_check"
+  drop domain check: drop_domain_check target=domain_type "App ""Schema"."Positive""Domain"
+    transactional=true new_unit=false isolated=false sql=ALTER DOMAIN "App ""Schema"."Positive""Domain" DROP CONSTRAINT "old_check"
+  alter domain owner: alter_domain_attrs target=domain_type "App ""Schema"."Positive""Domain"
+    transactional=true new_unit=false isolated=false sql=ALTER DOMAIN "App ""Schema"."Positive""Domain" OWNER TO "new_owner"
+  replace domain base type blocked: replace_domain_type target=domain_type "App ""Schema"."Positive""Domain"
+    raises MigrationError
   create schema: create_schema target=schema "public"."Billing"
     transactional=true new_unit=false isolated=false sql=CREATE SCHEMA "Billing" AUTHORIZATION "Role ""Owner"
     transactional=true new_unit=false isolated=false sql=COMMENT ON SCHEMA "Billing" IS 'Billing schema'

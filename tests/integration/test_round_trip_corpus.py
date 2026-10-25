@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import psycopg
 import pytest
 
-from pgschemadiff.application.migration.apply import apply_migration
+from pgschemadiff.application.migration.apply import ApplyResult, apply_migration
 from pgschemadiff.application.migration.bundle import load_bundle
 from pgschemadiff.application.migration.generate import generate_migration
 from pgschemadiff.application.sql_emit.risk import RiskLevel
@@ -16,6 +16,7 @@ from pgschemadiff.infrastructure.fs.bundle_reader import FilesystemBundleReader
 from pgschemadiff.infrastructure.fs.migration_writer import FilesystemMigrationWriter
 from pgschemadiff.infrastructure.postgres.applier import open_executor
 from pgschemadiff.presentation.cli.commands.diff import compare_urls
+from pgschemadiff.shared.errors import ApplyMigrationError, RiskGateError
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -131,6 +132,62 @@ def _seed(dsn: str, statements: list[str]) -> None:
                 "CREATE TYPE app.payload AS (value integer)",
                 "CREATE TABLE app.events (payload app.payload)",
             ],
+            [_APP],
+        ),
+        pytest.param(
+            "create-domain-and-use",
+            [_APP],
+            [
+                _APP,
+                "CREATE DOMAIN app.positive AS integer CHECK (VALUE > 0)",
+                "CREATE TABLE app.domain_values (value app.positive)",
+            ],
+        ),
+        pytest.param(
+            "set-domain-default",
+            [_APP, "CREATE DOMAIN app.positive AS integer"],
+            [_APP, "CREATE DOMAIN app.positive AS integer DEFAULT 7"],
+        ),
+        pytest.param(
+            "drop-domain-default",
+            [_APP, "CREATE DOMAIN app.positive AS integer DEFAULT 7"],
+            [_APP, "CREATE DOMAIN app.positive AS integer"],
+        ),
+        pytest.param(
+            "set-domain-not-null",
+            [_APP, "CREATE DOMAIN app.positive AS integer"],
+            [_APP, "CREATE DOMAIN app.positive AS integer NOT NULL"],
+        ),
+        pytest.param(
+            "drop-domain-not-null",
+            [_APP, "CREATE DOMAIN app.positive AS integer NOT NULL"],
+            [_APP, "CREATE DOMAIN app.positive AS integer"],
+        ),
+        pytest.param(
+            "add-domain-check",
+            [_APP, "CREATE DOMAIN app.positive AS integer"],
+            [_APP, "CREATE DOMAIN app.positive AS integer CHECK (VALUE > 0)"],
+        ),
+        pytest.param(
+            "validate-domain-check",
+            [
+                _APP,
+                "CREATE DOMAIN app.positive AS integer",
+                (
+                    "ALTER DOMAIN app.positive ADD CONSTRAINT positive_check "
+                    "CHECK (VALUE > 0) NOT VALID"
+                ),
+            ],
+            [_APP, "CREATE DOMAIN app.positive AS integer CHECK (VALUE > 0)"],
+        ),
+        pytest.param(
+            "drop-domain-check",
+            [_APP, "CREATE DOMAIN app.positive AS integer CHECK (VALUE > 0)"],
+            [_APP, "CREATE DOMAIN app.positive AS integer"],
+        ),
+        pytest.param(
+            "drop-domain",
+            [_APP, "CREATE DOMAIN app.positive AS integer"],
             [_APP],
         ),
         pytest.param(
@@ -456,3 +513,102 @@ async def test_pg18_round_trip_corpus(
 
     remaining = await compare_urls(pg_test_dsn, pg_test_dsn2, schemas=None)
     assert remaining.is_empty(), scenario
+
+
+@pytest.mark.integration
+async def test_invalid_domain_check_validation_keeps_applied_unit_history(
+    pg_test_dsn: str,
+    pg_test_dsn2: str,
+    tmp_path: Path,
+) -> None:
+    current_sql = [
+        _APP,
+        "CREATE DOMAIN app.positive AS integer",
+        "CREATE TABLE app.domain_values (value app.positive)",
+        "INSERT INTO app.domain_values VALUES (-1)",
+    ]
+    desired_sql = [
+        _APP,
+        "CREATE DOMAIN app.positive AS integer CHECK (VALUE > 0)",
+        "CREATE TABLE app.domain_values (value app.positive)",
+    ]
+    _seed(pg_test_dsn, current_sql)
+    _seed(pg_test_dsn2, desired_sql)
+
+    delta_set = await compare_urls(pg_test_dsn, pg_test_dsn2, schemas=None)
+    plan = generate_migration(
+        delta_set,
+        max_risk=RiskLevel.DESTRUCTIVE,
+        clock=lambda: datetime(2026, 10, 25, 12, 0, tzinfo=UTC),
+        id_factory=lambda: "pg18-corpus-domain-validation-failure",
+    )
+    bundle_dir = FilesystemMigrationWriter().write(plan, tmp_path)
+    manifest_bytes, up_sql_bytes = FilesystemBundleReader().read(bundle_dir)
+    bundle = load_bundle(manifest_bytes, up_sql_bytes)
+
+    async with open_executor(pg_test_dsn) as executor:
+        with pytest.raises(ApplyMigrationError) as failure:
+            await apply_migration(bundle, executor, approve_destructive=True)
+        result = failure.value.result
+        assert isinstance(result, ApplyResult)
+        assert result.status == "failed"
+        assert result.applied_unit_count == 1
+        assert result.failed_unit_index == 1
+        assert result.sqlstate == "23514"
+        history = await executor.load_history(bundle.id)
+
+    assert history is not None
+    assert history.status == "failed"
+    assert tuple(unit.status for unit in history.units) == ("applied", "failed")
+    with psycopg.connect(pg_test_dsn) as connection:
+        row = connection.execute(
+            "SELECT convalidated FROM pg_catalog.pg_constraint "
+            "WHERE contypid = 'app.positive'::regtype AND conname = 'positive_check'"
+        ).fetchone()
+    assert row == (False,)
+
+
+@pytest.mark.integration
+async def test_domain_check_inside_array_composite_or_range_is_blocked(
+    pg_test_dsn: str,
+    pg_test_dsn2: str,
+) -> None:
+    current_sql = [
+        _APP,
+        "CREATE DOMAIN app.positive AS integer",
+        "CREATE TYPE app.positive_record AS (value app.positive)",
+        "CREATE TYPE app.positive_range AS RANGE (subtype = app.positive)",
+        "CREATE TABLE app.domain_containers ("
+        "array_values app.positive[], record_value app.positive_record, "
+        "range_value app.positive_range)",
+    ]
+    desired_sql = [
+        _APP,
+        "CREATE DOMAIN app.positive AS integer CHECK (VALUE > 0)",
+        "CREATE TYPE app.positive_record AS (value app.positive)",
+        "CREATE TYPE app.positive_range AS RANGE (subtype = app.positive)",
+        "CREATE TABLE app.domain_containers ("
+        "array_values app.positive[], record_value app.positive_record, "
+        "range_value app.positive_range)",
+    ]
+    _seed(pg_test_dsn, current_sql)
+    _seed(pg_test_dsn2, desired_sql)
+
+    delta_set = await compare_urls(pg_test_dsn, pg_test_dsn2, schemas=None)
+
+    with pytest.raises(RiskGateError, match="Domain checks used inside"):
+        generate_migration(delta_set, max_risk=RiskLevel.DESTRUCTIVE)
+
+
+@pytest.mark.integration
+async def test_domain_base_type_change_is_blocked(
+    pg_test_dsn: str,
+    pg_test_dsn2: str,
+) -> None:
+    _seed(pg_test_dsn, [_APP, "CREATE DOMAIN app.positive AS integer"])
+    _seed(pg_test_dsn2, [_APP, "CREATE DOMAIN app.positive AS text"])
+
+    delta_set = await compare_urls(pg_test_dsn, pg_test_dsn2, schemas=None)
+
+    with pytest.raises(RiskGateError, match="base type or collation"):
+        generate_migration(delta_set, max_risk=RiskLevel.DESTRUCTIVE)

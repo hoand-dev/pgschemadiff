@@ -20,6 +20,7 @@ from pgschemadiff.domain.delta import (
     DeltaBase,
     DeltaSet,
     ReplaceCompositeType,
+    ReplaceDomainType,
     ReplaceEnumLabels,
 )
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
@@ -41,7 +42,11 @@ def _union_members(annotation: object) -> set[type[DeltaBase]]:
 
 
 def test_default_handlers_cover_every_emittable_delta_union_member() -> None:
-    members = _union_members(Delta) - {ReplaceEnumLabels, ReplaceCompositeType}
+    members = _union_members(Delta) - {
+        ReplaceCompositeType,
+        ReplaceDomainType,
+        ReplaceEnumLabels,
+    }
     handlers = default_handlers()
 
     assert set(handlers) == members

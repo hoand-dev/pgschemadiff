@@ -19,6 +19,7 @@ from typing import Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from pgschemadiff.domain.composite_type import CompositeType
+from pgschemadiff.domain.domain_type import DomainType
 from pgschemadiff.domain.enum_type import EnumType
 from pgschemadiff.domain.extension import Extension
 from pgschemadiff.domain.identity import ObjectRef, QualifiedName
@@ -149,6 +150,13 @@ class Database(BaseModel):
         result: list[CompositeType] = []
         for schema in self.schemas:
             result.extend(schema.composite_types)
+        return tuple(result)
+
+    def all_domain_types(self) -> tuple[DomainType, ...]:
+        """Return all domains across schemas, in schema-then-name order."""
+        result: list[DomainType] = []
+        for schema in self.schemas:
+            result.extend(schema.domain_types)
         return tuple(result)
 
     def all_indexes(self) -> tuple[Index, ...]:

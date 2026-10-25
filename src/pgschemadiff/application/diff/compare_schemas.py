@@ -8,6 +8,7 @@ from pgschemadiff.application.diff.comparators import (
     ColumnComparator,
     CompositeTypeComparator,
     ConstraintComparator,
+    DomainTypeComparator,
     EnumComparator,
     ExtensionComparator,
     IndexComparator,
@@ -40,6 +41,7 @@ async def compare_schemas(
         ExtensionComparator(),
         EnumComparator(),
         CompositeTypeComparator(),
+        DomainTypeComparator(),
         TableComparator(
             column_comparator=ColumnComparator(),
             constraint_comparator=ConstraintComparator(),

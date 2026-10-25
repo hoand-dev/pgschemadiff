@@ -271,6 +271,7 @@
                 "indexes": [],
                 "enums": [],
                 "composite_types": [],
+                "domain_types": [],
                 "comment": null
               }
             },
@@ -449,7 +450,7 @@
         - `up.sql`: `a6e992690fd58b789759956c7ec05f9c01aa1694ab140f106d2a915c6f8bd526`
         - `down.sql`: `e87201d8d4470825bb2bea1bd7a4503e7152abd3a22dbd70418d51cfa851166e`
         - `manifest.json`: `04fa4ef4e470362e9755d7177a7988b21c8d956dd3254c962b5702bb05a8deb8`
-        - `deltas.json`: `c141c45490e7343a65b06d084f65bca3115f7d40a97207cc7a35e02ba51f469f`
+        - `deltas.json`: `155526cef5994e0afb56e15f5cd4d34668dccfdb9c15748296abdb2cd7d04299`
         
         ## Warnings
         

@@ -8,16 +8,21 @@ from pgschemadiff.domain.constraint import ForeignKeyConstraint
 from pgschemadiff.domain.delta import (
     AddColumn,
     AddConstraint,
+    AddDomainCheck,
     AddEnumValue,
     AlterColumnType,
     AlterCompositeAddAttribute,
     AlterCompositeAttributeType,
     AlterCompositeDropAttribute,
     AlterCompositeTypeAttrs,
+    AlterDomainAttrs,
+    AlterDomainDefault,
+    AlterDomainNullability,
     AlterEnumAttrs,
     AlterExtension,
     AlterTableAttrs,
     CreateCompositeType,
+    CreateDomain,
     CreateEnum,
     CreateExtension,
     CreateIndex,
@@ -27,6 +32,8 @@ from pgschemadiff.domain.delta import (
     DropColumn,
     DropCompositeType,
     DropConstraint,
+    DropDomain,
+    DropDomainCheck,
     DropEnum,
     DropExtension,
     DropIndex,
@@ -35,10 +42,12 @@ from pgschemadiff.domain.delta import (
     RenameColumn,
     RenameTable,
     ReplaceCompositeType,
+    ReplaceDomainType,
     ReplaceEnumLabels,
     ReplaceIndex,
     SetColumnDefault,
     SetColumnNullability,
+    ValidateDomainCheck,
 )
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 
@@ -109,6 +118,15 @@ _SUPPORTED_DELTA_TYPES: tuple[type[DeltaBase], ...] = (
     AlterCompositeAttributeType,
     AlterCompositeTypeAttrs,
     ReplaceCompositeType,
+    CreateDomain,
+    DropDomain,
+    AlterDomainDefault,
+    AlterDomainNullability,
+    AddDomainCheck,
+    ValidateDomainCheck,
+    DropDomainCheck,
+    AlterDomainAttrs,
+    ReplaceDomainType,
 )
 
 
@@ -372,6 +390,60 @@ def classify_risk(  # noqa: PLR0912, PLR0915
         level, reason = (
             RiskLevel.BLOCKED,
             "Composite attribute reorder or middle insertion has no safe in-place DDL.",
+        )
+    elif isinstance(delta, CreateDomain):
+        level, reason = RiskLevel.SAFE, "Creates a domain type."
+    elif isinstance(delta, DropDomain):
+        level, reason = RiskLevel.DESTRUCTIVE, "Removes a domain type."
+    elif isinstance(delta, AlterDomainDefault):
+        level, reason = RiskLevel.SAFE, "Changes a domain default for future values."
+    elif isinstance(delta, AlterDomainNullability):
+        if delta.new_not_null and delta.used_in_container:
+            level, reason = (
+                RiskLevel.BLOCKED,
+                "PostgreSQL cannot set domain NOT NULL when used inside "
+                "a composite, array, or range column.",
+            )
+        elif delta.new_not_null:
+            level, reason = (
+                RiskLevel.DANGEROUS,
+                "Setting domain NOT NULL validates existing values and may block or fail.",
+            )
+        else:
+            level, reason = RiskLevel.DESTRUCTIVE, "Removes a domain's NOT NULL guarantee."
+    elif isinstance(delta, AddDomainCheck):
+        if delta.used_in_container:
+            level, reason = (
+                RiskLevel.BLOCKED,
+                "Domain checks used inside composite, array, or range types are unsupported.",
+            )
+        else:
+            level, reason = (
+                RiskLevel.DANGEROUS,
+                "Adds a domain check and validates existing values; migration may fail.",
+            )
+    elif isinstance(delta, ValidateDomainCheck):
+        if delta.used_in_container:
+            level, reason = (
+                RiskLevel.BLOCKED,
+                "Domain checks used inside composite, array, or range types are unsupported.",
+            )
+        else:
+            level, reason = (
+                RiskLevel.DANGEROUS,
+                "Validates existing domain values and may block or fail.",
+            )
+    elif isinstance(delta, DropDomainCheck):
+        level, reason = RiskLevel.DESTRUCTIVE, "Removes an enforced domain integrity rule."
+    elif isinstance(delta, AlterDomainAttrs):
+        level, reason = (
+            RiskLevel.DANGEROUS,
+            "Changes domain owner, which can change effective access.",
+        )
+    elif isinstance(delta, ReplaceDomainType):
+        level, reason = (
+            RiskLevel.BLOCKED,
+            "Changing a domain base type or collation has no safe in-place DDL.",
         )
     else:
         level, reason = RiskLevel.BLOCKED, "No risk policy exists for this delta type."

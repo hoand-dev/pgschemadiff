@@ -28,6 +28,7 @@ from __future__ import annotations
 from pgschemadiff.application.diff.comparators.column import ColumnComparator
 from pgschemadiff.application.diff.comparators.composite_type import CompositeTypeComparator
 from pgschemadiff.application.diff.comparators.constraint import ConstraintComparator
+from pgschemadiff.application.diff.comparators.domain_type import DomainTypeComparator
 from pgschemadiff.application.diff.comparators.enum import EnumComparator
 from pgschemadiff.application.diff.comparators.extension import ExtensionComparator
 from pgschemadiff.application.diff.comparators.index import IndexComparator
@@ -44,6 +45,7 @@ __all__ = [
     "CompositeTypeComparator",
     "ConstraintComparator",
     "ConstraintComparing",
+    "DomainTypeComparator",
     "EnumComparator",
     "ExtensionComparator",
     "IndexComparator",

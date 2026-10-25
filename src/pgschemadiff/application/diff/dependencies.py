@@ -30,6 +30,15 @@ from pgschemadiff.domain.delta.composite_type import (
     DropCompositeType,
 )
 from pgschemadiff.domain.delta.constraint import AddConstraint, DropConstraint
+from pgschemadiff.domain.delta.domain_type import (
+    AddDomainCheck,
+    AlterDomainDefault,
+    AlterDomainNullability,
+    CreateDomain,
+    DropDomain,
+    DropDomainCheck,
+    ValidateDomainCheck,
+)
 from pgschemadiff.domain.delta.enum import AddEnumValue, CreateEnum, DropEnum
 from pgschemadiff.domain.delta.index import CreateIndex, DropIndex, ReplaceIndex
 from pgschemadiff.domain.delta.schema import (
@@ -89,6 +98,11 @@ def _add_enum_dependencies(
                 CreateCompositeType,
                 AlterCompositeAddAttribute,
                 AlterCompositeAttributeType,
+                CreateDomain,
+                AlterDomainDefault,
+                AlterDomainNullability,
+                AddDomainCheck,
+                ValidateDomainCheck,
             ),
         )
     )
@@ -129,7 +143,16 @@ def _add_enum_drop_dependencies(
         for delta in nodes
         if isinstance(
             delta,
-            (DropTable, DropColumn, AlterColumnType, SetColumnDefault, DropConstraint, DropIndex),
+            (
+                DropTable,
+                DropColumn,
+                AlterColumnType,
+                SetColumnDefault,
+                DropConstraint,
+                DropIndex,
+                DropDomain,
+                DropDomainCheck,
+            ),
         )
     )
     for enum_drop in enum_drops:
@@ -154,13 +177,19 @@ def _collect_resources(
             creates[delta.table.ref].append(delta)
             for column in delta.table.columns:
                 creates[_column_ref(delta.table.ref, column.name)].append(delta)
-        elif isinstance(delta, (CreateEnum, CreateCompositeType, AddColumn, AddConstraint)):
+        elif isinstance(
+            delta,
+            (CreateEnum, CreateCompositeType, CreateDomain, AddColumn, AddConstraint),
+        ):
             creates[delta.target].append(delta)
         elif isinstance(delta, DropTable):
             drops[delta.table.ref].append(delta)
             for column in delta.table.columns:
                 drops[_column_ref(delta.table.ref, column.name)].append(delta)
-        elif isinstance(delta, (DropColumn, DropConstraint, DropEnum, DropCompositeType)):
+        elif isinstance(
+            delta,
+            (DropColumn, DropConstraint, DropEnum, DropCompositeType, DropDomain),
+        ):
             drops[delta.target].append(delta)
     return creates, drops, schema_creates
 
@@ -190,6 +219,7 @@ def _add_create_dependencies(
                 _add_create_prerequisites(delta, (parent_ref,), creates, add)
 
     _add_composite_create_dependencies(nodes, creates, add)
+    _add_domain_create_dependencies(nodes, creates, add)
     _add_index_create_dependencies(nodes, creates, add)
     _add_fk_unique_dependencies(nodes, add)
     _add_constraint_identity_dependencies(nodes, add)
@@ -224,6 +254,36 @@ def _add_composite_create_dependencies(
             _add_create_prerequisites(delta, delta.type_prerequisites, creates, add)
         elif isinstance(delta, AlterCompositeAttributeType):
             _add_create_prerequisites(delta, delta.new_type_prerequisites, creates, add)
+
+
+def _add_domain_create_dependencies(
+    nodes: tuple[DeltaBase, ...],
+    creates: dict[ObjectRef, list[DeltaBase]],
+    add: Callable[[DeltaBase, DeltaBase], None],
+) -> None:
+    domain_creates = tuple(delta for delta in nodes if isinstance(delta, CreateDomain))
+    for delta in domain_creates:
+        _add_create_prerequisites(delta, delta.domain.type_prerequisites, creates, add)
+
+    # ponytail: order all column DDL around domain DDL; exact column type refs
+    # require per-column catalog prerequisites, which this snapshot does not carry.
+    column_changes = tuple(
+        delta
+        for delta in nodes
+        if isinstance(delta, (AddColumn, AlterColumnType, SetColumnDefault))
+    )
+    domain_drops = tuple(delta for delta in nodes if isinstance(delta, DropDomain))
+    column_removals = tuple(
+        delta
+        for delta in nodes
+        if isinstance(delta, (DropTable, DropColumn, AlterColumnType, SetColumnDefault))
+    )
+    for domain_create in domain_creates:
+        for column_change in column_changes:
+            add(domain_create, column_change)
+    for domain_drop in domain_drops:
+        for column_removal in column_removals:
+            add(column_removal, domain_drop)
 
 
 def _add_index_create_dependencies(
@@ -364,6 +424,8 @@ def _add_drop_dependencies(
             _add_drop_prerequisites(delta, delta.old_type_prerequisites, drops, add)
         elif isinstance(delta, DropCompositeType):
             _add_drop_prerequisites(delta, delta.composite.type_prerequisites, drops, add)
+        elif isinstance(delta, DropDomain):
+            _add_drop_prerequisites(delta, delta.domain.type_prerequisites, drops, add)
         elif isinstance(delta, DropConstraint):
             _add_constraint_drop_dependencies(delta, drops, add)
         elif isinstance(delta, DropIndex):

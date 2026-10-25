@@ -25,16 +25,21 @@ from pgschemadiff.domain.constraint import (
 from pgschemadiff.domain.delta import (
     AddColumn,
     AddConstraint,
+    AddDomainCheck,
     AddEnumValue,
     AlterColumnType,
     AlterCompositeAddAttribute,
     AlterCompositeAttributeType,
     AlterCompositeDropAttribute,
     AlterCompositeTypeAttrs,
+    AlterDomainAttrs,
+    AlterDomainDefault,
+    AlterDomainNullability,
     AlterEnumAttrs,
     AlterExtension,
     AlterTableAttrs,
     CreateCompositeType,
+    CreateDomain,
     CreateEnum,
     CreateExtension,
     CreateIndex,
@@ -46,6 +51,8 @@ from pgschemadiff.domain.delta import (
     DropColumn,
     DropCompositeType,
     DropConstraint,
+    DropDomain,
+    DropDomainCheck,
     DropEnum,
     DropExtension,
     DropIndex,
@@ -54,11 +61,14 @@ from pgschemadiff.domain.delta import (
     RenameColumn,
     RenameTable,
     ReplaceCompositeType,
+    ReplaceDomainType,
     ReplaceEnumLabels,
     ReplaceIndex,
     SetColumnDefault,
     SetColumnNullability,
+    ValidateDomainCheck,
 )
+from pgschemadiff.domain.domain_type import DomainCheck, DomainType
 from pgschemadiff.domain.enum_type import EnumType
 from pgschemadiff.domain.extension import Extension
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
@@ -172,6 +182,29 @@ def _emitter_cases() -> tuple[tuple[str, Delta], ...]:
             ),
         ),
         owner='Role "Owner',
+    )
+    domain_ref = ObjectRef(
+        kind=ObjectKind.DOMAIN_TYPE,
+        qname=QualifiedName(namespace='App "Schema', name='Positive"Domain'),
+    )
+    domain = DomainType(
+        ref=domain_ref,
+        base_type="numeric(12, 2)",
+        collation='"App ""Schema""".case_insensitive',
+        default_expr="0",
+        not_null=True,
+        checks=(
+            DomainCheck(
+                name='nonzero "value',
+                expression="VALUE <> 0",
+            ),
+        ),
+        owner='Role "Owner',
+    )
+    unvalidated_domain_check = DomainCheck(
+        name="new_check",
+        expression="VALUE < 100",
+        validated=False,
     )
 
     plain_table = Table(
@@ -352,6 +385,61 @@ def _emitter_cases() -> tuple[tuple[str, Delta], ...]:
                 target=composite_ref,
                 old_attributes=composite.attributes,
                 new_attributes=tuple(reversed(composite.attributes)),
+            ),
+        ),
+        ("create domain", CreateDomain(target=domain_ref, domain=domain)),
+        (
+            "create domain with not-valid check",
+            CreateDomain(
+                target=domain_ref,
+                domain=domain.model_copy(update={"checks": (unvalidated_domain_check,)}),
+            ),
+        ),
+        ("drop domain", DropDomain(target=domain_ref, domain=domain)),
+        (
+            "set domain default",
+            AlterDomainDefault(target=domain_ref, new_default_expr="0"),
+        ),
+        ("drop domain default", AlterDomainDefault(target=domain_ref, new_default_expr=None)),
+        (
+            "set domain not null",
+            AlterDomainNullability(target=domain_ref, new_not_null=True),
+        ),
+        (
+            "drop domain not null",
+            AlterDomainNullability(target=domain_ref, new_not_null=False),
+        ),
+        (
+            "add and validate domain check",
+            AddDomainCheck(
+                target=domain_ref,
+                check=DomainCheck(name="positive", expression="VALUE > 0"),
+            ),
+        ),
+        (
+            "add not-valid domain check",
+            AddDomainCheck(target=domain_ref, check=unvalidated_domain_check),
+        ),
+        (
+            "validate domain check",
+            ValidateDomainCheck(target=domain_ref, check_name="new_check"),
+        ),
+        (
+            "drop domain check",
+            DropDomainCheck(target=domain_ref, check_name="old_check"),
+        ),
+        (
+            "alter domain owner",
+            AlterDomainAttrs(target=domain_ref, new_owner="new_owner"),
+        ),
+        (
+            "replace domain base type blocked",
+            ReplaceDomainType(
+                target=domain_ref,
+                old_base_type="integer",
+                new_base_type="text",
+                old_collation=None,
+                new_collation=None,
             ),
         ),
         (
@@ -693,7 +781,7 @@ def _render_emitter_corpus() -> str:
     lines: list[str] = []
     for label, delta in _EMITTER_CASES:
         lines.append(f"{label}: {_delta_kind(delta)} target={_target_text(delta.target)}")
-        if isinstance(delta, (ReplaceEnumLabels, ReplaceCompositeType)):
+        if isinstance(delta, (ReplaceEnumLabels, ReplaceCompositeType, ReplaceDomainType)):
             with pytest.raises(MigrationError):
                 emitter.emit(DeltaSet.from_iterable((delta,)))
             lines.append("  raises MigrationError")
@@ -816,7 +904,7 @@ def _render_pipeline_snapshot() -> str:
 
 def test_supported_delta_types_have_handlers_and_corpus_cases() -> None:
     supported = set(_SUPPORTED_DELTA_TYPES)
-    no_emitter = {ReplaceEnumLabels, ReplaceCompositeType}
+    no_emitter = {ReplaceEnumLabels, ReplaceCompositeType, ReplaceDomainType}
     emitter_supported = supported - no_emitter
     handler_types = set(default_handlers())
     corpus_types = {type(delta) for _, delta in _EMITTER_CASES}
@@ -843,3 +931,71 @@ def test_emitter_corpus(snapshot: SnapshotAssertion) -> None:
 
 def test_order_emit_split_pipeline(snapshot: SnapshotAssertion) -> None:
     assert _render_pipeline_snapshot() == snapshot
+
+
+def test_valid_domain_check_addition_drains_old_transactions_before_validation() -> None:
+    domain_ref = ObjectRef(
+        kind=ObjectKind.DOMAIN_TYPE,
+        qname=QualifiedName(namespace="public", name="positive"),
+    )
+    delta = AddDomainCheck(
+        target=domain_ref,
+        check=DomainCheck(name="positive_check", expression="VALUE > 0"),
+    )
+
+    statements = SqlEmitter(default_handlers()).emit(DeltaSet(deltas=(delta,)))
+    units = split_units(statements)
+
+    assert len(units) == 3
+    assert all(unit.transactional for unit in units)
+    assert all(len(unit.statements) == 1 for unit in units)
+    assert "NOT VALID" in units[0].statements[0].sql
+    drain_sql = units[1].statements[0].sql
+    assert "pg_stat_activity" in drain_sql
+    assert "pg_prepared_xacts" in drain_sql
+    assert "pg_read_all_stats" in drain_sql
+    assert "pg_sleep" in drain_sql
+    assert "VALIDATE CONSTRAINT" in units[2].statements[0].sql
+
+
+def test_existing_domain_check_validation_drains_old_transactions() -> None:
+    domain_ref = ObjectRef(
+        kind=ObjectKind.DOMAIN_TYPE,
+        qname=QualifiedName(namespace="public", name="positive"),
+    )
+    delta = ValidateDomainCheck(target=domain_ref, check_name="positive_check")
+
+    statements = SqlEmitter(default_handlers()).emit(DeltaSet(deltas=(delta,)))
+
+    assert len(statements) == 2
+    assert "pg_stat_activity" in statements[0].sql
+    assert "VALIDATE CONSTRAINT" in statements[1].sql
+
+
+def test_domain_container_alters_are_rejected_by_emitter() -> None:
+    domain_ref = ObjectRef(
+        kind=ObjectKind.DOMAIN_TYPE,
+        qname=QualifiedName(namespace="public", name="positive"),
+    )
+    deltas = (
+        AddDomainCheck(
+            target=domain_ref,
+            check=DomainCheck(name="positive_check", expression="VALUE > 0"),
+            used_in_container=True,
+        ),
+        ValidateDomainCheck(
+            target=domain_ref,
+            check_name="positive_check",
+            used_in_container=True,
+        ),
+        AlterDomainNullability(
+            target=domain_ref,
+            new_not_null=True,
+            used_in_container=True,
+        ),
+    )
+    emitter = SqlEmitter(default_handlers())
+
+    for delta in deltas:
+        with pytest.raises(MigrationError, match="container"):
+            emitter.emit(DeltaSet(deltas=(delta,)))

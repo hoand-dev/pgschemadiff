@@ -47,6 +47,7 @@ _CATALOG_FILES = [
     "schemas.sql",
     "enums.sql",
     "composite_types.sql",
+    "domain_types.sql",
     "type_prerequisites.sql",
 ]
 
@@ -365,6 +366,7 @@ def test_schemas_sql_selects_owner_and_comment() -> None:
         pytest.param("indexes.sql"),
         pytest.param("enums.sql"),
         pytest.param("composite_types.sql"),
+        pytest.param("domain_types.sql"),
         pytest.param("type_prerequisites.sql"),
     ],
 )
@@ -419,6 +421,41 @@ def test_composite_types_sql_excludes_system_reserved_and_extension_types() -> N
 
 
 @pytest.mark.unit
+def test_domain_types_sql_selects_metadata_checks_validation_and_container_use() -> None:
+    sql = _load_sql("domain_types.sql")
+
+    for expected in (
+        "pg_type",
+        "typbasetype",
+        "typcollation",
+        "typdefaultbin",
+        "typnotnull",
+        "pg_constraint",
+        "convalidated",
+        "pg_get_expr",
+        "pg_get_userbyid(t.typowner)",
+        "used_in_container",
+        "pg_range",
+        "pg_attribute",
+        "typelem",
+        "typbasetype",
+    ):
+        assert expected in sql
+
+
+@pytest.mark.unit
+def test_domain_types_sql_excludes_system_reserved_and_extension_domains() -> None:
+    sql = _load_sql("domain_types.sql")
+
+    assert "typtype = 'd'" in sql
+    assert "NOT LIKE 'pg_%'" in sql
+    assert "!= 'information_schema'" in sql
+    assert "!= 'pgschemadiff'" in sql
+    assert "pg_depend" in sql
+    assert "deptype = 'e'" in sql
+
+
+@pytest.mark.unit
 def test_type_prerequisites_sql_follows_enum_array_element_types() -> None:
     sql = _load_sql("type_prerequisites.sql")
     assert "pg_attribute" in sql
@@ -426,6 +463,9 @@ def test_type_prerequisites_sql_follows_enum_array_element_types() -> None:
     assert "typelem" in sql
     assert "typtype = 'e'" in sql
     assert "typtype = 'c'" in sql
+    assert "typtype = 'd'" in sql
+    assert "'domain_type'::text AS dependent_kind" in sql
+    assert "domain_type" in sql
     assert "DISTINCT" in sql
 
 

@@ -15,6 +15,7 @@ from pgschemadiff.domain.constraint import (
     UniqueConstraint,
 )
 from pgschemadiff.domain.database import Database
+from pgschemadiff.domain.domain_type import DomainCheck, DomainType
 from pgschemadiff.domain.enum_type import EnumType
 from pgschemadiff.domain.extension import Extension
 from pgschemadiff.domain.identity import (
@@ -48,6 +49,8 @@ __all__ = [
     "Constraint",
     "ConstraintDeferrability",
     "Database",
+    "DomainCheck",
+    "DomainType",
     "EnumType",
     "ExclusionConstraint",
     "ExclusionElement",

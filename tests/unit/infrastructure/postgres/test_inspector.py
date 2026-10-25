@@ -37,6 +37,7 @@ from pgschemadiff.domain.constraint import (
     UniqueConstraint,
 )
 from pgschemadiff.domain.database import Database
+from pgschemadiff.domain.domain_type import DomainCheck
 from pgschemadiff.domain.identity import QualifiedName
 from pgschemadiff.domain.index import IndexMethod, NullsOrder, SortOrder
 from pgschemadiff.domain.ports import SchemaInspector
@@ -154,6 +155,23 @@ _CompositeTypeRow = namedtuple(
         "collation",
         "owner",
     ],
+)
+_DomainTypeRow = namedtuple(
+    "_DomainTypeRow",
+    [
+        "schema_name",
+        "domain_name",
+        "base_type",
+        "collation",
+        "default_expr",
+        "not_null",
+        "check_name",
+        "check_expression",
+        "check_validated",
+        "owner",
+        "used_in_container",
+    ],
+    defaults=[None, None, False, None, False],
 )
 _TypePrerequisiteRow = namedtuple(
     "_TypePrerequisiteRow",
@@ -336,6 +354,35 @@ def _make_composite_type_row(
     )
 
 
+def _make_domain_type_row(
+    schema: str = "public",
+    name: str = "positive",
+    *,
+    base_type: str = "integer",
+    collation: str | None = None,
+    default_expr: str | None = None,
+    not_null: bool = False,
+    check_name: str | None = None,
+    check_expression: str | None = None,
+    check_validated: bool = True,
+    owner: str | None = "postgres",
+    used_in_container: bool = False,
+) -> Any:
+    return _DomainTypeRow(
+        schema,
+        name,
+        base_type,
+        collation,
+        default_expr,
+        not_null,
+        check_name,
+        check_expression,
+        check_validated,
+        owner,
+        used_in_container,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Mock pool + connection factory
 # ---------------------------------------------------------------------------
@@ -350,6 +397,7 @@ def _build_mock_pool(
     extensions_rows: list[Any] | None = None,
     enums_rows: list[Any] | None = None,
     composite_types_rows: list[Any] | None = None,
+    domain_types_rows: list[Any] | None = None,
     type_prerequisites_rows: list[Any] | None = None,
 ) -> MagicMock:
     """Build a mock Pool that yields a mocked psycopg connection.
@@ -365,6 +413,7 @@ def _build_mock_pool(
         extensions_rows or [],
         enums_rows or [],
         composite_types_rows or [],
+        domain_types_rows or [],
         type_prerequisites_rows or [],
     ]
 
@@ -416,7 +465,7 @@ def test_inspector_is_importable() -> None:
 
 
 @pytest.mark.unit
-async def test_inspect_calls_all_nine_queries() -> None:
+async def test_inspect_calls_all_ten_queries() -> None:
     """inspect() must execute one query per catalog file."""
     pool = _build_mock_pool(
         schemas_rows=[_SchemaRow("public")],
@@ -431,7 +480,7 @@ async def test_inspect_calls_all_nine_queries() -> None:
 
     # fetchall should have been called once per catalog SQL file.
     cur = pool.acquire.return_value.__aenter__.return_value.cursor.return_value
-    assert cur.fetchall.call_count == 9
+    assert cur.fetchall.call_count == 10
     assert isinstance(result, Database)
 
 
@@ -473,7 +522,7 @@ async def test_inspect_sets_local_search_path_before_catalog_queries() -> None:
     assert [mock_call[0] for mock_call in statements] == [
         "execute",
         "execute",
-        *("catalog_cursor.execute" for _ in range(9)),
+        *("catalog_cursor.execute" for _ in range(10)),
         "execute",
     ]
     assert statements[0].args == ("BEGIN ISOLATION LEVEL REPEATABLE READ",)
@@ -557,6 +606,7 @@ def test_assemble_maps_schema_and_extension_metadata() -> None:
         extensions_rows=[_ExtensionRow("pgcrypto", "1.3", "extensions", "extension note")],
         enums_rows=[],
         composite_types_rows=[],
+        domain_types_rows=[],
         type_prerequisites_rows=[],
     )
 
@@ -582,6 +632,7 @@ def test_assemble_keeps_extensions_database_wide_with_schema_filter() -> None:
         ],
         enums_rows=[],
         composite_types_rows=[],
+        domain_types_rows=[],
         type_prerequisites_rows=[],
     )
 
@@ -674,12 +725,92 @@ def test_assemble_retains_unselected_cross_schema_type_prerequisite() -> None:
         extensions_rows=[],
         enums_rows=[_make_enum_row("types")],
         composite_types_rows=[],
+        domain_types_rows=[],
         type_prerequisites_rows=[_make_type_prerequisite_row(type_schema="types")],
     )
 
     assert [schema.name for schema in database.schemas] == ["public"]
     table = database.schemas[0].tables[0]
     assert table.type_prerequisites[0].qname == QualifiedName(namespace="types", name="mood")
+
+
+@pytest.mark.unit
+async def test_inspect_maps_domain_metadata_checks_and_base_type_prerequisites() -> None:
+    pool = _build_mock_pool(
+        schemas_rows=[_SchemaRow("public"), _SchemaRow("types")],
+        domain_types_rows=[
+            _make_domain_type_row(
+                "public",
+                "positive",
+                base_type="types.state",
+                collation='"C"',
+                default_expr="'ready'::types.state",
+                not_null=True,
+                check_name="z_check",
+                check_expression="VALUE <> 'bad'::types.state",
+                check_validated=False,
+                owner="domain_owner",
+                used_in_container=True,
+            ),
+            _make_domain_type_row(
+                "public",
+                "positive",
+                base_type="types.state",
+                collation='"C"',
+                default_expr="'ready'::types.state",
+                not_null=True,
+                check_name="a_check",
+                check_expression="VALUE <> ''",
+                owner="domain_owner",
+                used_in_container=True,
+            ),
+        ],
+        type_prerequisites_rows=[
+            _make_type_prerequisite_row(
+                "public",
+                "positive",
+                "types",
+                "state",
+                dependent_kind="domain_type",
+                type_kind="enum",
+            )
+        ],
+    )
+
+    database = await PgCatalogInspector(pool).inspect()
+
+    domain = database.all_domain_types()[0]
+    assert domain.base_type == "types.state"
+    assert domain.collation == '"C"'
+    assert domain.default_expr == "'ready'::types.state"
+    assert domain.not_null is True
+    assert domain.checks == (
+        DomainCheck(name="a_check", expression="VALUE <> ''"),
+        DomainCheck(
+            name="z_check",
+            expression="VALUE <> 'bad'::types.state",
+            validated=False,
+        ),
+    )
+    assert domain.owner == "domain_owner"
+    assert domain.used_in_container is True
+    assert domain.type_prerequisites[0].qname == QualifiedName(namespace="types", name="state")
+
+
+@pytest.mark.unit
+async def test_inspect_rejects_unmapped_domain_check_expression() -> None:
+    pool = _build_mock_pool(
+        schemas_rows=[_SchemaRow("public")],
+        domain_types_rows=[
+            _make_domain_type_row(
+                check_name="positive_check",
+                check_expression="?",
+            )
+        ],
+    )
+
+    with pytest.raises(InspectionError, match=r"(?i)domain check.*expression"):
+        await PgCatalogInspector(pool).inspect()
 
 
 # ===========================================================================

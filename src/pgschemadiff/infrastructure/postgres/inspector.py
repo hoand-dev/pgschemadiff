@@ -35,6 +35,7 @@ from pgschemadiff.domain.constraint import (
     UniqueConstraint,
 )
 from pgschemadiff.domain.database import Database
+from pgschemadiff.domain.domain_type import DomainCheck, DomainType
 from pgschemadiff.domain.enum_type import EnumType
 from pgschemadiff.domain.extension import Extension
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
@@ -82,6 +83,7 @@ _SQL_CONSTRAINTS: str = _load_sql("constraints.sql")
 _SQL_EXTENSIONS: str = _load_sql("extensions.sql")
 _SQL_ENUMS: str = _load_sql("enums.sql")
 _SQL_COMPOSITE_TYPES: str = _load_sql("composite_types.sql")
+_SQL_DOMAIN_TYPES: str = _load_sql("domain_types.sql")
 _SQL_TYPE_PREREQUISITES: str = _load_sql("type_prerequisites.sql")
 
 # ---------------------------------------------------------------------------
@@ -614,6 +616,9 @@ class PgCatalogInspector:
                     await cur.execute(_SQL_COMPOSITE_TYPES)
                     composite_types_rows = await cur.fetchall()
 
+                    await cur.execute(_SQL_DOMAIN_TYPES)
+                    domain_types_rows = await cur.fetchall()
+
                     await cur.execute(_SQL_TYPE_PREREQUISITES)
                     type_prerequisites_rows = await cur.fetchall()
             finally:
@@ -628,6 +633,7 @@ class PgCatalogInspector:
             extensions_rows=extensions_rows,
             enums_rows=enums_rows,
             composite_types_rows=composite_types_rows,
+            domain_types_rows=domain_types_rows,
             type_prerequisites_rows=type_prerequisites_rows,
         )
 
@@ -642,6 +648,7 @@ class PgCatalogInspector:
         extensions_rows: list[Any],
         enums_rows: list[Any],
         composite_types_rows: list[Any],
+        domain_types_rows: list[Any],
         type_prerequisites_rows: list[Any],
     ) -> Database:
         """Assemble domain objects from raw catalog rows."""
@@ -666,6 +673,9 @@ class PgCatalogInspector:
         composite_types_by_schema = self._group_composite_types(
             composite_types_rows, allowed, prerequisites_by_object
         )
+        domain_types_by_schema = self._group_domain_types(
+            domain_types_rows, allowed, prerequisites_by_object
+        )
 
         tables_by_schema, idxs_by_schema = self._build_tables(
             tables_rows,
@@ -686,6 +696,7 @@ class PgCatalogInspector:
                     schemas_by_name,
                     enums_by_schema,
                     composite_types_by_schema,
+                    domain_types_by_schema,
                 )
             ),
             extensions=tuple(extensions),
@@ -809,6 +820,88 @@ class PgCatalogInspector:
         return result
 
     @staticmethod
+    def _group_domain_types(
+        rows: list[Any],
+        allowed: set[str] | None,
+        prerequisites: dict[tuple[ObjectKind, str, str], list[ObjectRef]],
+    ) -> dict[str, list[DomainType]]:
+        metadata: dict[tuple[str, str], tuple[Any, ...]] = {}
+        checks: dict[tuple[str, str], list[DomainCheck]] = {}
+        for row in rows:
+            schema_name = row.schema_name
+            if allowed is not None and schema_name not in allowed:
+                continue
+            key = (schema_name, row.domain_name)
+            current_metadata = (
+                row.base_type,
+                row.collation,
+                row.default_expr,
+                row.not_null,
+                row.owner,
+                row.used_in_container,
+            )
+            previous_metadata = metadata.setdefault(key, current_metadata)
+            if previous_metadata != current_metadata:
+                raise InspectionError(
+                    f"Domain {schema_name}.{row.domain_name} has inconsistent catalog metadata"
+                )
+            checks.setdefault(key, [])
+            if row.check_name is None:
+                continue
+            if (
+                row.check_expression is None
+                or not row.check_expression.strip()
+                or row.check_expression.strip() == "?"
+                or row.check_validated is None
+            ):
+                raise InspectionError(
+                    f"Domain check {schema_name}.{row.domain_name}.{row.check_name} "
+                    "is missing a usable expression or validation state"
+                )
+            checks[key].append(
+                DomainCheck(
+                    name=row.check_name,
+                    expression=row.check_expression,
+                    validated=row.check_validated,
+                )
+            )
+
+        result: dict[str, list[DomainType]] = {}
+        for (schema_name, domain_name), values in metadata.items():
+            base_type, collation, default_expr, not_null, owner, used_in_container = values
+            if not isinstance(base_type, str) or not base_type.strip() or base_type.strip() == "?":
+                raise InspectionError(f"Domain {schema_name}.{domain_name} has no usable base type")
+            if default_expr is not None and (
+                not default_expr.strip() or default_expr.strip() == "?"
+            ):
+                raise InspectionError(
+                    f"Domain {schema_name}.{domain_name} has no usable default expression"
+                )
+            ref = ObjectRef(
+                kind=ObjectKind.DOMAIN_TYPE,
+                qname=QualifiedName(namespace=schema_name, name=domain_name),
+            )
+            domain = DomainType(
+                ref=ref,
+                base_type=base_type,
+                collation=collation,
+                default_expr=default_expr,
+                not_null=not_null,
+                checks=tuple(
+                    sorted(checks[(schema_name, domain_name)], key=lambda check: check.name)
+                ),
+                type_prerequisites=tuple(
+                    prerequisites.get((ObjectKind.DOMAIN_TYPE, schema_name, domain_name), [])
+                ),
+                used_in_container=used_in_container,
+                owner=owner,
+            )
+            result.setdefault(schema_name, []).append(domain)
+        for domains in result.values():
+            domains.sort(key=lambda domain: domain.ref.qname.name)
+        return result
+
+    @staticmethod
     def _group_type_prerequisites(
         rows: list[Any],
         allowed: set[str] | None,
@@ -818,10 +911,18 @@ class PgCatalogInspector:
             if allowed is not None and row.dependent_schema not in allowed:
                 continue
             dependent_kind = ObjectKind(row.dependent_kind)
-            if dependent_kind not in {ObjectKind.TABLE, ObjectKind.COMPOSITE_TYPE}:
+            if dependent_kind not in {
+                ObjectKind.TABLE,
+                ObjectKind.COMPOSITE_TYPE,
+                ObjectKind.DOMAIN_TYPE,
+            }:
                 raise InspectionError(f"Unsupported type prerequisite dependent {dependent_kind!r}")
             type_kind = ObjectKind(row.type_kind)
-            if type_kind not in {ObjectKind.ENUM, ObjectKind.COMPOSITE_TYPE}:
+            if type_kind not in {
+                ObjectKind.ENUM,
+                ObjectKind.COMPOSITE_TYPE,
+                ObjectKind.DOMAIN_TYPE,
+            }:
                 raise InspectionError(f"Unsupported type prerequisite kind {type_kind!r}")
             ref = ObjectRef(
                 kind=type_kind,
@@ -892,6 +993,7 @@ class PgCatalogInspector:
         schemas_by_name: dict[str, Any],
         enums_by_schema: dict[str, list[EnumType]],
         composite_types_by_schema: dict[str, list[CompositeType]],
+        domain_types_by_schema: dict[str, list[DomainType]],
     ) -> list[Schema]:
         result: list[Schema] = []
         for name in schema_names:
@@ -907,6 +1009,7 @@ class PgCatalogInspector:
                     indexes=tuple(idxs_by_schema.get(name, [])),
                     enums=tuple(enums_by_schema.get(name, [])),
                     composite_types=tuple(composite_types_by_schema.get(name, [])),
+                    domain_types=tuple(domain_types_by_schema.get(name, [])),
                     comment=row.comment,
                 )
             )

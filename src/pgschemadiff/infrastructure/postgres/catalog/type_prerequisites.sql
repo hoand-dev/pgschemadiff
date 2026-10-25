@@ -1,12 +1,13 @@
 -- catalog/type_prerequisites.sql
--- Returns enum/composite types required by table columns and composite attributes.
+-- Returns enum/composite/domain types required by table columns, composite
+-- attributes, and domain base types.
 -- Array columns depend on their element type. System, reserved, and extension-owned
 -- objects are excluded on both sides of each dependency.
 -- Result columns:
---   dependent_kind   text -- 'table' or 'composite_type'
+--   dependent_kind   text -- 'table', 'composite_type', or 'domain_type'
 --   dependent_schema text -- schema owning the dependent object
 --   dependent_name   text -- dependent table or composite type name
---   type_kind        text -- 'enum' or 'composite_type'
+--   type_kind        text -- 'enum', 'composite_type', or 'domain_type'
 --   type_schema      text -- schema owning the prerequisite type
 --   type_name        text -- prerequisite type name
 WITH dependent_columns AS (
@@ -68,6 +69,33 @@ WITH dependent_columns AS (
             AND d.objid = dependent_type.oid
             AND d.deptype = 'e'
       )
+
+    UNION ALL
+
+    SELECT
+        'domain_type'::text AS dependent_kind,
+        domain_namespace.nspname AS dependent_schema,
+        domain_type.typname AS dependent_name,
+        CASE
+            WHEN base_type.typelem <> 0 THEN base_type.typelem
+            ELSE domain_type.typbasetype
+        END AS prerequisite_type_oid
+    FROM pg_catalog.pg_type AS domain_type
+    JOIN pg_catalog.pg_namespace AS domain_namespace
+        ON domain_namespace.oid = domain_type.typnamespace
+    JOIN pg_catalog.pg_type AS base_type
+        ON base_type.oid = domain_type.typbasetype
+    WHERE domain_type.typtype = 'd'
+      AND domain_namespace.nspname NOT LIKE 'pg_%'
+      AND domain_namespace.nspname != 'information_schema'
+      AND domain_namespace.nspname != 'pgschemadiff'
+      AND NOT EXISTS (
+          SELECT 1
+          FROM pg_catalog.pg_depend AS d
+          WHERE d.classid = 'pg_catalog.pg_type'::regclass
+            AND d.objid = domain_type.oid
+            AND d.deptype = 'e'
+      )
 )
 SELECT DISTINCT
     dependencies.dependent_kind,
@@ -76,6 +104,7 @@ SELECT DISTINCT
     CASE prerequisite_type.typtype
         WHEN 'e' THEN 'enum'
         WHEN 'c' THEN 'composite_type'
+        WHEN 'd' THEN 'domain_type'
     END AS type_kind,
     prerequisite_namespace.nspname AS type_schema,
     prerequisite_type.typname AS type_name
@@ -89,6 +118,7 @@ LEFT JOIN pg_catalog.pg_class AS prerequisite_relation
 WHERE (
         prerequisite_type.typtype = 'e'
         OR (prerequisite_type.typtype = 'c' AND prerequisite_relation.relkind = 'c')
+        OR prerequisite_type.typtype = 'd'
     )
   AND prerequisite_namespace.nspname NOT LIKE 'pg_%'
   AND prerequisite_namespace.nspname != 'information_schema'

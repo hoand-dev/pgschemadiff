@@ -23,16 +23,21 @@ from pgschemadiff.domain.constraint import (
 from pgschemadiff.domain.delta import (
     AddColumn,
     AddConstraint,
+    AddDomainCheck,
     AddEnumValue,
     AlterColumnType,
     AlterCompositeAddAttribute,
     AlterCompositeAttributeType,
     AlterCompositeDropAttribute,
     AlterCompositeTypeAttrs,
+    AlterDomainAttrs,
+    AlterDomainDefault,
+    AlterDomainNullability,
     AlterEnumAttrs,
     AlterExtension,
     AlterTableAttrs,
     CreateCompositeType,
+    CreateDomain,
     CreateEnum,
     CreateExtension,
     CreateIndex,
@@ -43,6 +48,8 @@ from pgschemadiff.domain.delta import (
     DropColumn,
     DropCompositeType,
     DropConstraint,
+    DropDomain,
+    DropDomainCheck,
     DropEnum,
     DropExtension,
     DropIndex,
@@ -51,11 +58,14 @@ from pgschemadiff.domain.delta import (
     RenameColumn,
     RenameTable,
     ReplaceCompositeType,
+    ReplaceDomainType,
     ReplaceEnumLabels,
     ReplaceIndex,
     SetColumnDefault,
     SetColumnNullability,
+    ValidateDomainCheck,
 )
+from pgschemadiff.domain.domain_type import DomainCheck, DomainType
 from pgschemadiff.domain.enum_type import EnumType
 from pgschemadiff.domain.extension import Extension
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
@@ -93,6 +103,10 @@ _COMPOSITE_REF = ObjectRef(
     kind=ObjectKind.COMPOSITE_TYPE,
     qname=QualifiedName(namespace="public", name="record"),
 )
+_DOMAIN_REF = ObjectRef(
+    kind=ObjectKind.DOMAIN_TYPE,
+    qname=QualifiedName(namespace="public", name="positive"),
+)
 
 
 def _table(*, partition_of: PartitionOf | None = None, unlogged: bool = False) -> Table:
@@ -109,6 +123,10 @@ def _composite() -> CompositeType:
         attributes=(CompositeAttribute(name="value", data_type="integer"),),
         owner="app_owner",
     )
+
+
+def _domain() -> DomainType:
+    return DomainType(ref=_DOMAIN_REF, base_type="integer", owner="app_owner")
 
 
 def _add_constraint(table_ref: ObjectRef, constraint: Constraint) -> AddConstraint:
@@ -538,6 +556,74 @@ RISK_CASES = (
         RiskLevel.BLOCKED,
         id="replace-composite-type-blocked",
     ),
+    pytest.param(
+        CreateDomain(target=_DOMAIN_REF, domain=_domain()),
+        RiskLevel.SAFE,
+        id="create-domain",
+    ),
+    pytest.param(
+        DropDomain(target=_DOMAIN_REF, domain=_domain()),
+        RiskLevel.DESTRUCTIVE,
+        id="drop-domain",
+    ),
+    pytest.param(
+        AlterDomainDefault(target=_DOMAIN_REF, new_default_expr="0"),
+        RiskLevel.SAFE,
+        id="domain-default",
+    ),
+    pytest.param(
+        AlterDomainNullability(target=_DOMAIN_REF, new_not_null=True),
+        RiskLevel.DANGEROUS,
+        id="domain-set-not-null",
+    ),
+    pytest.param(
+        AlterDomainNullability(
+            target=_DOMAIN_REF,
+            new_not_null=True,
+            used_in_container=True,
+        ),
+        RiskLevel.BLOCKED,
+        id="domain-set-not-null-in-container",
+    ),
+    pytest.param(
+        AlterDomainNullability(target=_DOMAIN_REF, new_not_null=False),
+        RiskLevel.DESTRUCTIVE,
+        id="domain-drop-not-null",
+    ),
+    pytest.param(
+        AddDomainCheck(
+            target=_DOMAIN_REF,
+            check=DomainCheck(name="positive_check", expression="VALUE > 0"),
+        ),
+        RiskLevel.DANGEROUS,
+        id="domain-add-check",
+    ),
+    pytest.param(
+        ValidateDomainCheck(target=_DOMAIN_REF, check_name="positive_check"),
+        RiskLevel.DANGEROUS,
+        id="domain-validate-check",
+    ),
+    pytest.param(
+        DropDomainCheck(target=_DOMAIN_REF, check_name="positive_check"),
+        RiskLevel.DESTRUCTIVE,
+        id="domain-drop-check",
+    ),
+    pytest.param(
+        AlterDomainAttrs(target=_DOMAIN_REF, new_owner="other_owner"),
+        RiskLevel.DANGEROUS,
+        id="domain-owner",
+    ),
+    pytest.param(
+        ReplaceDomainType(
+            target=_DOMAIN_REF,
+            old_base_type="integer",
+            new_base_type="text",
+            old_collation=None,
+            new_collation=None,
+        ),
+        RiskLevel.BLOCKED,
+        id="replace-domain-type-blocked",
+    ),
 )
 
 
@@ -579,6 +665,31 @@ def test_replacing_composite_layout_has_precise_blocked_reason() -> None:
     assert assessment.level is RiskLevel.BLOCKED
     assert assessment.reason == (
         "Composite attribute reorder or middle insertion has no safe in-place DDL."
+    )
+
+
+@pytest.mark.parametrize(
+    "delta",
+    [
+        AddDomainCheck(
+            target=_DOMAIN_REF,
+            check=DomainCheck(name="positive_check", expression="VALUE > 0"),
+            used_in_container=True,
+        ),
+        ValidateDomainCheck(
+            target=_DOMAIN_REF,
+            check_name="positive_check",
+            used_in_container=True,
+        ),
+    ],
+    ids=("add-check", "validate-check"),
+)
+def test_domain_check_changes_inside_containers_are_blocked(delta: DeltaBase) -> None:
+    assessment = classify_risk(delta)
+
+    assert assessment.level is RiskLevel.BLOCKED
+    assert assessment.reason == (
+        "Domain checks used inside composite, array, or range types are unsupported."
     )
 
 

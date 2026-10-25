@@ -30,6 +30,7 @@ from pgschemadiff.domain.delta.composite_type import (
     DropCompositeType,
 )
 from pgschemadiff.domain.delta.constraint import AddConstraint, DropConstraint
+from pgschemadiff.domain.delta.domain_type import CreateDomain, DropDomain
 from pgschemadiff.domain.delta.enum import AddEnumValue, CreateEnum, DropEnum
 from pgschemadiff.domain.delta.index import CreateIndex, DropIndex, ReplaceIndex
 from pgschemadiff.domain.delta.schema import (
@@ -40,6 +41,7 @@ from pgschemadiff.domain.delta.schema import (
     DropSchema,
 )
 from pgschemadiff.domain.delta.table import CreateTable, DropTable, RenameTable
+from pgschemadiff.domain.domain_type import DomainType
 from pgschemadiff.domain.enum_type import EnumType
 from pgschemadiff.domain.extension import Extension
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
@@ -232,6 +234,62 @@ def test_type_prerequisites_order_enum_nested_composite_table_creates_and_revers
 
     _assert_precedes(created, create_enum, create_inner, create_outer, create_table)
     _assert_precedes(dropped, drop_table, drop_outer, drop_inner, drop_enum)
+
+
+def test_domain_base_type_and_domain_users_order_create_and_drop() -> None:
+    enum_ref = _ref(ObjectKind.ENUM, "state")
+    enum = EnumType(ref=enum_ref, labels=("ready",))
+    create_enum = CreateEnum(target=enum_ref, enum=enum)
+    drop_enum = DropEnum(target=enum_ref, enum=enum)
+
+    domain_ref = _ref(ObjectKind.DOMAIN_TYPE, "state_domain")
+    domain = DomainType(
+        ref=domain_ref,
+        base_type="public.state",
+        type_prerequisites=(enum_ref,),
+    )
+    create_domain = CreateDomain(target=domain_ref, domain=domain)
+    drop_domain = DropDomain(target=domain_ref, domain=domain)
+
+    table = _table("events").model_copy(update={"type_prerequisites": (domain_ref,)})
+    create_table = CreateTable(target=table.ref, table=table)
+    drop_table = DropTable(target=table.ref, table=table)
+
+    created = order_deltas(
+        DeltaSet.from_iterable((create_table, create_domain, create_enum))
+    ).deltas
+    dropped = order_deltas(DeltaSet.from_iterable((drop_enum, drop_domain, drop_table))).deltas
+
+    _assert_precedes(created, create_enum, create_domain, create_table)
+    _assert_precedes(dropped, drop_table, drop_domain, drop_enum)
+
+
+def test_domain_ordering_covers_column_add_type_change_and_removal() -> None:
+    new_domain_ref = _ref(ObjectKind.DOMAIN_TYPE, "z_new_domain")
+    new_domain = DomainType(ref=new_domain_ref, base_type="integer")
+    create_domain = CreateDomain(target=new_domain_ref, domain=new_domain)
+
+    table_ref = _ref(ObjectKind.TABLE, "a_events")
+    column = Column(name="state", position=1, data_type="public.z_new_domain")
+    column_ref = _column_ref(table_ref, column.name)
+    add_column = AddColumn(target=column_ref, column=column)
+    alter_to_domain = AlterColumnType(target=column_ref, new_data_type="public.z_new_domain")
+
+    old_domain_ref = _ref(ObjectKind.DOMAIN_TYPE, "a_old_domain")
+    old_domain = DomainType(ref=old_domain_ref, base_type="integer")
+    drop_domain = DropDomain(target=old_domain_ref, domain=old_domain)
+    drop_column = DropColumn(target=column_ref, column=column)
+    alter_from_domain = AlterColumnType(target=column_ref, new_data_type="integer")
+
+    created = order_deltas(DeltaSet.from_iterable((add_column, create_domain))).deltas
+    altered_to = order_deltas(DeltaSet.from_iterable((alter_to_domain, create_domain))).deltas
+    dropped = order_deltas(DeltaSet.from_iterable((drop_domain, drop_column))).deltas
+    altered_from = order_deltas(DeltaSet.from_iterable((drop_domain, alter_from_domain))).deltas
+
+    _assert_precedes(created, create_domain, add_column)
+    _assert_precedes(altered_to, create_domain, alter_to_domain)
+    _assert_precedes(dropped, drop_column, drop_domain)
+    _assert_precedes(altered_from, alter_from_domain, drop_domain)
 
 
 def test_composite_attribute_changes_order_new_and_old_type_prerequisites() -> None:
