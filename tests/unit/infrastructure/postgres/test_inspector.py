@@ -78,6 +78,9 @@ _TableRow = namedtuple(
         "schema_name",
         "table_name",
         "unlogged",
+        "owner",
+        "tablespace",
+        "comment",
         "partition_strategy",
         "partition_expr",
         "partition_of_schema",
@@ -219,6 +222,9 @@ def _make_table_row(
     table: str = "users",
     *,
     unlogged: bool = False,
+    owner: str | None = "postgres",
+    tablespace: str | None = None,
+    comment: str | None = None,
     partition_strategy: str | None = None,
     partition_expr: str | None = None,
     partition_of_schema: str | None = None,
@@ -229,6 +235,9 @@ def _make_table_row(
         schema_name=schema,
         table_name=table,
         unlogged=unlogged,
+        owner=owner,
+        tablespace=tablespace,
+        comment=comment,
         partition_strategy=partition_strategy,
         partition_expr=partition_expr,
         partition_of_schema=partition_of_schema,
@@ -660,6 +669,20 @@ async def test_schema_filter_none_includes_all() -> None:
     schema_names = [s.name for s in result.schemas]
     assert "public" in schema_names
     assert "audit" in schema_names
+
+
+@pytest.mark.unit
+def test_build_tables_maps_owner_tablespace_and_comment() -> None:
+    tables_by_schema, _ = PgCatalogInspector._build_tables(
+        [_make_table_row(owner="app_owner", tablespace="fast", comment="Orders")],
+        ["public"],
+        {},
+        {},
+        {},
+    )
+
+    table = tables_by_schema["public"][0]
+    assert (table.owner, table.tablespace, table.comment) == ("app_owner", "fast", "Orders")
 
 
 @pytest.mark.unit

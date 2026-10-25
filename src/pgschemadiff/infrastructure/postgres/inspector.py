@@ -1066,6 +1066,9 @@ class PgCatalogInspector:
                     constraints=tuple(_safe_map_constraints(cons_by_table.get(key, []), col_names)),
                     type_prerequisites=tuple((type_prerequisites_by_table or {}).get(key, [])),
                     unlogged=row.unlogged,
+                    owner=row.owner,
+                    tablespace=row.tablespace,
+                    comment=row.comment,
                     partition_info=_build_partition_info(row),
                     partition_of=_build_partition_of(row),
                 )
