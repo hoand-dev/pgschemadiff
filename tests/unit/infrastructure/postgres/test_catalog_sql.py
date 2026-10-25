@@ -220,6 +220,17 @@ def test_indexes_sql_selects_include_columns_and_constraint_owner() -> None:
     assert "AS constraint_name" in sql
 
 
+@pytest.mark.unit
+def test_indexes_sql_selects_partitioned_and_parent_attachment_flags() -> None:
+    sql = " ".join(_load_sql("indexes.sql").split())
+
+    assert "ic.relkind = 'I' AS partitioned" in sql
+    assert (
+        "EXISTS (SELECT 1 FROM pg_catalog.pg_inherits WHERE inhrelid = i.indexrelid) "
+        "AS attached_to_parent"
+    ) in sql
+
+
 # ---------------------------------------------------------------------------
 # constraints.sql specific checks
 # ---------------------------------------------------------------------------

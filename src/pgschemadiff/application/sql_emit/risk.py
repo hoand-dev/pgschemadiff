@@ -239,6 +239,11 @@ def classify_risk(  # noqa: PLR0912, PLR0915
                 RiskLevel.SAFE,
                 "Creates an index on an empty table created in this migration.",
             )
+        elif delta.index.partitioned:
+            level, reason = (
+                RiskLevel.DANGEROUS,
+                "Builds the index on every partition while blocking writes.",
+            )
         else:
             level, reason = (
                 RiskLevel.WARNING,
@@ -253,11 +258,23 @@ def classify_risk(  # noqa: PLR0912, PLR0915
         else:
             level, reason = RiskLevel.DANGEROUS, "Dropping an index removes an access path."
     elif isinstance(delta, ReplaceIndex):
-        if delta.old_index.unique and not delta.new_index.unique:
+        if (
+            delta.old_index.partitioned or delta.new_index.partitioned
+        ) and delta.new_index.table_ref in created_tables:
+            level, reason = (
+                RiskLevel.SAFE,
+                "Replaces an index on an empty table created in this migration.",
+            )
+        elif delta.old_index.unique and not delta.new_index.unique:
             level, reason = (
                 RiskLevel.DESTRUCTIVE,
                 "Replacing a unique index with a non-unique index "
                 "removes an enforced uniqueness guarantee.",
+            )
+        elif delta.old_index.partitioned or delta.new_index.partitioned:
+            level, reason = (
+                RiskLevel.DANGEROUS,
+                "Builds the index on every partition while blocking writes.",
             )
         else:
             level, reason = (

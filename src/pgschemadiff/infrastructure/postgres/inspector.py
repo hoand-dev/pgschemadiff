@@ -348,6 +348,8 @@ def _map_index(row: Any) -> Index:
         predicate=row.predicate or None,
         definition=row.index_definition,
         constraint_name=row.constraint_name,
+        partitioned=bool(row.partitioned),
+        attached_to_parent=bool(row.attached_to_parent),
     )
 
 

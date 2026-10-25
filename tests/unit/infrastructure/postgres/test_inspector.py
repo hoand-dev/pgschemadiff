@@ -114,8 +114,10 @@ _IndexRow = namedtuple(
         "predicate",
         "include_columns",
         "constraint_name",
+        "partitioned",
+        "attached_to_parent",
     ],
-    defaults=[(), None],
+    defaults=[(), None, False, False],
 )
 _ConstraintRow = namedtuple(
     "_ConstraintRow",
@@ -232,6 +234,8 @@ def _make_index_row(
     is_unique: bool = False,
     definition: str = "CREATE INDEX users_email_idx ON public.users USING btree (email)",
     predicate: str | None = None,
+    partitioned: bool = False,
+    attached_to_parent: bool = False,
 ) -> Any:
     return _IndexRow(
         schema_name=schema,
@@ -243,6 +247,8 @@ def _make_index_row(
         is_exclusion=False,
         index_definition=definition,
         predicate=predicate,
+        partitioned=partitioned,
+        attached_to_parent=attached_to_parent,
     )
 
 
@@ -937,6 +943,8 @@ def test_map_index_preserves_definition_include_columns_and_constraint_name() ->
         predicate=None,
         include_columns=("display_name",),
         constraint_name="users_email_key",
+        partitioned=True,
+        attached_to_parent=True,
     )
 
     index = _map_index(row)
@@ -945,6 +953,8 @@ def test_map_index_preserves_definition_include_columns_and_constraint_name() ->
     assert tuple(key.column_name for key in index.key_columns) == ("email",)
     assert index.include_columns == ("display_name",)
     assert index.constraint_name == "users_email_key"
+    assert index.partitioned is True
+    assert index.attached_to_parent is True
 
 
 @pytest.mark.unit

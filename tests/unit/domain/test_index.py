@@ -140,6 +140,22 @@ def test_index_minimal() -> None:
     assert idx.predicate is None
     assert idx.include_columns == ()
     assert idx.comment is None
+    assert idx.partitioned is False
+    assert idx.attached_to_parent is False
+
+
+@pytest.mark.unit
+def test_index_partition_metadata() -> None:
+    idx = Index(
+        ref=_index_ref("events_date_idx"),
+        table_ref=_table_ref("events"),
+        key_columns=(IndexKeyColumn(column_name="event_date"),),
+        partitioned=True,
+        attached_to_parent=True,
+    )
+
+    assert idx.partitioned is True
+    assert idx.attached_to_parent is True
 
 
 @pytest.mark.unit

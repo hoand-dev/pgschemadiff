@@ -20,10 +20,14 @@ The structural fields compared by this comparator are:
 - ``include_columns`` — ``INCLUDE`` column list (covering index)
 - ``unique`` — uniqueness flag
 - ``predicate`` — ``WHERE`` predicate for partial indexes
+- ``partitioned`` — whether the index is a parent index on a partitioned table
 
 Indexes with ``constraint_name`` set are owned by their constraint and never
 produce standalone index deltas. If ownership changes on only one side, only
 the standalone side's create/drop is emitted.
+
+Attached child indexes are similarly owned by their parent partitioned index;
+each attached side is ignored when comparing index identities.
 
 The ``comment`` field is *non-structural*: a comment-only difference does not
 require a rebuild.  However, there is no ``AlterIndexComment`` delta type in
@@ -73,6 +77,7 @@ _STRUCTURAL_FIELDS: tuple[str, ...] = (
     "include_columns",
     "unique",
     "predicate",
+    "partitioned",
 )
 
 
@@ -152,6 +157,13 @@ class IndexComparator:
             Zero or one delta in a tuple.  Never returns more than one delta
             per call (replace covers both drop + create semantically).
         """
+        # Attached child indexes are managed by their parent index. Ignore each
+        # attached side independently, like inherited constraints.
+        if source is not None and source.attached_to_parent:
+            source = None
+        if target is not None and target.attached_to_parent:
+            target = None
+
         # Constraint DDL owns constraint-backed indexes. If ownership differs,
         # only the standalone side needs an explicit index delta.
         if source is not None and source.constraint_name is not None:
@@ -193,6 +205,8 @@ class IndexComparator:
         if (
             source is None
             or target is None
+            or source.attached_to_parent
+            or target.attached_to_parent
             or source.constraint_name is not None
             or target.constraint_name is not None
         ):

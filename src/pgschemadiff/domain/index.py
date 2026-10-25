@@ -10,6 +10,7 @@
 - An optional ``WHERE`` predicate for partial indexes.
 - The raw ``pg_get_indexdef`` result and any owning constraint name.
 - The uniqueness flag.
+- Whether the index is a partitioned parent index or a child attached to one.
 
 All models are pure domain: no IO, no async, no external drivers.
 """
@@ -134,6 +135,12 @@ class Index(BaseModel):
 
     unique: bool = False
     """``True`` if the index carries a uniqueness constraint."""
+
+    partitioned: bool = False
+    """``True`` when the index itself is partitioned (catalog ``relkind = 'I'``)."""
+
+    attached_to_parent: bool = False
+    """``True`` when this child index is attached to a parent index via ``pg_inherits``."""
 
     predicate: str | None = None
     """``WHERE`` predicate for partial indexes, or ``None``."""

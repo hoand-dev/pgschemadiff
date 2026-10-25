@@ -119,7 +119,7 @@ def _matches_qualified_table(definition: str, start: int, namespace: str, table:
     )
 
 
-def _create_definition(index: Index) -> str:
+def _create_definition(index: Index, *, concurrently: bool | None = None) -> str:
     definition = catalog_fragment(index.definition or "", "Index definition")
     if definition.startswith("CREATE UNIQUE INDEX "):
         prefix = "CREATE UNIQUE INDEX "
@@ -130,11 +130,36 @@ def _create_definition(index: Index) -> str:
 
     target_start = _find_on_target(definition, len(prefix))
     table = index.table_ref.qname
+
+    if index.partitioned:
+        if target_start is None:
+            raise MigrationError(
+                "Index definition must reference its expected schema-qualified table."
+            )
+
+        only_start = target_start
+        while only_start < len(definition) and definition[only_start].isspace():
+            only_start += 1
+        only_token = _read_identifier(definition, only_start)
+        if only_token is None or only_token[1] or only_token[0].upper() != "ONLY":
+            raise MigrationError("Partitioned index definition must use ON ONLY.")
+
+        table_start = only_token[2]
+        while table_start < len(definition) and definition[table_start].isspace():
+            table_start += 1
+        definition = definition[:only_start] + definition[table_start:]
+        target_start = _find_on_target(definition, len(prefix))
+
     if target_start is None or not _matches_qualified_table(
         definition, target_start, table.namespace, table.name
     ):
         raise MigrationError("Index definition must reference its expected schema-qualified table.")
-    return f"{prefix.rstrip()} CONCURRENTLY {definition[len(prefix) :]}"
+
+    if concurrently is None:
+        concurrently = not index.partitioned
+    if concurrently:
+        return f"{prefix.rstrip()} CONCURRENTLY {definition[len(prefix) :]}"
+    return definition
 
 
 def _check_standalone(index: Index) -> None:
@@ -147,7 +172,13 @@ def emit_create_index(delta: DeltaBase) -> tuple[SqlStatement, ...]:
         raise MigrationError("Create-index handler received a different delta type.")
     _check_standalone(delta.index)
 
-    statements = [_statement(_create_definition(delta.index), delta, transactional=False)]
+    statements = [
+        _statement(
+            _create_definition(delta.index),
+            delta,
+            transactional=delta.index.partitioned,
+        )
+    ]
     if delta.index.comment is not None:
         statements.append(
             _statement(
@@ -164,11 +195,12 @@ def emit_drop_index(delta: DeltaBase) -> tuple[SqlStatement, ...]:
     if not isinstance(delta, DropIndex):
         raise MigrationError("Drop-index handler received a different delta type.")
     _check_standalone(delta.index)
+    concurrently = " CONCURRENTLY" if not delta.index.partitioned else ""
     return (
         _statement(
-            f"DROP INDEX CONCURRENTLY {quote_qualified(delta.index.ref.qname)}",
+            f"DROP INDEX{concurrently} {quote_qualified(delta.index.ref.qname)}",
             delta,
-            transactional=False,
+            transactional=delta.index.partitioned,
         ),
     )
 
@@ -178,14 +210,20 @@ def emit_replace_index(delta: DeltaBase) -> tuple[SqlStatement, ...]:
         raise MigrationError("Replace-index handler received a different delta type.")
     _check_standalone(delta.old_index)
     _check_standalone(delta.new_index)
+    partitioned = delta.old_index.partitioned or delta.new_index.partitioned
+    concurrently = " CONCURRENTLY" if not partitioned else ""
 
     statements = [
         _statement(
-            f"DROP INDEX CONCURRENTLY {quote_qualified(delta.old_index.ref.qname)}",
+            f"DROP INDEX{concurrently} {quote_qualified(delta.old_index.ref.qname)}",
             delta,
-            transactional=False,
+            transactional=partitioned,
         ),
-        _statement(_create_definition(delta.new_index), delta, transactional=False),
+        _statement(
+            _create_definition(delta.new_index, concurrently=not partitioned),
+            delta,
+            transactional=partitioned,
+        ),
     ]
     if delta.new_index.comment is not None:
         statements.append(

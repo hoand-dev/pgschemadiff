@@ -9,6 +9,8 @@
 --   is_unique         bool       -- pg_index.indisunique
 --   is_primary        bool       -- pg_index.indisprimary
 --   is_exclusion      bool       -- pg_index.indisexclusion
+--   partitioned       bool       -- index relation has relkind 'I'
+--   attached_to_parent bool      -- child index is attached to a parent index
 --   index_definition  text       -- full CREATE [UNIQUE] INDEX … statement
 --   include_columns   text[]      -- names after the first indnkeyatts index attributes
 --   constraint_name   text|null   -- owning PK/UNIQUE/EXCLUSION constraint, if any
@@ -21,6 +23,9 @@ SELECT
     i.indisunique                                        AS is_unique,
     i.indisprimary                                       AS is_primary,
     i.indisexclusion                                     AS is_exclusion,
+    ic.relkind = 'I'                                     AS partitioned,
+    EXISTS (SELECT 1 FROM pg_catalog.pg_inherits WHERE inhrelid = i.indexrelid)
+                                                         AS attached_to_parent,
     pg_get_indexdef(i.indexrelid)                        AS index_definition,
     ARRAY(
         SELECT a.attname::text

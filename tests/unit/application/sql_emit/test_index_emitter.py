@@ -27,6 +27,8 @@ def _index(
     unique: bool = False,
     comment: str | None = None,
     constraint_name: str | None = None,
+    partitioned: bool = False,
+    attached_to_parent: bool = False,
 ) -> Index:
     table = table_ref or _table_ref()
     return Index(
@@ -41,6 +43,8 @@ def _index(
         definition=definition,
         comment=comment,
         constraint_name=constraint_name,
+        partitioned=partitioned,
+        attached_to_parent=attached_to_parent,
     )
 
 
@@ -88,6 +92,50 @@ def test_create_unique_index(snapshot: SnapshotAssertion) -> None:
     statements = _assert_emitted(handlers()[CreateIndex](delta), delta, (False,))
 
     assert tuple(statement.sql for statement in statements) == snapshot
+
+
+@pytest.mark.parametrize("unique", [False, True], ids=["plain", "unique"])
+def test_create_partitioned_index_strips_only_and_is_transactional(unique: bool) -> None:
+    prefix = "CREATE UNIQUE INDEX" if unique else "CREATE INDEX"
+    index = _index(
+        definition=(
+            f'{prefix} "Search""Idx" ON ONLY "Sales"."Order""Items" USING btree ("display")'
+        ),
+        unique=unique,
+        partitioned=True,
+        comment="partitioned note",
+    )
+    delta = CreateIndex(target=index.ref, index=index)
+
+    statements = _assert_emitted(handlers()[CreateIndex](delta), delta, (True, True))
+
+    expected_prefix = "CREATE UNIQUE INDEX" if unique else "CREATE INDEX"
+    assert tuple(statement.sql for statement in statements) == (
+        f'{expected_prefix} "Search""Idx" ON "Sales"."Order""Items" USING btree ("display")',
+        'COMMENT ON INDEX "Sales"."Search""Idx" IS \'partitioned note\'',
+    )
+
+
+def test_create_partitioned_index_rejects_wrong_schema_qualified_table() -> None:
+    index = _index(
+        definition=(
+            'CREATE INDEX "Search""Idx" ON ONLY "Other"."Order""Items" USING btree ("display")'
+        ),
+        partitioned=True,
+    )
+
+    with pytest.raises(MigrationError, match="expected schema-qualified table"):
+        handlers()[CreateIndex](CreateIndex(target=index.ref, index=index))
+
+
+def test_create_partitioned_index_rejects_definition_without_only() -> None:
+    index = _index(
+        definition=('CREATE INDEX "Search""Idx" ON "Sales"."Order""Items" USING btree ("display")'),
+        partitioned=True,
+    )
+
+    with pytest.raises(MigrationError, match="must use ON ONLY"):
+        handlers()[CreateIndex](CreateIndex(target=index.ref, index=index))
 
 
 def test_create_index_accepts_unquoted_lowercase_table_reference() -> None:
@@ -142,6 +190,15 @@ def test_drop_index(snapshot: SnapshotAssertion) -> None:
     assert tuple(statement.sql for statement in statements) == snapshot
 
 
+def test_drop_partitioned_index_is_transactional_and_nonconcurrent() -> None:
+    index = _index(partitioned=True)
+    delta = DropIndex(target=index.ref, index=index)
+
+    (statement,) = _assert_emitted(handlers()[DropIndex](delta), delta, (True,))
+
+    assert statement.sql == 'DROP INDEX "Sales"."Search""Idx"'
+
+
 def test_replace_index(snapshot: SnapshotAssertion) -> None:
     old_index = _index(
         definition=('CREATE INDEX "Search""Idx" ON "Sales"."Order""Items" USING btree ("display")')
@@ -159,6 +216,30 @@ def test_replace_index(snapshot: SnapshotAssertion) -> None:
     statements = _assert_emitted(handlers()[ReplaceIndex](delta), delta, (False, False, True))
 
     assert tuple(statement.sql for statement in statements) == snapshot
+
+
+def test_replace_partitioned_index_is_transactional_and_nonconcurrent() -> None:
+    old_definition = 'CREATE INDEX "Search""Idx" ON "Sales"."Order""Items" USING btree ("display")'
+    new_definition = (
+        'CREATE INDEX "Search""Idx" ON ONLY "Sales"."Order""Items" USING btree ("display" DESC)'
+    )
+    old_index = _index(definition=old_definition)
+    new_index = old_index.model_copy(
+        update={
+            "definition": new_definition,
+            "partitioned": True,
+            "comment": "rebuilt",
+        }
+    )
+    delta = ReplaceIndex(target=new_index.ref, old_index=old_index, new_index=new_index)
+
+    statements = _assert_emitted(handlers()[ReplaceIndex](delta), delta, (True, True, True))
+
+    assert tuple(statement.sql for statement in statements) == (
+        'DROP INDEX "Sales"."Search""Idx"',
+        'CREATE INDEX "Search""Idx" ON "Sales"."Order""Items" USING btree ("display" DESC)',
+        'COMMENT ON INDEX "Sales"."Search""Idx" IS \'rebuilt\'',
+    )
 
 
 @pytest.mark.parametrize(

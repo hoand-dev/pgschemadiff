@@ -72,6 +72,8 @@
     transactional=true new_unit=false sql=COMMENT ON INDEX "App Schema"."active_email_idx" IS 'Active email lookup'
   create non-btree index: create_index target=index "App Schema"."tags_gin_idx"
     transactional=false new_unit=false sql=CREATE INDEX CONCURRENTLY "tags_gin_idx" ON "App Schema"."Order""Items" USING gin ("tags")
+  create partitioned index: create_index target=index "App Schema"."events_date_idx"
+    transactional=true new_unit=false sql=CREATE INDEX "events_date_idx" ON "App Schema"."events" USING btree ("created_at")
   drop index: drop_index target=index "App Schema"."select"
     transactional=false new_unit=false sql=DROP INDEX CONCURRENTLY "App Schema"."select"
   replace index: replace_index target=index "App Schema"."created_at_idx"

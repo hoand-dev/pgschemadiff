@@ -106,13 +106,19 @@ def _column(
     )
 
 
-def _index(*, unique: bool = False, method: IndexMethod = IndexMethod.BTREE) -> Index:
+def _index(
+    *,
+    unique: bool = False,
+    method: IndexMethod = IndexMethod.BTREE,
+    partitioned: bool = False,
+) -> Index:
     return Index(
         ref=_INDEX_REF,
         table_ref=_TABLE_REF,
         method=method,
         key_columns=(IndexKeyColumn(column_name="email"),),
         unique=unique,
+        partitioned=partitioned,
     )
 
 
@@ -300,6 +306,11 @@ RISK_CASES = (
         id="create-index",
     ),
     pytest.param(
+        CreateIndex(target=_INDEX_REF, index=_index(partitioned=True)),
+        RiskLevel.DANGEROUS,
+        id="create-partitioned-index",
+    ),
+    pytest.param(
         DropIndex(target=_INDEX_REF, index=_index()),
         RiskLevel.DANGEROUS,
         id="drop-nonunique-index",
@@ -317,6 +328,15 @@ RISK_CASES = (
         ),
         RiskLevel.DANGEROUS,
         id="replace-index",
+    ),
+    pytest.param(
+        ReplaceIndex(
+            target=_INDEX_REF,
+            old_index=_index(partitioned=True),
+            new_index=_index(partitioned=True, method=IndexMethod.HASH),
+        ),
+        RiskLevel.DANGEROUS,
+        id="replace-partitioned-index",
     ),
     pytest.param(
         ReplaceIndex(
@@ -534,6 +554,37 @@ def test_index_on_new_table_is_safe() -> None:
 
     assert assessment.level is RiskLevel.SAFE
     assert "empty table" in assessment.reason
+
+
+def test_partitioned_index_on_new_table_stays_safe() -> None:
+    delta = CreateIndex(target=_INDEX_REF, index=_index(partitioned=True))
+
+    assessment = classify_risk(delta, created_tables=frozenset({_TABLE_REF}))
+
+    assert assessment.level is RiskLevel.SAFE
+    assert "empty table" in assessment.reason
+
+
+def test_partitioned_index_on_existing_table_has_blocking_risk_reason() -> None:
+    delta = CreateIndex(target=_INDEX_REF, index=_index(partitioned=True))
+
+    assessment = classify_risk(delta)
+
+    assert assessment.level is RiskLevel.DANGEROUS
+    assert assessment.reason == "Builds the index on every partition while blocking writes."
+
+
+def test_partitioned_index_replacement_on_new_table_stays_safe() -> None:
+    delta = ReplaceIndex(
+        target=_INDEX_REF,
+        old_index=_index(partitioned=True),
+        new_index=_index(partitioned=True, method=IndexMethod.HASH),
+    )
+
+    assessment = classify_risk(delta, created_tables=frozenset({_TABLE_REF}))
+
+    assert assessment.level is RiskLevel.SAFE
+    assert "created in this migration" in assessment.reason
 
 
 def test_existing_table_risks_stay_conservative_with_context() -> None:

@@ -176,18 +176,66 @@ def _seed(dsn: str, statements: list[str]) -> None:
         ),
         pytest.param(
             "index-on-partitioned-table",
-            [_APP, "CREATE TABLE app.events (event_date date) PARTITION BY RANGE (event_date)"],
             [
                 _APP,
                 "CREATE TABLE app.events (event_date date) PARTITION BY RANGE (event_date)",
+                "CREATE TABLE app.events_2026 PARTITION OF app.events "
+                "FOR VALUES FROM ('2026-01-01') TO ('2027-01-01')",
+                "CREATE TABLE app.events_2027 PARTITION OF app.events "
+                "FOR VALUES FROM ('2027-01-01') TO ('2028-01-01')",
+            ],
+            [
+                _APP,
+                "CREATE TABLE app.events (event_date date) PARTITION BY RANGE (event_date)",
+                "CREATE TABLE app.events_2026 PARTITION OF app.events "
+                "FOR VALUES FROM ('2026-01-01') TO ('2027-01-01')",
+                "CREATE TABLE app.events_2027 PARTITION OF app.events "
+                "FOR VALUES FROM ('2027-01-01') TO ('2028-01-01')",
                 "CREATE INDEX events_date_idx ON app.events (event_date)",
             ],
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason=(
-                    "TD-EMIT-01: CREATE INDEX CONCURRENTLY is unsupported on partitioned tables."
-                ),
-            ),
+        ),
+        pytest.param(
+            "drop-partitioned-index",
+            [
+                _APP,
+                "CREATE TABLE app.events (event_date date) PARTITION BY RANGE (event_date)",
+                "CREATE TABLE app.events_2026 PARTITION OF app.events "
+                "FOR VALUES FROM ('2026-01-01') TO ('2027-01-01')",
+                "CREATE TABLE app.events_2027 PARTITION OF app.events "
+                "FOR VALUES FROM ('2027-01-01') TO ('2028-01-01')",
+                "CREATE INDEX events_date_idx ON app.events (event_date)",
+            ],
+            [
+                _APP,
+                "CREATE TABLE app.events (event_date date) PARTITION BY RANGE (event_date)",
+                "CREATE TABLE app.events_2026 PARTITION OF app.events "
+                "FOR VALUES FROM ('2026-01-01') TO ('2027-01-01')",
+                "CREATE TABLE app.events_2027 PARTITION OF app.events "
+                "FOR VALUES FROM ('2027-01-01') TO ('2028-01-01')",
+            ],
+        ),
+        pytest.param(
+            "add-partition-to-indexed-parent",
+            [
+                _APP,
+                "CREATE TABLE app.events (event_date date) PARTITION BY RANGE (event_date)",
+                "CREATE TABLE app.events_2026 PARTITION OF app.events "
+                "FOR VALUES FROM ('2026-01-01') TO ('2027-01-01')",
+                "CREATE TABLE app.events_2027 PARTITION OF app.events "
+                "FOR VALUES FROM ('2027-01-01') TO ('2028-01-01')",
+                "CREATE INDEX events_date_idx ON app.events (event_date)",
+            ],
+            [
+                _APP,
+                "CREATE TABLE app.events (event_date date) PARTITION BY RANGE (event_date)",
+                "CREATE TABLE app.events_2026 PARTITION OF app.events "
+                "FOR VALUES FROM ('2026-01-01') TO ('2027-01-01')",
+                "CREATE TABLE app.events_2027 PARTITION OF app.events "
+                "FOR VALUES FROM ('2027-01-01') TO ('2028-01-01')",
+                "CREATE INDEX events_date_idx ON app.events (event_date)",
+                "CREATE TABLE app.events_2028 PARTITION OF app.events "
+                "FOR VALUES FROM ('2028-01-01') TO ('2029-01-01')",
+            ],
         ),
         pytest.param(
             "add-primary-key",

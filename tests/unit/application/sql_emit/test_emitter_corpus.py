@@ -100,6 +100,7 @@ def _index(
     include_columns: tuple[str, ...] = (),
     predicate: str | None = None,
     comment: str | None = None,
+    partitioned: bool = False,
 ) -> Index:
     return Index(
         ref=ObjectRef(
@@ -114,6 +115,7 @@ def _index(
         predicate=predicate,
         definition=definition,
         comment=comment,
+        partitioned=partitioned,
     )
 
 
@@ -189,6 +191,13 @@ def _emitter_cases() -> tuple[tuple[str, Delta], ...]:
         'CREATE INDEX "tags_gin_idx" ON "App Schema"."Order""Items" USING gin ("tags")',
         key_columns=(IndexKeyColumn(column_name="tags"),),
         method=IndexMethod.GIN,
+    )
+    partitioned_index = _index(
+        "events_date_idx",
+        partition_parent_ref,
+        'CREATE INDEX "events_date_idx" ON ONLY "App Schema"."events" USING btree ("created_at")',
+        key_columns=(IndexKeyColumn(column_name="created_at"),),
+        partitioned=True,
     )
     old_replaced_index = _index(
         "created_at_idx",
@@ -494,6 +503,10 @@ def _emitter_cases() -> tuple[tuple[str, Delta], ...]:
             CreateIndex(target=partial_expression_index.ref, index=partial_expression_index),
         ),
         ("create non-btree index", CreateIndex(target=gin_index.ref, index=gin_index)),
+        (
+            "create partitioned index",
+            CreateIndex(target=partitioned_index.ref, index=partitioned_index),
+        ),
         (
             "drop index",
             DropIndex(

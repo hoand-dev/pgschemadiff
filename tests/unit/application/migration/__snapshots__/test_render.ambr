@@ -402,6 +402,8 @@
                 ],
                 "include_columns": [],
                 "unique": false,
+                "partitioned": false,
+                "attached_to_parent": false,
                 "predicate": null,
                 "definition": "CREATE INDEX \"accounts_email_idx\" ON \"app\".\"accounts\" USING btree (\"email\")",
                 "constraint_name": null,
@@ -444,7 +446,7 @@
         - `up.sql`: `a6e992690fd58b789759956c7ec05f9c01aa1694ab140f106d2a915c6f8bd526`
         - `down.sql`: `e87201d8d4470825bb2bea1bd7a4503e7152abd3a22dbd70418d51cfa851166e`
         - `manifest.json`: `04fa4ef4e470362e9755d7177a7988b21c8d956dd3254c962b5702bb05a8deb8`
-        - `deltas.json`: `7009eea33e1e803705e33b71b6276b81f192e0fb152e8adb6561dad79ea0f42d`
+        - `deltas.json`: `2644ff70a7f8cbfcee2702cb0afb7e6aeb363d58e4767cf0a2e6e7cd1437220b`
         
         ## Warnings
         
