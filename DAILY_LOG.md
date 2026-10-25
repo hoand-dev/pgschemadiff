@@ -431,3 +431,12 @@ NEEDS_HUMAN (open): 3 — P1-TEST-02 (PR #3 human-closed; do not recreate); bran
 - Then: TD-INSPECT-02 (virtual generated columns), TD-INSPECT-01 (UNLOGGED; ignore rules gained `unlogged`), TD-EMIT-01 (partitioned indexes, attached children skipped). CI `0c9536b`: 48 integration passed, 0 xfail.
 - Ops: Windows Temp cleanup deleted zero-byte `py.typed` files from the scratch venv twice; reinstall with `uv sync --extra dev --reinstall`.
 - Next: Phase 3b MVP-B spec.
+
+---
+
+## RUN 2026-10-26-1 — Phase 3b (MVP-B) slices
+- Spec `docs/specs/2026-10-26-p3b-mvp-b-object-types-design.md` written by opencode, reviewed (enum ADD VALUE as isolated transactional unit; slice 0b folded into enum slices).
+- Done and CI-verified: slice 0a ObjectRef-keyed engine registry; P3-MVPB-06 enums; -09 composite types; -10 domain types (check NOT VALID → transaction drain → VALIDATE); -05 sequences (OWNED BY / owner ordering).
+- Long-standing inspector bugs found and fixed: `LIKE 'pg_%'` skipped schemas such as `pga_app`; `tables.sql` never selected owner/tablespace/comment; catalog SQL must not use bind placeholders; reserved `collation` alias.
+- Process: every new or changed catalog query is checked with EXPLAIN on the local PG 18.4 via MCP before push (Docker is unavailable locally).
+- CI `260dffb`: 84 PG18 integration tests passed. Next: P3-MVPB-03 functions.

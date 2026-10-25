@@ -35,10 +35,12 @@ Goal: inspect two Postgres DBs, show schema diff, generate safe migration SQL.
 ---
 
 ## Execution Queue
-1. Phase 3b (MVP-B object types, M4) or Phase 4 TUI wiring (P4-TUI-05..07) — order to be decided; P4 views still run on mock data.
+1. **Phase 3b (M4)** per `docs/specs/2026-10-26-p3b-mvp-b-object-types-design.md`: P3-MVPB-06 enums, -09 composite, -10 domain, -05 sequences done (CI `260dffb`: 84 PG18 integration passed). Next: -03 functions, -04 procedures, -01 views, -02 matviews, -07 triggers, -08 policies.
+2. Phase 4 TUI wiring (P4-TUI-05..07) after M4; views still run on mock data.
+3. TD-RISK-02 (owner-change risk alignment).
 
 ## Next Actions
-- Phase 3b: MVP-B design spec (object order, shared catalog/diff/emit pattern), then one object type per slice.
+- P3-MVPB-03 functions slice.
 
 ## Ready To Merge
 - None.
