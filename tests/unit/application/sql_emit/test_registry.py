@@ -19,6 +19,7 @@ from pgschemadiff.domain.delta import (
     Delta,
     DeltaBase,
     DeltaSet,
+    ReplaceEnumLabels,
 )
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index, IndexKeyColumn, IndexMethod
@@ -38,8 +39,8 @@ def _union_members(annotation: object) -> set[type[DeltaBase]]:
     raise AssertionError(f"Unexpected Delta union member: {annotation!r}")
 
 
-def test_default_handlers_cover_exactly_every_delta_union_member() -> None:
-    members = _union_members(Delta)
+def test_default_handlers_cover_every_emittable_delta_union_member() -> None:
+    members = _union_members(Delta) - {ReplaceEnumLabels}
     handlers = default_handlers()
 
     assert set(handlers) == members

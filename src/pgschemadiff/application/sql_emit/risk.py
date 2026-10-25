@@ -8,9 +8,12 @@ from pgschemadiff.domain.constraint import ForeignKeyConstraint
 from pgschemadiff.domain.delta import (
     AddColumn,
     AddConstraint,
+    AddEnumValue,
     AlterColumnType,
+    AlterEnumAttrs,
     AlterExtension,
     AlterTableAttrs,
+    CreateEnum,
     CreateExtension,
     CreateIndex,
     CreateSchema,
@@ -18,12 +21,14 @@ from pgschemadiff.domain.delta import (
     DeltaBase,
     DropColumn,
     DropConstraint,
+    DropEnum,
     DropExtension,
     DropIndex,
     DropSchema,
     DropTable,
     RenameColumn,
     RenameTable,
+    ReplaceEnumLabels,
     ReplaceIndex,
     SetColumnDefault,
     SetColumnNullability,
@@ -85,6 +90,11 @@ _SUPPORTED_DELTA_TYPES: tuple[type[DeltaBase], ...] = (
     ReplaceIndex,
     AddConstraint,
     DropConstraint,
+    CreateEnum,
+    DropEnum,
+    AddEnumValue,
+    AlterEnumAttrs,
+    ReplaceEnumLabels,
 )
 
 
@@ -310,6 +320,25 @@ def classify_risk(  # noqa: PLR0912, PLR0915
                     )
     elif isinstance(delta, DropConstraint):
         level, reason = RiskLevel.DESTRUCTIVE, "Removes an enforced integrity rule."
+    elif isinstance(delta, CreateEnum):
+        level, reason = RiskLevel.SAFE, "Creates an enum type."
+    elif isinstance(delta, AddEnumValue):
+        level, reason = (
+            RiskLevel.DANGEROUS,
+            "Adds an enum label; this is irreversible and changes accepted values.",
+        )
+    elif isinstance(delta, DropEnum):
+        level, reason = RiskLevel.DESTRUCTIVE, "Removes an enum type."
+    elif isinstance(delta, AlterEnumAttrs):
+        level, reason = (
+            RiskLevel.DANGEROUS,
+            "Changes enum owner, which can change effective access.",
+        )
+    elif isinstance(delta, ReplaceEnumLabels):
+        level, reason = (
+            RiskLevel.BLOCKED,
+            "Enum label removal, rename, or reorder has no safe in-place DDL.",
+        )
     else:
         level, reason = RiskLevel.BLOCKED, "No risk policy exists for this delta type."
 

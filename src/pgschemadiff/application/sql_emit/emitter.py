@@ -15,12 +15,14 @@ class SqlStatement:
 
     ``new_unit`` tells the transaction splitter to start a new transaction unit
     at this statement, even when the statement itself is transactional.
+    ``isolated`` puts a transactional statement in a unit by itself.
     """
 
     sql: str
     transactional: bool
     delta: DeltaBase
     new_unit: bool = False
+    isolated: bool = False
 
     def __post_init__(self) -> None:
         if not self.sql.strip():

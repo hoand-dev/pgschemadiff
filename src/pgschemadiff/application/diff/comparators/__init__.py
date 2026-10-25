@@ -27,6 +27,7 @@ from __future__ import annotations
 
 from pgschemadiff.application.diff.comparators.column import ColumnComparator
 from pgschemadiff.application.diff.comparators.constraint import ConstraintComparator
+from pgschemadiff.application.diff.comparators.enum import EnumComparator
 from pgschemadiff.application.diff.comparators.extension import ExtensionComparator
 from pgschemadiff.application.diff.comparators.index import IndexComparator
 from pgschemadiff.application.diff.comparators.schema import SchemaComparator
@@ -41,6 +42,7 @@ __all__ = [
     "ColumnComparing",
     "ConstraintComparator",
     "ConstraintComparing",
+    "EnumComparator",
     "ExtensionComparator",
     "IndexComparator",
     "SchemaComparator",

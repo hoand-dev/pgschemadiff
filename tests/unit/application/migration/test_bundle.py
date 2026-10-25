@@ -17,7 +17,14 @@ from pgschemadiff.application.migration.ports import BundleReader
 from pgschemadiff.application.migration.render import render_bundle
 from pgschemadiff.application.sql_emit.risk import RiskLevel
 from pgschemadiff.domain.column import Column
-from pgschemadiff.domain.delta import CreateIndex, CreateSchema, CreateTable, DeltaBase, DeltaSet
+from pgschemadiff.domain.delta import (
+    AddEnumValue,
+    CreateIndex,
+    CreateSchema,
+    CreateTable,
+    DeltaBase,
+    DeltaSet,
+)
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index, IndexKeyColumn, IndexMethod
 from pgschemadiff.domain.schema import Schema
@@ -328,6 +335,27 @@ def test_load_round_trips_rendered_plan_and_extracts_exact_statement_sql(
         unit.transaction_unit.transactional for unit in plan.units
     ]
     assert all(isinstance(unit.max_risk, RiskLevel) for unit in bundle.units)
+
+
+def test_enum_addition_round_trips_as_an_isolated_transactional_bundle_unit() -> None:
+    enum_ref = _ref(ObjectKind.ENUM, "app", "mood")
+    delta = AddEnumValue(target=enum_ref, label="happy", after="okay")
+    plan = generate_migration(
+        DeltaSet.from_iterable((delta,)),
+        clock=lambda: _CREATED_AT,
+        id_factory=lambda: "enum-addition-bundle",
+    )
+    files = dict(render_bundle(plan).files)
+
+    bundle = load_bundle(files["manifest.json"], files["up.sql"])
+
+    assert len(plan.units) == len(bundle.units) == 1
+    assert plan.units[0].transaction_unit.transactional is True
+    assert bundle.units[0].transactional is True
+    assert (
+        bundle.units[0].statements[0].sql
+        == "ALTER TYPE \"app\".\"mood\" ADD VALUE 'happy' AFTER 'okay'"
+    )
 
 
 def test_empty_bundle_round_trips_without_risk_or_units() -> None:

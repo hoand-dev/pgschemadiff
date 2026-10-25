@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from pgschemadiff.application.sql_emit import (
     column_emitter,
     constraint_emitter,
+    enum_emitter,
     index_emitter,
     schema_emitter,
     table_emitter,
@@ -26,6 +27,7 @@ def default_handlers() -> dict[type[DeltaBase], SqlHandler]:
         column_emitter.handlers(),
         index_emitter.handlers(),
         constraint_emitter.handlers(),
+        enum_emitter.handlers(),
         schema_emitter.handlers(),
     ):
         for delta_type, handler in emitter_handlers.items():

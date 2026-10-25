@@ -296,12 +296,19 @@ class DeltaSet(BaseModel):
 
 from pgschemadiff.domain.delta.column import ColumnDelta  # noqa: E402
 from pgschemadiff.domain.delta.constraint import ConstraintDelta  # noqa: E402
+from pgschemadiff.domain.delta.enum import EnumDelta  # noqa: E402
 from pgschemadiff.domain.delta.index import IndexDelta  # noqa: E402
 from pgschemadiff.domain.delta.schema import ExtensionDelta, SchemaDelta  # noqa: E402
 from pgschemadiff.domain.delta.table import TableDelta  # noqa: E402
 
 Delta = Annotated[
-    TableDelta | ColumnDelta | IndexDelta | ConstraintDelta | SchemaDelta | ExtensionDelta,
+    TableDelta
+    | ColumnDelta
+    | IndexDelta
+    | ConstraintDelta
+    | SchemaDelta
+    | ExtensionDelta
+    | EnumDelta,
     Field(discriminator="kind"),
 ]
 """Global discriminated union over ALL concrete delta types.

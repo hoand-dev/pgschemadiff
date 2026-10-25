@@ -33,6 +33,7 @@ def _statement(
     transactional: bool,
     *,
     new_unit: bool = False,
+    isolated: bool = False,
     delta: DeltaBase = _CREATE,
 ) -> SqlStatement:
     return SqlStatement(
@@ -40,6 +41,7 @@ def _statement(
         transactional=transactional,
         delta=delta,
         new_unit=new_unit,
+        isolated=isolated,
     )
 
 
@@ -94,6 +96,21 @@ def test_new_unit_at_start_and_consecutive_boundaries() -> None:
         statements[:1],
         statements[1:],
     )
+
+
+def test_isolated_transactional_statement_owns_its_unit_on_both_sides() -> None:
+    statements = (
+        _statement("before", True),
+        _statement("isolated", True, isolated=True),
+        _statement("after", True),
+    )
+
+    units = split_units(statements)
+
+    assert tuple(unit.statements for unit in units) == tuple(
+        (statement,) for statement in statements
+    )
+    assert tuple(unit.transactional for unit in units) == (True, True, True)
 
 
 def test_empty_input_returns_no_units() -> None:

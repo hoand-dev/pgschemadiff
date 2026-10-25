@@ -14,8 +14,15 @@ from pgschemadiff.domain.constraint import (
     UniqueConstraint,
 )
 from pgschemadiff.domain.delta.base import DeltaSet
-from pgschemadiff.domain.delta.column import AddColumn, DropColumn, RenameColumn
+from pgschemadiff.domain.delta.column import (
+    AddColumn,
+    AlterColumnType,
+    DropColumn,
+    RenameColumn,
+    SetColumnDefault,
+)
 from pgschemadiff.domain.delta.constraint import AddConstraint, DropConstraint
+from pgschemadiff.domain.delta.enum import AddEnumValue, CreateEnum, DropEnum
 from pgschemadiff.domain.delta.index import CreateIndex, DropIndex, ReplaceIndex
 from pgschemadiff.domain.delta.schema import (
     AlterExtension,
@@ -25,6 +32,7 @@ from pgschemadiff.domain.delta.schema import (
     DropSchema,
 )
 from pgschemadiff.domain.delta.table import CreateTable, DropTable, RenameTable
+from pgschemadiff.domain.enum_type import EnumType
 from pgschemadiff.domain.extension import Extension
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index, IndexKeyColumn
@@ -137,6 +145,85 @@ def test_creation_prerequisites_order_schema_table_column_constraint_and_index()
     _assert_precedes(ordered, create_table, add_column)
     _assert_precedes(ordered, add_column, add_constraint)
     _assert_precedes(ordered, add_column, create_index)
+
+
+def test_enum_creation_and_additions_precede_table_and_index_changes() -> None:
+    enum_ref = _ref(ObjectKind.ENUM, "state")
+    enum = EnumType(ref=enum_ref, labels=("ready",))
+    create_enum = CreateEnum(target=enum_ref, enum=enum)
+    add_review = AddEnumValue(target=enum_ref, label="review", after="ready")
+    add_done = AddEnumValue(target=enum_ref, label="done", after="review")
+
+    table = _table("items", columns=("id",))
+    create_table = CreateTable(target=table.ref, table=table)
+    state_column = Column(name="state", position=2, data_type="public.state")
+    add_column = AddColumn(target=_column_ref(table.ref, "state"), column=state_column)
+    alter_type = AlterColumnType(target=_column_ref(table.ref, "id"), new_data_type="bigint")
+    set_default = SetColumnDefault(
+        target=_column_ref(table.ref, "id"), new_default="'done'::public.state"
+    )
+    add_constraint = _add_constraint(table, CheckConstraint(name="items_check", expression="true"))
+    index = _index("items_id_idx", table.ref, "id")
+    create_index = CreateIndex(target=index.ref, index=index)
+    old_index = _index("items_replaced_idx", table.ref, "id")
+    new_index = _index("items_replaced_idx", table.ref, "state")
+    replace_index = ReplaceIndex(target=new_index.ref, old_index=old_index, new_index=new_index)
+    dependents = (
+        create_table,
+        add_column,
+        alter_type,
+        set_default,
+        add_constraint,
+        create_index,
+        replace_index,
+    )
+
+    ordered = order_deltas(
+        DeltaSet.from_iterable((*reversed(dependents), add_review, add_done, create_enum))
+    ).deltas
+
+    _assert_precedes(ordered, create_enum, add_review, add_done)
+    for dependent in dependents:
+        _assert_precedes(ordered, add_done, dependent)
+
+
+def test_enum_drop_waits_for_table_column_type_default_constraint_and_index_drops() -> None:
+    enum_ref = _ref(ObjectKind.ENUM, "aaa_state")
+    enum = EnumType(ref=enum_ref, labels=("ready",))
+    drop_enum = DropEnum(target=enum_ref, enum=enum)
+    table = _table("items", columns=("id",))
+    column_ref = _column_ref(table.ref, "id")
+    index = _index("items_id_idx", table.ref, "id")
+    constraint = CheckConstraint(name="items_check", expression="true")
+    dependents = (
+        DropTable(target=table.ref, table=table),
+        DropColumn(target=column_ref, column=Column(name="id", position=1, data_type="integer")),
+        AlterColumnType(target=column_ref, new_data_type="text"),
+        SetColumnDefault(target=column_ref, new_default=None),
+        _drop_constraint(table, constraint),
+        DropIndex(target=index.ref, index=index),
+    )
+
+    for dependent in dependents:
+        ordered = order_deltas(DeltaSet.from_iterable((drop_enum, dependent))).deltas
+        _assert_precedes(ordered, dependent, drop_enum)
+
+
+def test_enum_create_and_drop_are_ordered_with_their_schema() -> None:
+    schema_ref = _ref(ObjectKind.SCHEMA, "public")
+    schema = Schema(ref=schema_ref)
+    create_schema = CreateSchema(target=schema_ref, pg_schema=schema)
+    drop_schema = DropSchema(target=schema_ref, pg_schema=schema)
+    enum_ref = _ref(ObjectKind.ENUM, "state")
+    enum = EnumType(ref=enum_ref, labels=("ready",))
+    create_enum = CreateEnum(target=enum_ref, enum=enum)
+    drop_enum = DropEnum(target=enum_ref, enum=enum)
+
+    created = order_deltas(DeltaSet.from_iterable((create_enum, create_schema))).deltas
+    dropped = order_deltas(DeltaSet.from_iterable((drop_schema, drop_enum))).deltas
+
+    _assert_precedes(created, create_schema, create_enum)
+    _assert_precedes(dropped, drop_enum, drop_schema)
 
 
 def test_fk_addition_waits_for_owning_and_referenced_tables_and_columns() -> None:

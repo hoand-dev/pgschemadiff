@@ -48,6 +48,52 @@ def _seed(dsn: str, statements: list[str]) -> None:
         pytest.param("create-table", [_APP], [_APP, _ITEMS]),
         pytest.param("drop-table", [_APP, _ITEMS], [_APP]),
         pytest.param(
+            "create-enum-and-table",
+            [_APP],
+            [
+                _APP,
+                "CREATE TYPE app.mood AS ENUM ('sad', 'okay', 'happy')",
+                "CREATE TABLE app.status (mood app.mood)",
+            ],
+        ),
+        pytest.param(
+            "append-enum-label",
+            [_APP, "CREATE TYPE app.mood AS ENUM ('sad', 'okay')"],
+            [_APP, "CREATE TYPE app.mood AS ENUM ('sad', 'okay', 'happy')"],
+        ),
+        pytest.param(
+            "insert-enum-label-before",
+            [_APP, "CREATE TYPE app.mood AS ENUM ('sad', 'happy')"],
+            [_APP, "CREATE TYPE app.mood AS ENUM ('sad', 'okay', 'happy')"],
+        ),
+        pytest.param(
+            "insert-enum-label-after",
+            [_APP, "CREATE TYPE app.mood AS ENUM ('sad', 'happy')"],
+            [_APP, "CREATE TYPE app.mood AS ENUM ('sad', 'happy', 'great')"],
+        ),
+        pytest.param(
+            "enum-addition-before-column-default",
+            [
+                _APP,
+                "CREATE TYPE app.mood AS ENUM ('sad', 'okay')",
+                "CREATE TABLE app.status (mood app.mood)",
+            ],
+            [
+                _APP,
+                "CREATE TYPE app.mood AS ENUM ('sad', 'okay', 'happy')",
+                "CREATE TABLE app.status (mood app.mood DEFAULT 'happy'::app.mood)",
+            ],
+        ),
+        pytest.param(
+            "drop-enum-after-column",
+            [
+                _APP,
+                "CREATE TYPE app.mood AS ENUM ('sad', 'okay')",
+                "CREATE TABLE app.status (id integer, mood app.mood)",
+            ],
+            [_APP, "CREATE TABLE app.status (id integer)"],
+        ),
+        pytest.param(
             "partitioned-parent-and-child",
             [_APP],
             [

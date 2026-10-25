@@ -22,9 +22,12 @@ from pgschemadiff.domain.constraint import (
 from pgschemadiff.domain.delta import (
     AddColumn,
     AddConstraint,
+    AddEnumValue,
     AlterColumnType,
+    AlterEnumAttrs,
     AlterExtension,
     AlterTableAttrs,
+    CreateEnum,
     CreateExtension,
     CreateIndex,
     CreateSchema,
@@ -33,16 +36,19 @@ from pgschemadiff.domain.delta import (
     DeltaOp,
     DropColumn,
     DropConstraint,
+    DropEnum,
     DropExtension,
     DropIndex,
     DropSchema,
     DropTable,
     RenameColumn,
     RenameTable,
+    ReplaceEnumLabels,
     ReplaceIndex,
     SetColumnDefault,
     SetColumnNullability,
 )
+from pgschemadiff.domain.enum_type import EnumType
 from pgschemadiff.domain.extension import Extension
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index, IndexKeyColumn, IndexMethod
@@ -71,10 +77,18 @@ _EXTENSION_REF = ObjectRef(
     kind=ObjectKind.EXTENSION,
     qname=QualifiedName(namespace="public", name="pgcrypto"),
 )
+_ENUM_REF = ObjectRef(
+    kind=ObjectKind.ENUM,
+    qname=QualifiedName(namespace="public", name="state"),
+)
 
 
 def _table(*, partition_of: PartitionOf | None = None, unlogged: bool = False) -> Table:
     return Table(ref=_TABLE_REF, partition_of=partition_of, unlogged=unlogged)
+
+
+def _enum() -> EnumType:
+    return EnumType(ref=_ENUM_REF, labels=("ready", "done"), owner="app_owner")
 
 
 def _add_constraint(table_ref: ObjectRef, constraint: Constraint) -> AddConstraint:
@@ -429,6 +443,35 @@ RISK_CASES = (
         RiskLevel.DESTRUCTIVE,
         id="drop-constraint",
     ),
+    pytest.param(
+        CreateEnum(target=_ENUM_REF, enum=_enum()),
+        RiskLevel.SAFE,
+        id="create-enum",
+    ),
+    pytest.param(
+        AddEnumValue(target=_ENUM_REF, label="review", before="done"),
+        RiskLevel.DANGEROUS,
+        id="add-enum-value",
+    ),
+    pytest.param(
+        DropEnum(target=_ENUM_REF, enum=_enum()),
+        RiskLevel.DESTRUCTIVE,
+        id="drop-enum",
+    ),
+    pytest.param(
+        AlterEnumAttrs(target=_ENUM_REF, new_owner="other_owner"),
+        RiskLevel.DANGEROUS,
+        id="enum-owner",
+    ),
+    pytest.param(
+        ReplaceEnumLabels(
+            target=_ENUM_REF,
+            old_labels=("ready", "done"),
+            new_labels=("ready",),
+        ),
+        RiskLevel.BLOCKED,
+        id="replace-enum-labels",
+    ),
 )
 
 
@@ -443,6 +486,19 @@ def test_classify_risk_matches_policy(delta: DeltaBase, expected_level: RiskLeve
     assert assessment.level is expected_level
     assert assessment.reason.strip()
     assert classify_risk(delta).reason == assessment.reason
+
+
+def test_replacing_enum_labels_has_precise_blocked_reason() -> None:
+    delta = ReplaceEnumLabels(
+        target=_ENUM_REF,
+        old_labels=("ready", "done"),
+        new_labels=("ready",),
+    )
+
+    assessment = classify_risk(delta)
+
+    assert assessment.level is RiskLevel.BLOCKED
+    assert assessment.reason == ("Enum label removal, rename, or reorder has no safe in-place DDL.")
 
 
 def test_virtual_generated_column_addition_has_precise_safe_reason() -> None:

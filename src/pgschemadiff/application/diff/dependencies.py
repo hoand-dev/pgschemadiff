@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from itertools import pairwise
 from typing import TYPE_CHECKING
 
 from pgschemadiff.application.diff.topo_sort import topological_sort
@@ -14,8 +15,15 @@ from pgschemadiff.domain.constraint import (
     UniqueConstraint,
 )
 from pgschemadiff.domain.delta.base import DeltaBase, DeltaOp, DeltaSet
-from pgschemadiff.domain.delta.column import AddColumn, DropColumn, RenameColumn
+from pgschemadiff.domain.delta.column import (
+    AddColumn,
+    AlterColumnType,
+    DropColumn,
+    RenameColumn,
+    SetColumnDefault,
+)
 from pgschemadiff.domain.delta.constraint import AddConstraint, DropConstraint
+from pgschemadiff.domain.delta.enum import AddEnumValue, CreateEnum, DropEnum
 from pgschemadiff.domain.delta.index import CreateIndex, DropIndex, ReplaceIndex
 from pgschemadiff.domain.delta.schema import (
     AlterExtension,
@@ -44,12 +52,79 @@ def order_deltas(delta_set: DeltaSet) -> DeltaSet:
 
     creates, drops, schema_creates = _collect_resources(nodes)
     _add_create_dependencies(nodes, creates, schema_creates, add)
+    _add_enum_dependencies(nodes, add)
     _add_drop_dependencies(nodes, drops, add)
     _add_schema_drop_dependencies(nodes, add)
     _add_rename_dependencies(nodes, add)
     return DeltaSet.from_iterable(
         topological_sort(nodes, dependencies, key=lambda delta: delta.sort_key)
     )
+
+
+def _add_enum_dependencies(
+    nodes: tuple[DeltaBase, ...],
+    add: Callable[[DeltaBase, DeltaBase], None],
+) -> None:
+    enum_changes = tuple(delta for delta in nodes if isinstance(delta, (CreateEnum, AddEnumValue)))
+    table_changes = tuple(
+        delta
+        for delta in nodes
+        if isinstance(
+            delta,
+            (
+                CreateTable,
+                AddColumn,
+                AlterColumnType,
+                SetColumnDefault,
+                AddConstraint,
+                CreateIndex,
+                ReplaceIndex,
+            ),
+        )
+    )
+    for enum_change in enum_changes:
+        for table_change in table_changes:
+            add(enum_change, table_change)
+
+    _add_enum_addition_dependencies(nodes, add)
+    _add_enum_drop_dependencies(nodes, add)
+
+
+def _add_enum_addition_dependencies(
+    nodes: tuple[DeltaBase, ...],
+    add: Callable[[DeltaBase, DeltaBase], None],
+) -> None:
+    additions_by_ref: dict[ObjectRef, list[AddEnumValue]] = defaultdict(list)
+    creates_by_ref: dict[ObjectRef, list[CreateEnum]] = defaultdict(list)
+    for delta in nodes:
+        if isinstance(delta, CreateEnum):
+            creates_by_ref[delta.target].append(delta)
+        elif isinstance(delta, AddEnumValue):
+            additions_by_ref[delta.target].append(delta)
+    for enum_ref, additions in additions_by_ref.items():
+        for enum_create in creates_by_ref.get(enum_ref, ()):
+            for addition in additions:
+                add(enum_create, addition)
+        for previous, following in pairwise(additions):
+            add(previous, following)
+
+
+def _add_enum_drop_dependencies(
+    nodes: tuple[DeltaBase, ...],
+    add: Callable[[DeltaBase, DeltaBase], None],
+) -> None:
+    enum_drops = tuple(delta for delta in nodes if isinstance(delta, DropEnum))
+    dependent_drops = tuple(
+        delta
+        for delta in nodes
+        if isinstance(
+            delta,
+            (DropTable, DropColumn, AlterColumnType, SetColumnDefault, DropConstraint, DropIndex),
+        )
+    )
+    for enum_drop in enum_drops:
+        for dependent_drop in dependent_drops:
+            add(dependent_drop, enum_drop)
 
 
 def _collect_resources(

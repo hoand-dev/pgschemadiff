@@ -1,5 +1,6 @@
 from typing import cast
 
+import pytest
 from syrupy.assertion import SnapshotAssertion
 
 from pgschemadiff.application.diff.dependencies import order_deltas
@@ -23,9 +24,12 @@ from pgschemadiff.domain.constraint import (
 from pgschemadiff.domain.delta import (
     AddColumn,
     AddConstraint,
+    AddEnumValue,
     AlterColumnType,
+    AlterEnumAttrs,
     AlterExtension,
     AlterTableAttrs,
+    CreateEnum,
     CreateExtension,
     CreateIndex,
     CreateSchema,
@@ -35,21 +39,25 @@ from pgschemadiff.domain.delta import (
     DeltaSet,
     DropColumn,
     DropConstraint,
+    DropEnum,
     DropExtension,
     DropIndex,
     DropSchema,
     DropTable,
     RenameColumn,
     RenameTable,
+    ReplaceEnumLabels,
     ReplaceIndex,
     SetColumnDefault,
     SetColumnNullability,
 )
+from pgschemadiff.domain.enum_type import EnumType
 from pgschemadiff.domain.extension import Extension
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index, IndexKeyColumn, IndexMethod, SortOrder
 from pgschemadiff.domain.schema import Schema
 from pgschemadiff.domain.table import PartitionInfo, PartitionOf, PartitionStrategy, Table
+from pgschemadiff.shared.errors import MigrationError
 
 
 def _schema_ref(name: str) -> ObjectRef:
@@ -126,6 +134,21 @@ def _emitter_cases() -> tuple[tuple[str, Delta], ...]:
     plain_table_ref = _table_ref('Order"Items')
     account_ref = _table_ref("accounts")
     old_table_name = QualifiedName(namespace='Old "Schema', name="old_table")
+    enum_ref = ObjectRef(
+        kind=ObjectKind.ENUM,
+        qname=QualifiedName(namespace='App "Schema', name='Mood"Type'),
+    )
+    enum = EnumType(
+        ref=enum_ref,
+        labels=("open", "owner's choice"),
+        owner='Role "Owner',
+    )
+    empty_enum = EnumType(
+        ref=ObjectRef(
+            kind=ObjectKind.ENUM,
+            qname=QualifiedName(namespace="App Schema", name="EmptyMood"),
+        ),
+    )
 
     plain_table = Table(
         ref=plain_table_ref,
@@ -252,6 +275,27 @@ def _emitter_cases() -> tuple[tuple[str, Delta], ...]:
     )
 
     return (
+        ("create enum", CreateEnum(target=enum_ref, enum=enum)),
+        ("create empty enum", CreateEnum(target=empty_enum.ref, enum=empty_enum)),
+        ("drop enum", DropEnum(target=enum_ref, enum=enum)),
+        ("append enum value", AddEnumValue(target=enum_ref, label="closed")),
+        (
+            "add enum value before",
+            AddEnumValue(target=enum_ref, label="it's pending", before="closed"),
+        ),
+        (
+            "add enum value after",
+            AddEnumValue(target=enum_ref, label="archived", after="closed"),
+        ),
+        ("alter enum owner", AlterEnumAttrs(target=enum_ref, new_owner="other_owner")),
+        (
+            "replace enum labels blocked",
+            ReplaceEnumLabels(
+                target=enum_ref,
+                old_labels=("open", "owner's choice"),
+                new_labels=("open",),
+            ),
+        ),
         (
             "create schema",
             CreateSchema(
@@ -591,10 +635,16 @@ def _render_emitter_corpus() -> str:
     lines: list[str] = []
     for label, delta in _EMITTER_CASES:
         lines.append(f"{label}: {_delta_kind(delta)} target={_target_text(delta.target)}")
+        if isinstance(delta, ReplaceEnumLabels):
+            with pytest.raises(MigrationError):
+                emitter.emit(DeltaSet.from_iterable((delta,)))
+            lines.append("  raises MigrationError")
+            continue
         for statement in emitter.emit(DeltaSet.from_iterable((delta,))):
             lines.append(
                 f"  transactional={str(statement.transactional).lower()} "
-                f"new_unit={str(statement.new_unit).lower()} sql={statement.sql}"
+                f"new_unit={str(statement.new_unit).lower()} "
+                f"isolated={str(statement.isolated).lower()} sql={statement.sql}"
             )
     return "\n".join(lines)
 
@@ -708,12 +758,14 @@ def _render_pipeline_snapshot() -> str:
 
 def test_supported_delta_types_have_handlers_and_corpus_cases() -> None:
     supported = set(_SUPPORTED_DELTA_TYPES)
+    no_emitter = {ReplaceEnumLabels}
+    emitter_supported = supported - no_emitter
     handler_types = set(default_handlers())
     corpus_types = {type(delta) for _, delta in _EMITTER_CASES}
 
-    missing_handlers = sorted(supported - handler_types, key=lambda delta: delta.__name__)
+    missing_handlers = sorted(emitter_supported - handler_types, key=lambda delta: delta.__name__)
     missing_cases = sorted(supported - corpus_types, key=lambda delta: delta.__name__)
-    extra_handlers = sorted(handler_types - supported, key=lambda delta: delta.__name__)
+    extra_handlers = sorted(handler_types - emitter_supported, key=lambda delta: delta.__name__)
 
     assert not missing_handlers, "missing default handlers: " + ", ".join(
         delta.__name__ for delta in missing_handlers
@@ -724,6 +776,7 @@ def test_supported_delta_types_have_handlers_and_corpus_cases() -> None:
     assert not extra_handlers, "handlers outside supported delta set: " + ", ".join(
         delta.__name__ for delta in extra_handlers
     )
+    assert no_emitter <= supported
 
 
 def test_emitter_corpus(snapshot: SnapshotAssertion) -> None:

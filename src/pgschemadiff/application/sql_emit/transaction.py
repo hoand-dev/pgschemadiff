@@ -49,7 +49,7 @@ class TransactionUnit:
 
 
 def split_units(statements: Sequence[SqlStatement]) -> tuple[TransactionUnit, ...]:
-    """Group transactional runs and isolate each non-transactional statement."""
+    """Group transactional runs; isolate marked or non-transactional statements."""
     units: list[TransactionUnit] = []
     current: list[SqlStatement] = []
 
@@ -59,6 +59,13 @@ def split_units(statements: Sequence[SqlStatement]) -> tuple[TransactionUnit, ..
                 units.append(TransactionUnit(tuple(current), transactional=True))
                 current.clear()
             units.append(TransactionUnit((statement,), transactional=False))
+            continue
+
+        if statement.isolated:
+            if current:
+                units.append(TransactionUnit(tuple(current), transactional=True))
+                current.clear()
+            units.append(TransactionUnit((statement,), transactional=True))
             continue
 
         if current and statement.new_unit:
