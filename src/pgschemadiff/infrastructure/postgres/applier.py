@@ -611,7 +611,8 @@ class PostgresMigrationExecutor:
             "FROM pg_catalog.pg_constraint AS con "
             "JOIN pg_catalog.pg_class AS c ON c.oid = con.conrelid "
             "JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace "
-            "WHERE n.nspname = %s "
+            # PG18 records NOT NULL as contype 'n'; attnotnull already covers it.
+            "WHERE n.nspname = %s AND con.contype <> 'n' "
             "ORDER BY c.relname, con.conname",
             (_HISTORY_SCHEMA,),
         )
