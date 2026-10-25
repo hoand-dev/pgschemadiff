@@ -1,9 +1,8 @@
 """``pgsd`` CLI entry point.
 
-The ``inspect``, ``diff``, and ``generate`` sub-commands handle database
-operations. ``pgsd apply`` arrives in a later phase. ``pgsd tui`` (and
-``pgsd`` with no sub-command) launches the interactive Textual TUI implemented
-in ``pgschemadiff.presentation.tui``.
+The ``inspect``, ``diff``, ``generate``, and ``apply`` sub-commands handle
+database operations. ``pgsd tui`` (and ``pgsd`` with no sub-command) launches
+the interactive Textual TUI implemented in ``pgschemadiff.presentation.tui``.
 """
 
 from __future__ import annotations
@@ -14,6 +13,7 @@ import typer
 
 from pgschemadiff import __version__
 from pgschemadiff.application.sql_emit.risk import RiskLevel
+from pgschemadiff.presentation.cli.commands.apply import apply_cmd
 from pgschemadiff.presentation.cli.commands.diff import diff_cmd
 from pgschemadiff.presentation.cli.commands.generate import generate_cmd
 from pgschemadiff.presentation.cli.commands.inspect import inspect_cmd
@@ -138,6 +138,50 @@ def generate(
         renames_path=renames,
         max_risk=max_risk,
         name=name,
+    )
+
+
+@app.command("apply")
+def apply(
+    bundle_dir: Path = typer.Argument(  # noqa: B008
+        ...,
+        metavar="BUNDLE_DIR",
+        help="Directory containing manifest.json and up.sql.",
+    ),
+    db_url: str = typer.Argument(
+        ...,
+        metavar="DB_URL",
+        help="Target PostgreSQL connection URL.",
+    ),
+    lock_timeout: str = typer.Option(
+        "5s",
+        "--lock-timeout",
+        help="Maximum time to wait for the migration lock (0, ms, s, or min).",
+    ),
+    statement_timeout: str = typer.Option(
+        "0",
+        "--statement-timeout",
+        help="Maximum statement execution time (0, ms, s, or min).",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Validate and check connectivity only.",
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        help="Approve destructive migration units.",
+    ),
+) -> None:
+    """Apply a migration bundle after validation and risk confirmation."""
+    apply_cmd(
+        bundle_dir,
+        db_url,
+        lock_timeout=lock_timeout,
+        statement_timeout=statement_timeout,
+        dry_run=dry_run,
+        yes=yes,
     )
 
 
