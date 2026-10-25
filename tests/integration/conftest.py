@@ -43,22 +43,14 @@ def pg_admin_dsn(postgres_container: Any) -> str:
     return url
 
 
-@pytest.fixture
-def pg_test_dsn(pg_admin_dsn: str) -> Iterator[str]:
-    """Create a fresh ``test_<uuid>`` database, yield its DSN, drop on teardown.
-
-    The CREATE / DROP statements must run outside a transaction (DDL that
-    operates on databases cannot be inside a transaction block).  We use
-    psycopg's ``autocommit=True`` for the admin connection.
-    """
+def _fresh_pg_test_dsn(pg_admin_dsn: str) -> Iterator[str]:
+    """Create a fresh test database and drop it after yielding its DSN."""
     db_name = f"test_{uuid.uuid4().hex[:12]}"
 
-    # Build the per-test DSN by replacing the database name in the admin DSN.
-    # The admin DSN ends with /<db> — we replace that last path component.
-    # e.g. postgresql://test:test@localhost:5432/test → …/test_abc123
     base, _, _old_db = pg_admin_dsn.rpartition("/")
     test_dsn = f"{base}/{db_name}"
 
+    # CREATE / DROP DATABASE must run outside a transaction.
     with psycopg.connect(pg_admin_dsn, autocommit=True) as conn:
         conn.execute(f'CREATE DATABASE "{db_name}"')
 
@@ -67,3 +59,15 @@ def pg_test_dsn(pg_admin_dsn: str) -> Iterator[str]:
     finally:
         with psycopg.connect(pg_admin_dsn, autocommit=True) as conn:
             conn.execute(f'DROP DATABASE IF EXISTS "{db_name}" WITH (FORCE)')
+
+
+@pytest.fixture
+def pg_test_dsn(pg_admin_dsn: str) -> Iterator[str]:
+    """Create one fresh test database for this test."""
+    yield from _fresh_pg_test_dsn(pg_admin_dsn)
+
+
+@pytest.fixture
+def pg_test_dsn2(pg_admin_dsn: str) -> Iterator[str]:
+    """Create a second fresh test database for two-database round trips."""
+    yield from _fresh_pg_test_dsn(pg_admin_dsn)
