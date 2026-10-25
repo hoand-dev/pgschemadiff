@@ -419,3 +419,12 @@ NEEDS_HUMAN (open): 3 — P1-TEST-02 (PR #3 human-closed; do not recreate); bran
 - Gate: ruff, format, mypy strict, import-linter 4/4, 1,560 unit tests. Docker integration not run locally; CI integration job now fails closed.
 - Next: P3-OUT-01 spec review.
 
+---
+
+## RUN 2026-10-25-1 — 2026-10-24..25 (P3-OUT-01 + P3-APPLY-01)
+- Delegated to opencode (`openai/gpt-6-luna#max`); each slice reviewed, gated and committed by Claude, pushed to `origin/main`.
+- Done: P3-OUT-01 (plan, renderer, atomic writer, `pgsd generate`); P3-APPLY-01 slices 1–5 (bundle validator, `apply_migration` use case, psycopg executor + `pgschemadiff` history schema excluded from inspection, `pgsd apply`, PG18 API + CLI round trip).
+- Review catches fixed: risk-gate detection by message prefix → `RiskGateError`; connection failures wrapped as apply errors (exit 1 vs 3); CLI timeouts above 24h exited 3 instead of 2; PG18 `contype='n'` NOT NULL rows broke the history layout check; credential redaction assertion false-positive on the default `test` password.
+- CI fixes: Rich ANSI codes on GitHub Actions (CLI conftest forces plain terminal); pytest-asyncio implicit event loop leaked by sync `asyncio.run` tests (root conftest closes it before sync tests).
+- Gate: ruff, format, mypy strict, import-linter 4/4, 1,793 unit tests; CI `9d4e405` green incl. 9 PG18 integration tests.
+- Next: P3-TEST-02, P3-TEST-01 corpus, TD-RISK-01.

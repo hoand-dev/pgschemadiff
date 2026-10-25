@@ -5,7 +5,7 @@
 | **Phase 0** | Stabilization | M0: CI green on empty project; layered architecture enforced | Done except open P0-CI-03 coverage gate |
 | Phase 1 | Domain & Infrastructure (MVP-A) | M1: `pgsd inspect` dumps a JSON snapshot of a real PG18 database for tables/columns/indexes/FKs/constraints/schemas/extensions | Feature shipped; M1 caveat: P1-TEST-02 needs-human and 1000-object benchmark unmeasured |
 | Phase 2 | Diff engine | M2: `pgsd diff` outputs a typed `DeltaSet` JSON; hypothesis idempotent-diff property passes | Done; M2 reached at unit level; Docker integration not run locally |
-| Phase 3a | Migration generator (MVP-A) | M3: round-trip integration test green for MVP-A scope; `pgsd generate` + `pgsd apply` end-to-end | In progress; P3-RISK-01 and P3-SQL-01 done; next P3-SQL-02 |
+| Phase 3a | Migration generator (MVP-A) | M3: round-trip integration test green for MVP-A scope; `pgsd generate` + `pgsd apply` end-to-end | Near M3: emitters, transaction units, bundles, applier, `pgsd generate`/`apply`, PG18 round trip done; open: P3-TEST-02, P3-TEST-01 corpus, TD-RISK-01 |
 | Phase 3b | MVP-B object types | M4: views, matviews, functions, procedures, sequences, enums, triggers, RLS policies, composite/domain types all covered with round-trip tests | _not started_ |
 | Phase 4 | TUI | M5: Textual TUI ships with the screens specified in `docs/ui-design.md` | Shell and seven views implemented on mock data; real-use-case wiring remains |
 | Phase 5 | Production readiness | M6: HTML report, i18n, benchmark suite (10k objects < 10s), PyPI release, safe-migration cookbook | _not started_ |
@@ -40,10 +40,10 @@
 
 - [ ] All MVP-A emitters implemented with snapshot tests
 - [ ] Risk classifier assigns correct levels for the canonical test corpus
-- [ ] Multi-file migration output validates against schema
-- [ ] **Core round-trip integration test green**:
+- [x] Multi-file migration output validates against schema
+- [x] **Core round-trip integration test green** (seed schema; corpus pending in P3-TEST-01):
       `apply(emit(diff(∅, S)))` → `inspect()` → equal to `S`
-- [ ] `pgsd generate` + `pgsd apply` end-to-end on a real PG18 container
+- [x] `pgsd generate` + `pgsd apply` end-to-end on a real PG18 container
 
 ### M4 (Phase 3b)
 

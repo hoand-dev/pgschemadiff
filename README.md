@@ -16,7 +16,7 @@
 
 ## Quickstart
 
-> `pgsd inspect` and `pgsd diff` are implemented. `pgsd generate` and `pgsd apply` are planned Phase 3 work.
+> `pgsd inspect`, `pgsd diff`, `pgsd generate` and `pgsd apply` are implemented for the MVP-A object set (schemas, extensions, tables, columns, indexes, constraints). The TUI still runs on mock data.
 
 ```bash
 # install (Phase 5)
@@ -25,20 +25,20 @@ uv tool install pgschemadiff
 # launch the TUI
 pgsd                  # or: pgsd tui
 
-# inspect a schema (Phase 1)
+# inspect a schema
 pgsd inspect postgresql://user:pass@host:5432/db > snapshot.json
 
-# diff two databases (Phase 2)
-pgsd diff postgresql://user:pass@host/src postgresql://user:pass@host/tgt
+# diff current (source) against desired (target)
+pgsd diff postgresql://user:pass@host/current postgresql://user:pass@host/desired
 
-# generate a migration (Phase 3)
-pgsd generate \
-  --source postgresql://.../src \
-  --target postgresql://.../tgt \
-  --output ./migrations/
+# generate a migration bundle that moves current to desired
+# (prints the bundle directory; --max-risk defaults to dangerous)
+pgsd generate postgresql://.../current postgresql://.../desired --out ./migrations/
 
-# apply (Phase 3)
-pgsd apply ./migrations/20260523_120000_diff/
+# preview, then apply it to the current database
+pgsd apply ./migrations/20260523_120000_diff/ postgresql://.../current --dry-run
+pgsd apply ./migrations/20260523_120000_diff/ postgresql://.../current
+# destructive units need --yes (or interactive confirmation)
 ```
 
 ## Development
