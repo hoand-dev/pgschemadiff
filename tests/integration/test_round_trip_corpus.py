@@ -552,14 +552,15 @@ async def test_invalid_domain_check_validation_keeps_applied_unit_history(
         result = failure.value.result
         assert isinstance(result, ApplyResult)
         assert result.status == "failed"
-        assert result.applied_unit_count == 1
-        assert result.failed_unit_index == 1
+        # Units: ADD CONSTRAINT ... NOT VALID, transaction drain, VALIDATE.
+        assert result.applied_unit_count == 2
+        assert result.failed_unit_index == 2
         assert result.sqlstate == "23514"
         history = await executor.load_history(bundle.id)
 
     assert history is not None
     assert history.status == "failed"
-    assert tuple(unit.status for unit in history.units) == ("applied", "failed")
+    assert tuple(unit.status for unit in history.units) == ("applied", "applied", "failed")
     with psycopg.connect(pg_test_dsn) as connection:
         row = connection.execute(
             "SELECT convalidated FROM pg_catalog.pg_constraint "
