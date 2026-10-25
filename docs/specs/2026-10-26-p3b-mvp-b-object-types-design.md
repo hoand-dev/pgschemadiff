@@ -398,3 +398,12 @@ Reviewed 2026-10-26.
   the enum slice (column type → enum). Each lands with the existing corpus green.
 - **Per-slice gate:** a P3-MVPB task is done only when its PG18 corpus scenarios
   pass in CI with no xfails for supported cases.
+- **Amendment (2026-10-26, after slice 0a):** slice 0b is folded into the enum
+  slices. `order_deltas` only sees the DeltaSet, so catalog dependencies travel
+  on the domain objects themselves (for example a table's user-type
+  prerequisites derived from `pg_attribute.atttypid`), carried by create/drop
+  delta payloads; a standalone dependency layer with no consumer would be
+  speculative. Enum work is split into 1a (domain model, catalog query,
+  inspector, table → user-type prerequisites), 1b (deltas, comparator, engine
+  registration, ordering edges) and 1c (emitter, risk, isolated transactional
+  unit for `ADD VALUE`, PG18 corpus scenarios).
