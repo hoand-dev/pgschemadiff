@@ -398,17 +398,14 @@ async def test_inspect_starts_repeatable_read_transaction() -> None:
 
 
 @pytest.mark.unit
-async def test_inspect_passes_schema_filter_to_new_catalog_queries() -> None:
+async def test_inspect_runs_catalog_queries_without_parameters() -> None:
     pool = _build_mock_pool()
 
     await PgCatalogInspector(pool, schemas=["public"]).inspect()
 
     cur = pool.acquire.return_value.__aenter__.return_value.cursor.return_value
-    filtered_type_queries = [
-        call for call in cur.execute.call_args_list if "pg_enum" in call.args[0]
-    ]
-    assert len(filtered_type_queries) == 2
-    assert all(call.args[1] == (["public"], ["public"]) for call in filtered_type_queries)
+    assert cur.execute.call_args_list
+    assert all(len(call.args) == 1 and not call.kwargs for call in cur.execute.call_args_list)
 
 
 @pytest.mark.unit

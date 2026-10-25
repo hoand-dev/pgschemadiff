@@ -606,10 +606,10 @@ class PgCatalogInspector:
                     await cur.execute(_SQL_EXTENSIONS)
                     extensions_rows = await cur.fetchall()
 
-                    await cur.execute(_SQL_ENUMS, (self._schemas, self._schemas))
+                    await cur.execute(_SQL_ENUMS)
                     enums_rows = await cur.fetchall()
 
-                    await cur.execute(_SQL_TYPE_PREREQUISITES, (self._schemas, self._schemas))
+                    await cur.execute(_SQL_TYPE_PREREQUISITES)
                     type_prerequisites_rows = await cur.fetchall()
             finally:
                 await conn.execute("ROLLBACK")

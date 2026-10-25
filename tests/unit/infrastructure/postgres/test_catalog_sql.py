@@ -67,6 +67,17 @@ def test_catalog_sql_file_ends_with_newline(filename: str) -> None:
     assert sql.endswith("\n"), f"{filename} must end with a trailing newline"
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize("filename", _CATALOG_FILES)
+def test_catalog_sql_file_has_no_bind_placeholders(filename: str) -> None:
+    """Catalog queries run without parameters; schema filtering happens in Python.
+
+    A ``%s`` placeholder makes psycopg also parse the ``%`` in ``LIKE 'pg_%'``
+    patterns, which breaks the query at run time.
+    """
+    assert "%s" not in _load_sql(filename), f"{filename} must not use bind placeholders"
+
+
 # ---------------------------------------------------------------------------
 # tables.sql specific checks
 # ---------------------------------------------------------------------------
@@ -398,14 +409,6 @@ def test_type_prerequisites_sql_excludes_system_and_extension_types() -> None:
     assert "n.nspname != 'pgschemadiff'" in sql
     assert "pg_depend" in sql
     assert "deptype = 'e'" in sql
-
-
-@pytest.mark.unit
-@pytest.mark.parametrize("filename", ["enums.sql", "type_prerequisites.sql"])
-def test_new_catalog_queries_support_schema_filter(filename: str) -> None:
-    sql = _load_sql(filename)
-    assert "%s::text[]" in sql
-    assert "ANY(" in sql
 
 
 # ---------------------------------------------------------------------------

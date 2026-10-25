@@ -33,7 +33,6 @@ WHERE table_class.relkind IN ('r', 'p')
   AND table_namespace.nspname NOT LIKE 'pg_%'
   AND table_namespace.nspname != 'information_schema'
   AND table_namespace.nspname != 'pgschemadiff'
-  AND (%s::text[] IS NULL OR table_namespace.nspname = ANY(%s::text[]))
   AND n.nspname NOT LIKE 'pg_%'
   AND n.nspname != 'information_schema'
   AND n.nspname != 'pgschemadiff'

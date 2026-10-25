@@ -24,7 +24,6 @@ WHERE t.typtype = 'e'
   AND n.nspname NOT LIKE 'pg_%'
   AND n.nspname != 'information_schema'
   AND n.nspname != 'pgschemadiff'
-  AND (%s::text[] IS NULL OR n.nspname = ANY(%s::text[]))
   AND NOT EXISTS (
       SELECT 1
       FROM pg_catalog.pg_depend AS d
