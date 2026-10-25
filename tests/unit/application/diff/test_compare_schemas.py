@@ -13,7 +13,8 @@ from pgschemadiff.domain.delta.column import AddColumn
 from pgschemadiff.domain.delta.constraint import AddConstraint, DropConstraint
 from pgschemadiff.domain.delta.index import CreateIndex
 from pgschemadiff.domain.delta.schema import CreateExtension, CreateSchema
-from pgschemadiff.domain.delta.table import CreateTable, RenameTable
+from pgschemadiff.domain.delta.sequence import AlterSequenceOwner
+from pgschemadiff.domain.delta.table import AlterTableAttrs, CreateTable, RenameTable
 from pgschemadiff.domain.extension import Extension
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index, IndexKeyColumn
@@ -116,6 +117,63 @@ async def test_compare_schemas_includes_sequence_comparator() -> None:
     result = await compare_schemas(StubInspector(Database(name="source")), target)
 
     assert any(delta.target == sequence.ref for delta in result.deltas)
+
+
+async def test_compare_schemas_uses_table_owner_change_for_linked_sequence() -> None:
+    table_ref = _ref(ObjectKind.TABLE, "tickets")
+    column_ref = ObjectRef(
+        kind=ObjectKind.COLUMN,
+        qname=QualifiedName(namespace="public", name="id"),
+        parent=table_ref,
+    )
+    source_sequence = Sequence(
+        ref=_ref(ObjectKind.SEQUENCE, "ticket_seq"),
+        data_type="bigint",
+        start=1,
+        increment=1,
+        min_value=1,
+        max_value=999,
+        cache=1,
+        cycle=False,
+        owner="old_owner",
+        owned_by=column_ref,
+    )
+    target_sequence = source_sequence.model_copy(update={"owner": "new_owner"})
+    source_table = Table(
+        ref=table_ref,
+        columns=(Column(name="id", position=1, data_type="bigint"),),
+        owner="old_owner",
+    )
+    target_table = source_table.model_copy(update={"owner": "new_owner"})
+    source = StubInspector(
+        Database(
+            name="source",
+            schemas=(
+                Schema(
+                    ref=_schema().ref,
+                    tables=(source_table,),
+                    sequences=(source_sequence,),
+                ),
+            ),
+        )
+    )
+    target = StubInspector(
+        Database(
+            name="target",
+            schemas=(
+                Schema(
+                    ref=_schema().ref,
+                    tables=(target_table,),
+                    sequences=(target_sequence,),
+                ),
+            ),
+        )
+    )
+
+    result = await compare_schemas(source, target)
+
+    assert any(isinstance(delta, AlterTableAttrs) for delta in result.deltas)
+    assert not any(isinstance(delta, AlterSequenceOwner) for delta in result.deltas)
 
 
 async def test_compare_schemas_creates_table_before_local_constraints() -> None:

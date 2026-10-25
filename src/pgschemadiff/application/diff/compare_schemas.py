@@ -36,6 +36,12 @@ async def compare_schemas(
     """Inspect both databases and return their ordered typed schema changes."""
     source = await source_inspector.inspect()
     target = await target_inspector.inspect()
+    source_table_owners = {
+        table.ref: table.owner for schema in source.schemas for table in schema.tables
+    }
+    target_table_owners = {
+        table.ref: table.owner for schema in target.schemas for table in schema.tables
+    }
 
     comparators: tuple[Comparator, ...] = (
         SchemaComparator(),
@@ -43,7 +49,10 @@ async def compare_schemas(
         EnumComparator(),
         CompositeTypeComparator(),
         DomainTypeComparator(),
-        SequenceComparator(),
+        SequenceComparator(
+            source_table_owners=source_table_owners,
+            target_table_owners=target_table_owners,
+        ),
         TableComparator(
             column_comparator=ColumnComparator(),
             constraint_comparator=ConstraintComparator(),

@@ -93,21 +93,69 @@ def test_sequence_comparator_emits_only_changed_options() -> None:
 
 @pytest.mark.unit
 def test_sequence_comparator_separates_owner_and_owned_by_changes() -> None:
-    source = _sequence()
-    table_ref = _ref(ObjectKind.TABLE, "tickets")
-    column_ref = ObjectRef(
+    old_table_ref = _ref(ObjectKind.TABLE, "old_tickets")
+    new_table_ref = _ref(ObjectKind.TABLE, "new_tickets")
+    old_column_ref = ObjectRef(
         kind=ObjectKind.COLUMN,
         qname=QualifiedName(namespace="public", name="id"),
-        parent=table_ref,
+        parent=old_table_ref,
     )
-    target = _sequence(owner="new_owner", owned_by=column_ref)
+    new_column_ref = ObjectRef(
+        kind=ObjectKind.COLUMN,
+        qname=QualifiedName(namespace="public", name="id"),
+        parent=new_table_ref,
+    )
+    source = _sequence(owner="old_owner", owned_by=old_column_ref)
+    target = _sequence(owner="new_owner", owned_by=new_column_ref)
 
     deltas = SequenceComparator().compare(source, target)
 
     assert len(deltas) == 2
     assert isinstance(deltas[0], AlterSequenceOwner)
     assert deltas[0].new_owner == "new_owner"
-    assert deltas[1] == AlterSequenceOwnedBy(target=source.ref, new_owned_by=column_ref)
+    assert deltas[0].old_owned_by == old_column_ref
+    assert deltas[1] == AlterSequenceOwnedBy(
+        target=source.ref,
+        old_owned_by=old_column_ref,
+        new_owned_by=new_column_ref,
+    )
+
+
+@pytest.mark.unit
+def test_sequence_owner_follows_table_owner_change_when_owned_by_is_unchanged() -> None:
+    table_ref = _ref(ObjectKind.TABLE, "tickets")
+    column_ref = ObjectRef(
+        kind=ObjectKind.COLUMN,
+        qname=QualifiedName(namespace="public", name="id"),
+        parent=table_ref,
+    )
+    source = _sequence(owner="old_owner", owned_by=column_ref)
+    target = _sequence(owner="new_owner", owned_by=column_ref)
+    comparator = SequenceComparator(
+        source_table_owners={table_ref: "old_owner"},
+        target_table_owners={table_ref: "new_owner"},
+    )
+
+    assert comparator.compare(source, target) == ()
+
+
+@pytest.mark.unit
+def test_sequence_owner_change_with_unchanged_table_owner_is_inconsistent() -> None:
+    table_ref = _ref(ObjectKind.TABLE, "tickets")
+    column_ref = ObjectRef(
+        kind=ObjectKind.COLUMN,
+        qname=QualifiedName(namespace="public", name="id"),
+        parent=table_ref,
+    )
+    source = _sequence(owner="old_owner", owned_by=column_ref)
+    target = _sequence(owner="new_owner", owned_by=column_ref)
+    comparator = SequenceComparator(
+        source_table_owners={table_ref: "old_owner"},
+        target_table_owners={table_ref: "old_owner"},
+    )
+
+    with pytest.raises(DiffError, match="inconsistent catalog"):
+        comparator.compare(source, target)
 
 
 @pytest.mark.unit

@@ -12,7 +12,7 @@ from pgschemadiff.domain.delta.sequence import (
     CreateSequence,
     DropSequence,
 )
-from pgschemadiff.domain.delta.table import CreateTable, DropTable
+from pgschemadiff.domain.delta.table import AlterTableAttrs, CreateTable, DropTable
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.sequence import Sequence
 from pgschemadiff.domain.table import Table
@@ -73,19 +73,76 @@ def test_sequence_precedes_table_default_and_owned_by_follows_owner_column() -> 
 
 
 @pytest.mark.unit
-def test_sequence_owner_change_precedes_owned_by_transition() -> None:
+@pytest.mark.parametrize("drop_owner_kind", ["column", "table"])
+def test_sequence_owner_transition_precedes_relink_and_old_owner_drop(
+    drop_owner_kind: str,
+) -> None:
     sequence = _sequence()
-    target_column = _column_ref(_ref(ObjectKind.TABLE, "new_tickets"), "id")
-    change_owner = AlterSequenceOwner(target=sequence.ref, new_owner="new_owner")
+    old_table_ref = _ref(ObjectKind.TABLE, "old_tickets")
+    new_table_ref = _ref(ObjectKind.TABLE, "new_tickets")
+    old_column = _column_ref(old_table_ref, "id")
+    new_column = _column_ref(new_table_ref, "id")
+    change_owner = AlterSequenceOwner(
+        target=sequence.ref,
+        new_owner="new_owner",
+        old_owned_by=old_column,
+    )
     change_owned_by = AlterSequenceOwnedBy(
         target=sequence.ref,
-        old_owned_by=None,
-        new_owned_by=target_column,
+        old_owned_by=old_column,
+        new_owned_by=new_column,
+    )
+    create_new_table = CreateTable(
+        target=new_table_ref,
+        table=Table(
+            ref=new_table_ref,
+            columns=(Column(name="id", position=1, data_type="bigint"),),
+            owner="new_owner",
+        ),
+    )
+    if drop_owner_kind == "column":
+        drop_old_owner: DropColumn | DropTable = DropColumn(
+            target=old_column,
+            column=Column(name="id", position=1, data_type="bigint"),
+        )
+    else:
+        drop_old_owner = DropTable(
+            target=old_table_ref,
+            table=Table(
+                ref=old_table_ref,
+                columns=(Column(name="id", position=1, data_type="bigint"),),
+                owner="old_owner",
+            ),
+        )
+
+    ordered = order_deltas(
+        DeltaSet(deltas=(drop_old_owner, change_owned_by, change_owner, create_new_table))
+    ).deltas
+
+    assert _position(ordered, create_new_table) < _position(ordered, change_owner)
+    assert _position(ordered, change_owner) < _position(ordered, change_owned_by)
+    assert _position(ordered, change_owner) < _position(ordered, drop_old_owner)
+    assert _position(ordered, change_owned_by) < _position(ordered, drop_old_owner)
+
+
+@pytest.mark.unit
+def test_sequence_owned_by_link_waits_for_sequence_and_table_owner_changes() -> None:
+    sequence = _sequence()
+    table_ref = _ref(ObjectKind.TABLE, "tickets")
+    column_ref = _column_ref(table_ref, "id")
+    change_owner = AlterSequenceOwner(target=sequence.ref, new_owner="new_owner")
+    change_table_owner = AlterTableAttrs(target=table_ref, new_owner="new_owner")
+    change_owned_by = AlterSequenceOwnedBy(
+        target=sequence.ref,
+        new_owned_by=column_ref,
     )
 
-    ordered = order_deltas(DeltaSet(deltas=(change_owned_by, change_owner))).deltas
+    ordered = order_deltas(
+        DeltaSet(deltas=(change_owned_by, change_table_owner, change_owner))
+    ).deltas
 
     assert _position(ordered, change_owner) < _position(ordered, change_owned_by)
+    assert _position(ordered, change_table_owner) < _position(ordered, change_owned_by)
 
 
 @pytest.mark.unit

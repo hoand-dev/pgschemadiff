@@ -78,7 +78,11 @@ def emit_alter_sequence_owner(delta: DeltaBase) -> tuple[SqlStatement, ...]:
         raise MigrationError("Alter-sequence-owner handler received a different delta type.")
     name = quote_qualified(delta.target.qname)
     owner = quote_ident(delta.new_owner)
-    return (_statement(f"ALTER SEQUENCE {name} OWNER TO {owner}", delta),)
+    statements = []
+    if delta.old_owned_by is not None:
+        statements.append(_statement(f"ALTER SEQUENCE {name} OWNED BY NONE", delta))
+    statements.append(_statement(f"ALTER SEQUENCE {name} OWNER TO {owner}", delta))
+    return tuple(statements)
 
 
 def emit_alter_sequence_owned_by(delta: DeltaBase) -> tuple[SqlStatement, ...]:

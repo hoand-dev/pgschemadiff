@@ -1050,3 +1050,29 @@ def test_domain_container_alters_are_rejected_by_emitter() -> None:
     for delta in deltas:
         with pytest.raises(MigrationError, match="container"):
             emitter.emit(DeltaSet(deltas=(delta,)))
+
+
+@pytest.mark.unit
+def test_alter_sequence_owner_unlinks_before_changing_owner() -> None:
+    sequence_ref = ObjectRef(
+        kind=ObjectKind.SEQUENCE,
+        qname=QualifiedName(namespace="public", name="ticket_seq"),
+    )
+    table_ref = ObjectRef(
+        kind=ObjectKind.TABLE,
+        qname=QualifiedName(namespace="public", name="tickets"),
+    )
+    old_column = _column_ref(table_ref, "id")
+    delta = AlterSequenceOwner(
+        target=sequence_ref,
+        new_owner="new_owner",
+        old_owned_by=old_column,
+    )
+
+    statements = default_handlers()[AlterSequenceOwner](delta)
+
+    assert tuple(statement.sql for statement in statements) == (
+        'ALTER SEQUENCE "public"."ticket_seq" OWNED BY NONE',
+        'ALTER SEQUENCE "public"."ticket_seq" OWNER TO "new_owner"',
+    )
+    assert all(statement.delta == delta for statement in statements)

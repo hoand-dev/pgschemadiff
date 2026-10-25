@@ -54,7 +54,7 @@ from pgschemadiff.domain.delta.sequence import (
     CreateSequence,
     DropSequence,
 )
-from pgschemadiff.domain.delta.table import CreateTable, DropTable, RenameTable
+from pgschemadiff.domain.delta.table import AlterTableAttrs, CreateTable, DropTable, RenameTable
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 
 if TYPE_CHECKING:
@@ -294,9 +294,15 @@ def _add_sequence_dependencies(
     add: Callable[[DeltaBase, DeltaBase], None],
 ) -> None:
     owners_by_ref: dict[ObjectRef, list[AlterSequenceOwner]] = defaultdict(list)
+    owned_by_by_ref: dict[ObjectRef, list[AlterSequenceOwnedBy]] = defaultdict(list)
+    table_owner_changes: dict[ObjectRef, list[AlterTableAttrs]] = defaultdict(list)
     for delta in nodes:
         if isinstance(delta, AlterSequenceOwner):
             owners_by_ref[delta.target].append(delta)
+        elif isinstance(delta, AlterSequenceOwnedBy):
+            owned_by_by_ref[delta.target].append(delta)
+        elif isinstance(delta, AlterTableAttrs) and delta.new_owner is not None:
+            table_owner_changes[delta.target].append(delta)
 
     for delta in nodes:
         if isinstance(delta, AlterSequenceOwnedBy):
@@ -310,6 +316,33 @@ def _add_sequence_dependencies(
                 for owner_change in owners_by_ref.get(delta.target, ()):
                     # OWNED BY requires sequence and destination table owners to match.
                     add(owner_change, delta)
+                if delta.new_owned_by.parent is not None:
+                    for table_owner_change in table_owner_changes.get(
+                        delta.new_owned_by.parent, ()
+                    ):
+                        add(table_owner_change, delta)
+
+    _add_sequence_owner_dependencies(nodes, owned_by_by_ref, creates, add)
+
+
+def _add_sequence_owner_dependencies(
+    nodes: tuple[DeltaBase, ...],
+    owned_by_by_ref: dict[ObjectRef, list[AlterSequenceOwnedBy]],
+    creates: dict[ObjectRef, list[DeltaBase]],
+    add: Callable[[DeltaBase, DeltaBase], None],
+) -> None:
+    for delta in nodes:
+        if not isinstance(delta, AlterSequenceOwner):
+            continue
+        for owned_by_change in owned_by_by_ref.get(delta.target, ()):
+            if owned_by_change.new_owned_by is not None:
+                _add_create_prerequisites(
+                    delta,
+                    (owned_by_change.new_owned_by,),
+                    creates,
+                    add,
+                )
+                add(delta, owned_by_change)
 
 
 def _add_composite_create_dependencies(
@@ -532,7 +565,10 @@ def _add_sequence_drop_dependencies(
     for delta in nodes:
         if isinstance(delta, SetColumnDefault):
             _add_drop_prerequisites(delta, delta.old_sequence_prerequisites, drops, add)
-        elif isinstance(delta, AlterSequenceOwnedBy) and delta.old_owned_by is not None:
+        elif (
+            isinstance(delta, (AlterSequenceOwnedBy, AlterSequenceOwner))
+            and delta.old_owned_by is not None
+        ):
             _add_drop_prerequisites(delta, (delta.old_owned_by,), drops, add)
 
 

@@ -12,10 +12,12 @@ from pgschemadiff.domain.delta.sequence import (
     CreateSequence,
     DropSequence,
 )
-from pgschemadiff.domain.identity import ObjectKind
+from pgschemadiff.domain.identity import ObjectKind, ObjectRef
 from pgschemadiff.shared.errors import DiffError
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from pgschemadiff.domain.delta.base import DeltaBase
     from pgschemadiff.domain.sequence import Sequence
 
@@ -24,6 +26,16 @@ class SequenceComparator:
     """Compare sequence options, owner role, and owned column."""
 
     kind: ObjectKind = ObjectKind.SEQUENCE
+
+    def __init__(
+        self,
+        *,
+        source_table_owners: Mapping[ObjectRef, str | None] | None = None,
+        target_table_owners: Mapping[ObjectRef, str | None] | None = None,
+    ) -> None:
+        """Accept table-owner snapshots for ownership-following sequences."""
+        self._source_table_owners = source_table_owners or {}
+        self._target_table_owners = target_table_owners or {}
 
     def compare(self, source: object | None, target: object | None) -> tuple[DeltaBase, ...]:
         src = cast("Sequence | None", source)
@@ -70,7 +82,33 @@ class SequenceComparator:
         if src.owner != tgt.owner:
             if tgt.owner is None:
                 raise DiffError("Sequence owner cannot be changed to an unresolved owner.")
-            result.append(AlterSequenceOwner(target=src.ref, new_owner=tgt.owner))
+            if src.owned_by is not None and src.owned_by == tgt.owned_by:
+                table_ref = src.owned_by.parent
+                source_table_owner = (
+                    self._source_table_owners.get(table_ref) if table_ref is not None else None
+                )
+                target_table_owner = (
+                    self._target_table_owners.get(table_ref) if table_ref is not None else None
+                )
+                if (
+                    table_ref is None
+                    or source_table_owner is None
+                    or target_table_owner is None
+                    or src.owner != source_table_owner
+                    or tgt.owner != target_table_owner
+                    or source_table_owner == target_table_owner
+                ):
+                    raise DiffError(
+                        "Sequence and owning table owners have inconsistent catalog state."
+                    )
+            else:
+                result.append(
+                    AlterSequenceOwner(
+                        target=src.ref,
+                        new_owner=tgt.owner,
+                        old_owned_by=src.owned_by,
+                    )
+                )
         if src.owned_by != tgt.owned_by:
             result.append(
                 AlterSequenceOwnedBy(

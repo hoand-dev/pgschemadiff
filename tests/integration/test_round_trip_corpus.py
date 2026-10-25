@@ -656,6 +656,46 @@ async def test_sequence_owner_transition_precedes_owned_by_change_for_pg18(
 
 
 @pytest.mark.integration
+async def test_sequence_owner_follows_table_owner_change_for_pg18(
+    pg_admin_dsn: str,
+    pg_test_dsn: str,
+    pg_test_dsn2: str,
+    tmp_path: Path,
+) -> None:
+    old_owner = "pgsd_sequence_table_owner"
+    with psycopg.connect(pg_admin_dsn, autocommit=True) as connection:
+        connection.execute(f"CREATE ROLE {old_owner}")
+
+    common = [
+        _APP,
+        "CREATE SEQUENCE app.stable_seq AS bigint START WITH 1 INCREMENT BY 1",
+        "CREATE TABLE app.stable_owner_table "
+        "(id bigint DEFAULT nextval('app.stable_seq'::regclass))",
+        "ALTER SEQUENCE app.stable_seq OWNED BY app.stable_owner_table.id",
+    ]
+    current_sql = [*common, f"ALTER TABLE app.stable_owner_table OWNER TO {old_owner}"]
+    _seed(pg_test_dsn, current_sql)
+    _seed(pg_test_dsn2, common)
+
+    delta_set = await compare_urls(pg_test_dsn, pg_test_dsn2, schemas=None)
+    plan = generate_migration(
+        delta_set,
+        max_risk=RiskLevel.DESTRUCTIVE,
+        clock=lambda: datetime(2026, 10, 25, 12, 0, tzinfo=UTC),
+        id_factory=lambda: "pg18-corpus-sequence-table-owner-change",
+    )
+    bundle_dir = FilesystemMigrationWriter().write(plan, tmp_path)
+    manifest_bytes, up_sql_bytes = FilesystemBundleReader().read(bundle_dir)
+    bundle = load_bundle(manifest_bytes, up_sql_bytes)
+
+    assert 'ALTER SEQUENCE "app"."stable_seq" OWNER TO' not in up_sql_bytes.decode("utf-8")
+    async with open_executor(pg_test_dsn) as executor:
+        result = await apply_migration(bundle, executor, approve_destructive=True)
+    assert result.status == "applied"
+    assert (await compare_urls(pg_test_dsn, pg_test_dsn2, schemas=None)).is_empty()
+
+
+@pytest.mark.integration
 async def test_identity_backing_sequence_is_not_compared(
     pg_test_dsn: str,
     pg_test_dsn2: str,

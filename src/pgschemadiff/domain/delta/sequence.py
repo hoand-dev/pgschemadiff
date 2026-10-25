@@ -92,12 +92,14 @@ class AlterSequenceOptions(DeltaBase):
 
 
 class AlterSequenceOwner(DeltaBase):
-    """Change the role owning a sequence."""
+    """Change sequence owner, unlinking any source-owned column first."""
 
     op: Literal[DeltaOp.ALTER] = DeltaOp.ALTER
     kind: Literal["alter_sequence_owner"] = "alter_sequence_owner"
 
     new_owner: str = Field(min_length=1)
+    old_owned_by: ObjectRef | None = None
+    """Source owning column; its presence requires an unlink before owner change."""
 
     @model_validator(mode="after")
     def _check_target_kind(self) -> Self:
