@@ -33,7 +33,9 @@ def _create_sql(view: View, *, replace: bool) -> str:
     option_sql = f" WITH ({', '.join(options)})" if options else ""
     prefix = "CREATE OR REPLACE VIEW" if replace else "CREATE VIEW"
     sql = f"{prefix} {quote_qualified(view.ref.qname)} ({columns}){option_sql} AS "
-    sql += catalog_fragment(view.definition, "View definition")
+    # pg_get_viewdef ends the query with ";", which must not precede CHECK OPTION.
+    definition = catalog_fragment(view.definition, "View definition").rstrip()
+    sql += definition.removesuffix(";").rstrip()
     if view.check_option != "none":
         sql += f" WITH {view.check_option.upper()} CHECK OPTION"
     return sql

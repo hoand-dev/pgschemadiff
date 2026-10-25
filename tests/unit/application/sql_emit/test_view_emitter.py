@@ -62,6 +62,15 @@ def test_create_view_emits_quoted_columns_options_check_option_and_owner() -> No
     assert all(statement.transactional and statement.delta is delta for statement in statements)
 
 
+def test_create_view_strips_catalog_semicolon_before_check_option() -> None:
+    # pg_get_viewdef(oid, true) returns " SELECT ...;" with a trailing semicolon.
+    view = _view(definition=" SELECT 1 AS id;\n", columns=(("id", "integer"),), owner=None)
+
+    statements = _emit(CreateView(target=_VIEW_REF, view=view))
+
+    assert statements[0].sql.endswith("AS  SELECT 1 AS id WITH LOCAL CHECK OPTION")
+
+
 def test_create_view_omits_default_options_and_owner() -> None:
     view = _view(
         definition="SELECT 1 AS id",
