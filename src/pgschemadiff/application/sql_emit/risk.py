@@ -21,6 +21,7 @@ from pgschemadiff.domain.delta import (
     AlterEnumAttrs,
     AlterExtension,
     AlterFunctionOwner,
+    AlterProcedureOwner,
     AlterSequenceOptions,
     AlterSequenceOwnedBy,
     AlterSequenceOwner,
@@ -31,6 +32,7 @@ from pgschemadiff.domain.delta import (
     CreateExtension,
     CreateFunction,
     CreateIndex,
+    CreateProcedure,
     CreateSchema,
     CreateSequence,
     CreateTable,
@@ -44,6 +46,7 @@ from pgschemadiff.domain.delta import (
     DropExtension,
     DropFunction,
     DropIndex,
+    DropProcedure,
     DropSchema,
     DropSequence,
     DropTable,
@@ -54,6 +57,7 @@ from pgschemadiff.domain.delta import (
     ReplaceEnumLabels,
     ReplaceFunction,
     ReplaceIndex,
+    ReplaceProcedure,
     SetColumnDefault,
     SetColumnNullability,
     ValidateDomainCheck,
@@ -103,6 +107,10 @@ _SUPPORTED_DELTA_TYPES: tuple[type[DeltaBase], ...] = (
     DropFunction,
     AlterExtension,
     AlterFunctionOwner,
+    CreateProcedure,
+    DropProcedure,
+    ReplaceProcedure,
+    AlterProcedureOwner,
     CreateTable,
     DropTable,
     RenameTable,
@@ -509,6 +517,52 @@ def classify_risk(  # noqa: PLR0912, PLR0915
             level, reason = (
                 RiskLevel.DANGEROUS,
                 "Changes function owner, which can change effective access.",
+            )
+    elif isinstance(
+        delta,
+        (CreateProcedure, DropProcedure, ReplaceProcedure, AlterProcedureOwner),
+    ):
+        procedures = (
+            (delta.old_procedure, delta.new_procedure)
+            if isinstance(delta, ReplaceProcedure)
+            else (delta.procedure,)
+        )
+        unsupported_procedure = next(
+            (procedure for procedure in procedures if not procedure.is_supported), None
+        )
+        if unsupported_procedure is not None:
+            level, reason = (
+                RiskLevel.BLOCKED,
+                f"Procedure language {unsupported_procedure.language!r} is unsupported; "
+                "only sql and plpgsql are supported.",
+            )
+        elif isinstance(delta, CreateProcedure) and delta.procedure.security_definer:
+            level, reason = (
+                RiskLevel.BLOCKED,
+                "Creating a SECURITY DEFINER procedure is blocked because routine ACLs "
+                "are not modeled.",
+            )
+        elif isinstance(delta, ReplaceProcedure) and delta.incompatible:
+            level, reason = (
+                RiskLevel.BLOCKED,
+                "Procedure parameter name, mode, or output shape cannot be changed in place.",
+            )
+        elif isinstance(delta, CreateProcedure):
+            level, reason = (
+                RiskLevel.WARNING,
+                "Creates a procedure and installs its executable body.",
+            )
+        elif isinstance(delta, DropProcedure):
+            level, reason = RiskLevel.DESTRUCTIVE, "Removes a procedure and its callable behavior."
+        elif isinstance(delta, ReplaceProcedure):
+            level, reason = (
+                RiskLevel.DANGEROUS,
+                "Replaces procedure behavior and may change runtime results.",
+            )
+        else:
+            level, reason = (
+                RiskLevel.DANGEROUS,
+                "Changes procedure owner, which can change effective access.",
             )
     elif isinstance(delta, CreateSequence):
         if delta.sequence.owned_by is None:

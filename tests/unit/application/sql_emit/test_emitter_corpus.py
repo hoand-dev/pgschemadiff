@@ -38,6 +38,7 @@ from pgschemadiff.domain.delta import (
     AlterEnumAttrs,
     AlterExtension,
     AlterFunctionOwner,
+    AlterProcedureOwner,
     AlterSequenceOptions,
     AlterSequenceOwnedBy,
     AlterSequenceOwner,
@@ -48,6 +49,7 @@ from pgschemadiff.domain.delta import (
     CreateExtension,
     CreateFunction,
     CreateIndex,
+    CreateProcedure,
     CreateSchema,
     CreateSequence,
     CreateTable,
@@ -63,6 +65,7 @@ from pgschemadiff.domain.delta import (
     DropExtension,
     DropFunction,
     DropIndex,
+    DropProcedure,
     DropSchema,
     DropSequence,
     DropTable,
@@ -73,6 +76,7 @@ from pgschemadiff.domain.delta import (
     ReplaceEnumLabels,
     ReplaceFunction,
     ReplaceIndex,
+    ReplaceProcedure,
     SetColumnDefault,
     SetColumnNullability,
     ValidateDomainCheck,
@@ -83,6 +87,7 @@ from pgschemadiff.domain.extension import Extension
 from pgschemadiff.domain.function import Function, FunctionArgument
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index, IndexKeyColumn, IndexMethod, SortOrder
+from pgschemadiff.domain.procedure import Procedure, ProcedureArgument
 from pgschemadiff.domain.schema import Schema
 from pgschemadiff.domain.sequence import Sequence
 from pgschemadiff.domain.table import PartitionInfo, PartitionOf, PartitionStrategy, Table
@@ -213,6 +218,26 @@ def _emitter_cases() -> tuple[tuple[str, Delta], ...]:
         default_count=1,
         body="SELECT value",
         definition=function_definition,
+        owner='Role "Owner',
+    )
+    procedure_ref = ObjectRef(
+        kind=ObjectKind.PROCEDURE,
+        qname=QualifiedName(namespace='App "Schema', name='run"task'),
+        arg_signature=("integer",),
+    )
+    procedure_definition = (
+        'CREATE OR REPLACE PROCEDURE "App ""Schema"."run""task"('
+        "value integer DEFAULT 7) LANGUAGE sql AS $procedure$ SELECT value $procedure$"
+    )
+    procedure = Procedure(
+        ref=procedure_ref,
+        arguments=(ProcedureArgument(name="value", data_type="integer", default_expr="7"),),
+        language="sql",
+        security_definer=False,
+        default_expressions="7",
+        default_count=1,
+        body="SELECT value",
+        definition=procedure_definition,
         owner='Role "Owner',
     )
     empty_enum = EnumType(
@@ -408,6 +433,31 @@ def _emitter_cases() -> tuple[tuple[str, Delta], ...]:
             AlterFunctionOwner(
                 target=function_ref,
                 function=function,
+                new_owner='New "Owner',
+            ),
+        ),
+        ("create procedure", CreateProcedure(target=procedure_ref, procedure=procedure)),
+        ("drop procedure overload", DropProcedure(target=procedure_ref, procedure=procedure)),
+        (
+            "replace procedure",
+            ReplaceProcedure(
+                target=procedure_ref,
+                old_procedure=procedure,
+                new_procedure=procedure.model_copy(
+                    update={
+                        "body": "SELECT value + 1",
+                        "definition": procedure_definition.replace(
+                            "SELECT value", "SELECT value + 1"
+                        ),
+                    }
+                ),
+            ),
+        ),
+        (
+            "alter procedure owner",
+            AlterProcedureOwner(
+                target=procedure_ref,
+                procedure=procedure,
                 new_owner='New "Owner',
             ),
         ),

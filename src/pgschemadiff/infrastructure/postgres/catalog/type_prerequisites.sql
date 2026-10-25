@@ -1,16 +1,16 @@
 -- catalog/type_prerequisites.sql
 -- Returns enum/composite/domain types required by table columns, composite
--- attributes, domain base types, and function arguments/returns.
+-- attributes, domain base types, and function/procedure arguments/returns.
 -- Array columns depend on their element type. System, reserved, and extension-owned
 -- objects are excluded on both sides of each dependency.
 -- Result columns:
---   dependent_kind   text -- table, composite_type, domain_type, or function
+--   dependent_kind   text -- table, composite_type, domain_type, function, or procedure
 --   dependent_schema text -- schema owning the dependent object
 --   dependent_name   text -- dependent table or composite type name
 --   type_kind        text -- 'enum', 'composite_type', or 'domain_type'
 --   type_schema      text -- schema owning the prerequisite type
 --   type_name        text -- prerequisite type name
---   dependent_signature text[] -- function identity input types, otherwise NULL
+--   dependent_signature text[] -- routine input identity types, otherwise NULL
 WITH dependent_columns AS (
     SELECT
         'table'::text AS dependent_kind,
@@ -104,8 +104,8 @@ WITH dependent_columns AS (
     UNION ALL
 
     SELECT
-        'function'::text AS dependent_kind,
-        function_namespace.nspname AS dependent_schema,
+        CASE routine.prokind WHEN 'p' THEN 'procedure' ELSE 'function' END AS dependent_kind,
+        routine_namespace.nspname AS dependent_schema,
         routine.proname AS dependent_name,
         ARRAY(
             SELECT pg_catalog.format_type(input_argument.type_oid, NULL)
@@ -118,8 +118,8 @@ WITH dependent_columns AS (
             ELSE referenced_type.oid
         END AS prerequisite_type_oid
     FROM pg_catalog.pg_proc AS routine
-    JOIN pg_catalog.pg_namespace AS function_namespace
-        ON function_namespace.oid = routine.pronamespace
+    JOIN pg_catalog.pg_namespace AS routine_namespace
+        ON routine_namespace.oid = routine.pronamespace
     CROSS JOIN LATERAL (
         SELECT routine.prorettype AS type_oid
         UNION ALL
@@ -129,10 +129,10 @@ WITH dependent_columns AS (
     ) AS routine_type
     JOIN pg_catalog.pg_type AS referenced_type
         ON referenced_type.oid = routine_type.type_oid
-    WHERE routine.prokind = 'f'
-      AND left(function_namespace.nspname, 3) != 'pg_'
-      AND function_namespace.nspname != 'information_schema'
-      AND function_namespace.nspname != 'pgschemadiff'
+    WHERE routine.prokind IN ('f', 'p')
+      AND left(routine_namespace.nspname, 3) != 'pg_'
+      AND routine_namespace.nspname != 'information_schema'
+      AND routine_namespace.nspname != 'pgschemadiff'
       AND NOT EXISTS (
           SELECT 1
           FROM pg_catalog.pg_depend AS extension_dependency

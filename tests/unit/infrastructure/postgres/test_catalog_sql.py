@@ -491,7 +491,7 @@ def test_type_prerequisites_sql_includes_function_argument_and_return_types() ->
     assert "proallargtypes" in sql
     assert "prorettype" in sql
     assert "dependent_signature" in sql
-    assert "'function'::text AS dependent_kind" in sql
+    assert "CASE routine.prokind WHEN 'p' THEN 'procedure' ELSE 'function' END" in sql
 
 
 @pytest.mark.unit
@@ -535,12 +535,13 @@ def test_sequences_sql_excludes_identity_extension_and_system_sequences() -> Non
 
 
 @pytest.mark.unit
-def test_routines_sql_selects_function_semantics_and_definition() -> None:
+def test_routines_sql_selects_function_and_procedure_semantics_and_definition() -> None:
     sql = _load_sql("routines.sql")
 
     for expected in (
         "pg_proc",
-        "prokind = 'f'",
+        "prokind IN ('f', 'p')",
+        "AS routine_kind",
         "proargtypes",
         "proallargtypes",
         "proargmodes",
@@ -556,15 +557,24 @@ def test_routines_sql_selects_function_semantics_and_definition() -> None:
 
 
 @pytest.mark.unit
-def test_routines_sql_excludes_system_reserved_and_extension_functions() -> None:
+def test_routines_sql_excludes_system_reserved_and_extension_routines() -> None:
     sql = _load_sql("routines.sql")
 
-    assert "left(function_namespace.nspname, 3) != 'pg_'" in sql
-    assert "function_namespace.nspname != 'information_schema'" in sql
-    assert "function_namespace.nspname != 'pgschemadiff'" in sql
+    assert "left(routine_namespace.nspname, 3) != 'pg_'" in sql
+    assert "routine_namespace.nspname != 'information_schema'" in sql
+    assert "routine_namespace.nspname != 'pgschemadiff'" in sql
     assert "classid = 'pg_catalog.pg_proc'::regclass" in sql
     assert "deptype = 'e'" in sql
-    assert "prokind = 'p'" not in sql
+    assert "prokind IN ('f', 'p')" in sql
+
+
+@pytest.mark.unit
+def test_type_prerequisites_sql_includes_procedure_signature_and_argument_types() -> None:
+    sql = _load_sql("type_prerequisites.sql")
+
+    assert "WHEN 'p' THEN 'procedure'" in sql
+    assert "proallargtypes" in sql
+    assert "proargtypes" in sql
 
 
 @pytest.mark.unit

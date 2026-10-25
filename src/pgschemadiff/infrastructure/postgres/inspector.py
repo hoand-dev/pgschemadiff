@@ -41,6 +41,7 @@ from pgschemadiff.domain.extension import Extension
 from pgschemadiff.domain.function import Function, FunctionArgument
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index, IndexKeyColumn, IndexMethod, NullsOrder, SortOrder
+from pgschemadiff.domain.procedure import Procedure, ProcedureArgument
 from pgschemadiff.domain.schema import Schema
 from pgschemadiff.domain.sequence import Sequence
 from pgschemadiff.domain.table import (
@@ -708,6 +709,9 @@ class PgCatalogInspector:
         functions_by_schema = self._group_functions(
             routines_rows or [], allowed, prerequisites_by_object
         )
+        procedures_by_schema = self._group_procedures(
+            routines_rows or [], allowed, prerequisites_by_object
+        )
 
         tables_by_schema, idxs_by_schema = self._build_tables(
             tables_rows,
@@ -731,6 +735,7 @@ class PgCatalogInspector:
                     domain_types_by_schema,
                     sequences_by_schema,
                     functions_by_schema,
+                    procedures_by_schema,
                 )
             ),
             extensions=tuple(extensions),
@@ -880,6 +885,8 @@ class PgCatalogInspector:
         }
         result: dict[str, list[Function]] = {}
         for row in rows:
+            if row.routine_kind != "f":
+                continue
             schema_name = row.schema_name
             if allowed is not None and schema_name not in allowed:
                 continue
@@ -965,6 +972,104 @@ class PgCatalogInspector:
         for functions in result.values():
             functions.sort(
                 key=lambda function: (function.ref.qname.name, function.ref.arg_signature)
+            )
+        return result
+
+    @staticmethod
+    def _group_procedures(
+        rows: list[Any],
+        allowed: set[str] | None,
+        prerequisites: dict[tuple[ObjectKind, str, str, tuple[str, ...] | None], list[ObjectRef]],
+    ) -> dict[str, list[Procedure]]:
+        mode_by_code: dict[str, Literal["IN", "OUT", "INOUT", "VARIADIC"]] = {
+            "i": "IN",
+            "o": "OUT",
+            "b": "INOUT",
+            "v": "VARIADIC",
+        }
+        result: dict[str, list[Procedure]] = {}
+        for row in rows:
+            if row.routine_kind != "p":
+                continue
+            schema_name = row.schema_name
+            if allowed is not None and schema_name not in allowed:
+                continue
+
+            input_types = tuple(row.input_types or ())
+            argument_types = tuple(row.all_argument_types or ())
+            raw_modes = tuple(row.argument_modes or ("i" for _ in argument_types))
+            raw_names = tuple(row.argument_names or (None for _ in argument_types))
+            if len(argument_types) != len(raw_modes) or len(argument_types) != len(raw_names):
+                raise InspectionError(
+                    f"Procedure {schema_name}.{row.function_name} has "
+                    "inconsistent argument metadata"
+                )
+
+            arguments: list[ProcedureArgument] = []
+            for name, mode, data_type in zip(raw_names, raw_modes, argument_types, strict=True):
+                mode_code = mode.decode() if isinstance(mode, bytes) else mode
+                mapped_mode = mode_by_code.get(mode_code)
+                if mapped_mode is None:
+                    raise InspectionError(
+                        f"Procedure {schema_name}.{row.function_name} has unsupported "
+                        f"argument mode {mode!r}"
+                    )
+                if not isinstance(data_type, str) or not data_type.strip():
+                    raise InspectionError(
+                        f"Procedure {schema_name}.{row.function_name} has an unusable argument type"
+                    )
+                arguments.append(
+                    ProcedureArgument(name=name or None, mode=mapped_mode, data_type=data_type)
+                )
+
+            default_expressions = row.default_expressions
+            if row.default_count and default_expressions is None:
+                raise InspectionError(
+                    f"Procedure {schema_name}.{row.function_name} has missing default expressions"
+                )
+            if default_expressions is not None and (
+                not default_expressions.strip() or default_expressions.strip() == "?"
+            ):
+                raise InspectionError(
+                    f"Procedure {schema_name}.{row.function_name} has unusable default expressions"
+                )
+            definition = row.definition
+            if (
+                not isinstance(definition, str)
+                or not definition.strip()
+                or definition.strip() == "?"
+            ):
+                raise InspectionError(
+                    f"Procedure {schema_name}.{row.function_name} has no usable definition"
+                )
+
+            ref = ObjectRef(
+                kind=ObjectKind.PROCEDURE,
+                qname=QualifiedName(namespace=schema_name, name=row.function_name),
+                arg_signature=input_types,
+            )
+            procedure = Procedure(
+                ref=ref,
+                arguments=tuple(arguments),
+                language=row.language,
+                security_definer=row.security_definer,
+                transforms=tuple(row.transforms or ()),
+                config=tuple(row.config or ()),
+                default_expressions=default_expressions,
+                default_count=row.default_count,
+                body=row.body,
+                definition=definition,
+                owner=row.owner,
+                type_prerequisites=tuple(
+                    prerequisites.get(
+                        (ObjectKind.PROCEDURE, schema_name, row.function_name, input_types), []
+                    )
+                ),
+            )
+            result.setdefault(schema_name, []).append(procedure)
+        for procedures in result.values():
+            procedures.sort(
+                key=lambda procedure: (procedure.ref.qname.name, procedure.ref.arg_signature)
             )
         return result
 
@@ -1123,6 +1228,7 @@ class PgCatalogInspector:
                 ObjectKind.COMPOSITE_TYPE,
                 ObjectKind.DOMAIN_TYPE,
                 ObjectKind.FUNCTION,
+                ObjectKind.PROCEDURE,
             }:
                 raise InspectionError(f"Unsupported type prerequisite dependent {dependent_kind!r}")
             type_kind = ObjectKind(row.type_kind)
@@ -1137,10 +1243,10 @@ class PgCatalogInspector:
                 qname=QualifiedName(namespace=row.type_schema, name=row.type_name),
             )
             signature = None
-            if dependent_kind is ObjectKind.FUNCTION:
+            if dependent_kind in {ObjectKind.FUNCTION, ObjectKind.PROCEDURE}:
                 if row.dependent_signature is None:
                     raise InspectionError(
-                        f"Function type prerequisite {row.dependent_schema}.{row.dependent_name} "
+                        f"Routine type prerequisite {row.dependent_schema}.{row.dependent_name} "
                         "has no overload signature"
                     )
                 signature = tuple(row.dependent_signature)
@@ -1215,6 +1321,7 @@ class PgCatalogInspector:
         domain_types_by_schema: dict[str, list[DomainType]],
         sequences_by_schema: dict[str, list[Sequence]],
         functions_by_schema: dict[str, list[Function]],
+        procedures_by_schema: dict[str, list[Procedure]],
     ) -> list[Schema]:
         result: list[Schema] = []
         for name in schema_names:
@@ -1233,6 +1340,7 @@ class PgCatalogInspector:
                     domain_types=tuple(domain_types_by_schema.get(name, [])),
                     sequences=tuple(sequences_by_schema.get(name, [])),
                     functions=tuple(functions_by_schema.get(name, [])),
+                    procedures=tuple(procedures_by_schema.get(name, [])),
                     comment=row.comment,
                 )
             )

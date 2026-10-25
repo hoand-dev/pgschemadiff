@@ -12,6 +12,7 @@ from pgschemadiff.application.sql_emit import (
     enum_emitter,
     function_emitter,
     index_emitter,
+    procedure_emitter,
     schema_emitter,
     sequence_emitter,
     table_emitter,
@@ -35,6 +36,7 @@ def default_handlers() -> dict[type[DeltaBase], SqlHandler]:
         constraint_emitter.handlers(),
         enum_emitter.handlers(),
         function_emitter.handlers(),
+        procedure_emitter.handlers(),
         schema_emitter.handlers(),
         sequence_emitter.handlers(),
     ):

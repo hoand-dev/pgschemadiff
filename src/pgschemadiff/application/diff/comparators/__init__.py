@@ -33,6 +33,7 @@ from pgschemadiff.application.diff.comparators.enum import EnumComparator
 from pgschemadiff.application.diff.comparators.extension import ExtensionComparator
 from pgschemadiff.application.diff.comparators.function import FunctionComparator
 from pgschemadiff.application.diff.comparators.index import IndexComparator
+from pgschemadiff.application.diff.comparators.procedure import ProcedureComparator
 from pgschemadiff.application.diff.comparators.schema import SchemaComparator
 from pgschemadiff.application.diff.comparators.sequence import SequenceComparator
 from pgschemadiff.application.diff.comparators.table import (
@@ -52,6 +53,7 @@ __all__ = [
     "ExtensionComparator",
     "FunctionComparator",
     "IndexComparator",
+    "ProcedureComparator",
     "SchemaComparator",
     "SequenceComparator",
     "TableComparator",

@@ -21,6 +21,7 @@ from pgschemadiff.domain.enum_type import EnumType
 from pgschemadiff.domain.function import Function
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index
+from pgschemadiff.domain.procedure import Procedure
 from pgschemadiff.domain.sequence import Sequence
 from pgschemadiff.domain.table import Table
 
@@ -70,6 +71,9 @@ class Schema(BaseModel):
 
     functions: tuple[Function, ...] = Field(default=())
     """Functions owned by this schema, ordered by name and input signature."""
+
+    procedures: tuple[Procedure, ...] = Field(default=())
+    """Procedures owned by this schema, ordered by name and input signature."""
 
     comment: str | None = None
     """Optional ``COMMENT ON SCHEMA`` value."""
@@ -164,6 +168,22 @@ class Schema(BaseModel):
                 raise ValueError(
                     f"Function {function.ref.qname.fqn!r} belongs to namespace "
                     f"{function.ref.qname.namespace!r}, but schema is {self.name!r}"
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _check_procedure_refs(self) -> Self:
+        seen: set[ObjectRef] = set()
+        for procedure in self.procedures:
+            if procedure.ref in seen:
+                raise ValueError(
+                    f"Duplicate procedure ref {procedure.ref!r} in schema {self.name!r}"
+                )
+            seen.add(procedure.ref)
+            if procedure.ref.qname.namespace != self.name:
+                raise ValueError(
+                    f"Procedure {procedure.ref.qname.fqn!r} belongs to namespace "
+                    f"{procedure.ref.qname.namespace!r}, but schema is {self.name!r}"
                 )
         return self
 

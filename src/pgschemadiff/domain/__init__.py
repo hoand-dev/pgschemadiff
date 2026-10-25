@@ -33,6 +33,7 @@ from pgschemadiff.domain.index import (
     SortOrder,
 )
 from pgschemadiff.domain.ports import SchemaInspector
+from pgschemadiff.domain.procedure import Procedure, ProcedureArgument
 from pgschemadiff.domain.schema import Schema
 from pgschemadiff.domain.sequence import Sequence
 from pgschemadiff.domain.table import (
@@ -74,6 +75,8 @@ __all__ = [
     "PartitionOf",
     "PartitionStrategy",
     "PrimaryKeyConstraint",
+    "Procedure",
+    "ProcedureArgument",
     "QualifiedName",
     "Schema",
     "SchemaInspector",

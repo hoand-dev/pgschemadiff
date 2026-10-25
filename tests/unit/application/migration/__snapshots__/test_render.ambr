@@ -274,6 +274,7 @@
                 "domain_types": [],
                 "sequences": [],
                 "functions": [],
+                "procedures": [],
                 "comment": null
               }
             },
@@ -454,7 +455,7 @@
         - `up.sql`: `a6e992690fd58b789759956c7ec05f9c01aa1694ab140f106d2a915c6f8bd526`
         - `down.sql`: `e87201d8d4470825bb2bea1bd7a4503e7152abd3a22dbd70418d51cfa851166e`
         - `manifest.json`: `04fa4ef4e470362e9755d7177a7988b21c8d956dd3254c962b5702bb05a8deb8`
-        - `deltas.json`: `07216e15ffca26130943bb3d5276f4b789323c058849be59b5b94f69139e784d`
+        - `deltas.json`: `73734d89a85d5c41191ff27ce9c769ce811022bb1663206cac674758cafd9020`
         
         ## Warnings
         

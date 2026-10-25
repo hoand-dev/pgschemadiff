@@ -21,6 +21,7 @@ from pgschemadiff.domain.delta.column import (
     DropColumn,
     RenameColumn,
     SetColumnDefault,
+    SetColumnNullability,
 )
 from pgschemadiff.domain.delta.composite_type import (
     AlterCompositeAddAttribute,
@@ -42,6 +43,7 @@ from pgschemadiff.domain.delta.domain_type import (
 from pgschemadiff.domain.delta.enum import AddEnumValue, CreateEnum, DropEnum
 from pgschemadiff.domain.delta.function import CreateFunction, DropFunction, ReplaceFunction
 from pgschemadiff.domain.delta.index import CreateIndex, DropIndex, ReplaceIndex
+from pgschemadiff.domain.delta.procedure import CreateProcedure, DropProcedure, ReplaceProcedure
 from pgschemadiff.domain.delta.schema import (
     AlterExtension,
     CreateExtension,
@@ -76,6 +78,7 @@ def order_deltas(delta_set: DeltaSet) -> DeltaSet:
     creates, drops, schema_creates = _collect_resources(nodes)
     _add_create_dependencies(nodes, creates, schema_creates, add)
     _add_enum_dependencies(nodes, add)
+    _add_routine_table_dependencies(nodes, add)
     _add_drop_dependencies(nodes, drops, add)
     _add_schema_drop_dependencies(nodes, add)
     _add_rename_dependencies(nodes, add)
@@ -129,6 +132,8 @@ def _add_enum_dependencies(
                 ValidateDomainCheck,
                 CreateFunction,
                 ReplaceFunction,
+                CreateProcedure,
+                ReplaceProcedure,
             ),
         )
     )
@@ -180,6 +185,8 @@ def _add_enum_drop_dependencies(
                 DropDomainCheck,
                 DropFunction,
                 ReplaceFunction,
+                DropProcedure,
+                ReplaceProcedure,
             ),
         )
     )
@@ -213,6 +220,7 @@ def _collect_resources(
                 CreateDomain,
                 CreateSequence,
                 CreateFunction,
+                CreateProcedure,
                 AddColumn,
                 AddConstraint,
             ),
@@ -232,10 +240,11 @@ def _collect_resources(
                 DropDomain,
                 DropSequence,
                 DropFunction,
+                DropProcedure,
             ),
         ):
             drops[delta.target].append(delta)
-        elif isinstance(delta, ReplaceFunction):
+        elif isinstance(delta, (ReplaceFunction, ReplaceProcedure)):
             creates[delta.target].append(delta)
             drops[delta.target].append(delta)
     return creates, drops, schema_creates
@@ -284,6 +293,7 @@ def _add_create_dependencies(
     _add_composite_create_dependencies(nodes, creates, add)
     _add_domain_create_dependencies(nodes, creates, add)
     _add_function_create_dependencies(nodes, creates, add)
+    _add_procedure_create_dependencies(nodes, creates, add)
     _add_index_create_dependencies(nodes, creates, add)
     _add_fk_unique_dependencies(nodes, add)
     _add_constraint_identity_dependencies(nodes, add)
@@ -417,6 +427,62 @@ def _add_function_create_dependencies(
             _add_create_prerequisites(delta, delta.function.type_prerequisites, creates, add)
         elif isinstance(delta, ReplaceFunction):
             _add_create_prerequisites(delta, delta.new_function.type_prerequisites, creates, add)
+
+
+def _add_procedure_create_dependencies(
+    nodes: tuple[DeltaBase, ...],
+    creates: dict[ObjectRef, list[DeltaBase]],
+    add: Callable[[DeltaBase, DeltaBase], None],
+) -> None:
+    for delta in nodes:
+        if isinstance(delta, CreateProcedure):
+            _add_create_prerequisites(delta, delta.procedure.type_prerequisites, creates, add)
+        elif isinstance(delta, ReplaceProcedure):
+            _add_create_prerequisites(delta, delta.new_procedure.type_prerequisites, creates, add)
+
+
+def _add_routine_table_dependencies(
+    nodes: tuple[DeltaBase, ...],
+    add: Callable[[DeltaBase, DeltaBase], None],
+) -> None:
+    routine_creates = tuple(
+        delta
+        for delta in nodes
+        if isinstance(delta, (CreateFunction, ReplaceFunction, CreateProcedure, ReplaceProcedure))
+    )
+    routine_drops = tuple(
+        delta for delta in nodes if isinstance(delta, (DropFunction, DropProcedure))
+    )
+    table_work = tuple(
+        delta
+        for delta in nodes
+        if isinstance(
+            delta,
+            (
+                CreateTable,
+                DropTable,
+                RenameTable,
+                AlterTableAttrs,
+                AddColumn,
+                DropColumn,
+                AlterColumnType,
+                SetColumnDefault,
+                SetColumnNullability,
+                RenameColumn,
+                AddConstraint,
+                DropConstraint,
+                CreateIndex,
+                DropIndex,
+                ReplaceIndex,
+            ),
+        )
+    )
+    for routine_create in routine_creates:
+        for table_change in table_work:
+            add(routine_create, table_change)
+    for table_change in table_work:
+        for routine_drop in routine_drops:
+            add(table_change, routine_drop)
 
 
 def _add_index_create_dependencies(
@@ -567,9 +633,8 @@ def _add_drop_dependencies(
             _add_drop_prerequisites(delta, delta.composite.type_prerequisites, drops, add)
         elif isinstance(delta, DropDomain):
             _add_drop_prerequisites(delta, delta.domain.type_prerequisites, drops, add)
-        elif isinstance(delta, (DropFunction, ReplaceFunction)):
-            function = delta.old_function if isinstance(delta, ReplaceFunction) else delta.function
-            _add_drop_prerequisites(delta, function.type_prerequisites, drops, add)
+        elif isinstance(delta, (DropFunction, ReplaceFunction, DropProcedure, ReplaceProcedure)):
+            _add_drop_prerequisites(delta, _routine_type_prerequisites(delta), drops, add)
         elif isinstance(delta, DropConstraint):
             _add_constraint_drop_dependencies(delta, drops, add)
         elif isinstance(delta, DropIndex):
@@ -591,6 +656,16 @@ def _add_drop_dependencies(
                     _add_drop_prerequisites(delta, _fk_remote_refs(constraint), drops, add)
 
     _add_sequence_drop_dependencies(nodes, drops, add)
+
+
+def _routine_type_prerequisites(
+    delta: DropFunction | ReplaceFunction | DropProcedure | ReplaceProcedure,
+) -> tuple[ObjectRef, ...]:
+    if isinstance(delta, (DropFunction, DropProcedure)):
+        routine = delta.function if isinstance(delta, DropFunction) else delta.procedure
+    else:
+        routine = delta.old_function if isinstance(delta, ReplaceFunction) else delta.old_procedure
+    return routine.type_prerequisites
 
 
 def _add_sequence_drop_dependencies(

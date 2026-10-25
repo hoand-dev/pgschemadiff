@@ -13,6 +13,7 @@ from pgschemadiff.application.diff.comparators import (
     ExtensionComparator,
     FunctionComparator,
     IndexComparator,
+    ProcedureComparator,
     SchemaComparator,
     SequenceComparator,
     TableComparator,
@@ -55,6 +56,7 @@ async def compare_schemas(
             target_table_owners=target_table_owners,
         ),
         FunctionComparator(target_functions=target.all_functions()),
+        ProcedureComparator(),
         TableComparator(
             column_comparator=ColumnComparator(),
             constraint_comparator=ConstraintComparator(),

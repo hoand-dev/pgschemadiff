@@ -25,6 +25,7 @@ from pgschemadiff.domain.extension import Extension
 from pgschemadiff.domain.function import Function
 from pgschemadiff.domain.identity import ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index
+from pgschemadiff.domain.procedure import Procedure
 from pgschemadiff.domain.schema import Schema
 from pgschemadiff.domain.sequence import Sequence
 from pgschemadiff.domain.table import Table
@@ -173,6 +174,13 @@ class Database(BaseModel):
         result: list[Function] = []
         for schema in self.schemas:
             result.extend(schema.functions)
+        return tuple(result)
+
+    def all_procedures(self) -> tuple[Procedure, ...]:
+        """Return all procedures across every schema."""
+        result: list[Procedure] = []
+        for schema in self.schemas:
+            result.extend(schema.procedures)
         return tuple(result)
 
     def all_indexes(self) -> tuple[Index, ...]:

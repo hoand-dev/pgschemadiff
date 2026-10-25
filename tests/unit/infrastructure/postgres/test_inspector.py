@@ -219,6 +219,7 @@ _SequencePrerequisiteRow = namedtuple(
 _FunctionRow = namedtuple(
     "_FunctionRow",
     [
+        "routine_kind",
         "schema_name",
         "function_name",
         "input_types",
@@ -413,6 +414,7 @@ def _make_function_row(
     schema: str = "public",
     name: str = "lookup",
     *,
+    routine_kind: str = "f",
     input_types: tuple[str, ...] = (),
     all_argument_types: tuple[str, ...] = (),
     argument_modes: tuple[str, ...] | None = None,
@@ -439,6 +441,7 @@ def _make_function_row(
     modes = argument_modes or tuple("i" for _ in all_argument_types)
     names = argument_names or tuple(None for _ in all_argument_types)
     return _FunctionRow(
+        routine_kind,
         schema,
         name,
         input_types,
@@ -461,8 +464,25 @@ def _make_function_row(
         transforms,
         config,
         body,
-        definition or f"CREATE OR REPLACE FUNCTION {schema}.{name}() RETURNS {return_type}",
+        definition
+        or f"CREATE OR REPLACE {'PROCEDURE' if routine_kind == 'p' else 'FUNCTION'} "
+        f"{schema}.{name}() RETURNS {return_type}",
         owner,
+    )
+
+
+def _make_procedure_row(
+    schema: str = "public",
+    name: str = "run_task",
+    **kwargs: Any,
+) -> Any:
+    return _make_function_row(
+        schema,
+        name,
+        routine_kind="p",
+        return_type="void",
+        volatility="volatile",
+        **kwargs,
     )
 
 
@@ -920,6 +940,83 @@ async def test_inspect_maps_function_type_prerequisites_by_overload_signature() 
 
     function = database.all_functions()[0]
     assert function.type_prerequisites == (
+        ObjectRef(
+            kind=ObjectKind.ENUM,
+            qname=QualifiedName(namespace="types", name="mood"),
+        ),
+    )
+
+
+@pytest.mark.unit
+async def test_inspect_maps_procedure_overloads_and_ignores_out_types_in_identity() -> None:
+    pool = _build_mock_pool(
+        schemas_rows=[_SchemaRow("public"), _SchemaRow("audit")],
+        routines_rows=[
+            _make_procedure_row("audit", "hidden"),
+            _make_procedure_row(
+                "public",
+                "run_task",
+                input_types=("integer",),
+                all_argument_types=("integer", "text"),
+                argument_modes=("i", "o"),
+                argument_names=("value", "result"),
+                body="BEGIN result := value::text; END",
+                security_definer=False,
+            ),
+            _make_procedure_row(
+                "public",
+                "run_task",
+                input_types=("text",),
+                all_argument_types=("text",),
+                argument_modes=("i",),
+                argument_names=("value",),
+            ),
+        ],
+    )
+
+    database = await PgCatalogInspector(pool, schemas=["public"]).inspect()
+
+    procedures = database.all_procedures()
+    assert len(procedures) == 2
+    assert tuple(procedure.ref.arg_signature for procedure in procedures) == (
+        ("integer",),
+        ("text",),
+    )
+    assert tuple(argument.mode for argument in procedures[0].arguments) == ("IN", "OUT")
+    assert procedures[0].arguments[1].data_type == "text"
+    assert not procedures[0].security_definer
+
+
+@pytest.mark.unit
+async def test_inspect_maps_procedure_type_prerequisites_by_input_signature() -> None:
+    pool = _build_mock_pool(
+        schemas_rows=[_SchemaRow("public"), _SchemaRow("types")],
+        routines_rows=[
+            _make_procedure_row(
+                "public",
+                "run_task",
+                input_types=("types.mood",),
+                all_argument_types=("types.mood", "types.payload"),
+                argument_modes=("i", "o"),
+                argument_names=("mood", "result"),
+            ),
+        ],
+        type_prerequisites_rows=[
+            _make_type_prerequisite_row(
+                type_schema="types",
+                type_name="mood",
+                dependent_kind="procedure",
+                dependent_schema="public",
+                dependent_name="run_task",
+                dependent_signature=("types.mood",),
+            ),
+        ],
+    )
+
+    database = await PgCatalogInspector(pool).inspect()
+
+    procedure = database.all_procedures()[0]
+    assert procedure.type_prerequisites == (
         ObjectRef(
             kind=ObjectKind.ENUM,
             qname=QualifiedName(namespace="types", name="mood"),

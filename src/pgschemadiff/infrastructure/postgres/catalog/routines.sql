@@ -1,14 +1,17 @@
 -- catalog/routines.sql
--- Returns user-defined functions; procedures and extension members are excluded.
--- Function input types define overload identity. Defaults remain an opaque
--- deparsed argument list so no SQL parser is needed in the inspector.
+-- Returns user-defined functions and procedures; aggregate/window routines and
+-- extension members are excluded. PostgreSQL 18 proargtypes contains only
+-- IN/INOUT/VARIADIC types. DROP PROCEDURE resolves from those input types and
+-- ignores OUT types (see catalog-pg-proc.html and sql-dropprocedure.html).
+-- Defaults remain an opaque deparsed argument list; no SQL parser is needed.
 -- Result columns:
---   schema_name, function_name, input_types, all_argument_types, argument_modes,
+--   routine_kind, schema_name, function_name, input_types, all_argument_types, argument_modes,
 --   argument_names, default_expressions, default_count, return_type, returns_set,
 --   language, volatility, strict, security_definer, leakproof, parallel, cost,
 --   rows, support_function, transforms, config, body, definition, owner
 SELECT
-    function_namespace.nspname AS schema_name,
+    routine.prokind AS routine_kind,
+    routine_namespace.nspname AS schema_name,
     routine.proname AS function_name,
     ARRAY(
         SELECT pg_catalog.format_type(input_argument.type_oid, NULL)
@@ -64,14 +67,14 @@ SELECT
     pg_catalog.pg_get_functiondef(routine.oid) AS definition,
     pg_catalog.pg_get_userbyid(routine.proowner) AS owner
 FROM pg_catalog.pg_proc AS routine
-JOIN pg_catalog.pg_namespace AS function_namespace
-    ON function_namespace.oid = routine.pronamespace
+JOIN pg_catalog.pg_namespace AS routine_namespace
+    ON routine_namespace.oid = routine.pronamespace
 JOIN pg_catalog.pg_language AS function_language
     ON function_language.oid = routine.prolang
-WHERE routine.prokind = 'f'
-  AND left(function_namespace.nspname, 3) != 'pg_'
-  AND function_namespace.nspname != 'information_schema'
-  AND function_namespace.nspname != 'pgschemadiff'
+WHERE routine.prokind IN ('f', 'p')
+  AND left(routine_namespace.nspname, 3) != 'pg_'
+  AND routine_namespace.nspname != 'information_schema'
+  AND routine_namespace.nspname != 'pgschemadiff'
   AND NOT EXISTS (
       SELECT 1
       FROM pg_catalog.pg_depend AS extension_dependency
@@ -79,4 +82,4 @@ WHERE routine.prokind = 'f'
         AND extension_dependency.objid = routine.oid
         AND extension_dependency.deptype = 'e'
   )
-ORDER BY function_namespace.nspname, routine.proname, input_types;
+ORDER BY routine_namespace.nspname, routine.proname, input_types;

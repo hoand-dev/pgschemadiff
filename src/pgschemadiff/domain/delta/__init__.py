@@ -89,6 +89,13 @@ from pgschemadiff.domain.delta.index import (
     IndexDelta,
     ReplaceIndex,
 )
+from pgschemadiff.domain.delta.procedure import (
+    AlterProcedureOwner,
+    CreateProcedure,
+    DropProcedure,
+    ProcedureDelta,
+    ReplaceProcedure,
+)
 from pgschemadiff.domain.delta.schema import (
     AlterExtension,
     CreateExtension,
@@ -130,6 +137,7 @@ __all__ = [
     "AlterEnumAttrs",
     "AlterExtension",
     "AlterFunctionOwner",
+    "AlterProcedureOwner",
     "AlterSequenceOptions",
     "AlterSequenceOwnedBy",
     "AlterSequenceOwner",
@@ -143,6 +151,7 @@ __all__ = [
     "CreateExtension",
     "CreateFunction",
     "CreateIndex",
+    "CreateProcedure",
     "CreateSchema",
     "CreateSequence",
     "CreateTable",
@@ -160,6 +169,7 @@ __all__ = [
     "DropExtension",
     "DropFunction",
     "DropIndex",
+    "DropProcedure",
     "DropSchema",
     "DropSequence",
     "DropTable",
@@ -167,6 +177,7 @@ __all__ = [
     "ExtensionDelta",
     "FunctionDelta",
     "IndexDelta",
+    "ProcedureDelta",
     "RenameColumn",
     "RenameTable",
     "ReplaceCompositeType",
@@ -174,6 +185,7 @@ __all__ = [
     "ReplaceEnumLabels",
     "ReplaceFunction",
     "ReplaceIndex",
+    "ReplaceProcedure",
     "SchemaDelta",
     "SequenceDelta",
     "SetColumnDefault",

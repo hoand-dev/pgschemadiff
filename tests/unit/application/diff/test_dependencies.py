@@ -34,6 +34,7 @@ from pgschemadiff.domain.delta.domain_type import CreateDomain, DropDomain
 from pgschemadiff.domain.delta.enum import AddEnumValue, CreateEnum, DropEnum
 from pgschemadiff.domain.delta.function import CreateFunction, DropFunction
 from pgschemadiff.domain.delta.index import CreateIndex, DropIndex, ReplaceIndex
+from pgschemadiff.domain.delta.procedure import CreateProcedure, DropProcedure
 from pgschemadiff.domain.delta.schema import (
     AlterExtension,
     CreateExtension,
@@ -48,6 +49,7 @@ from pgschemadiff.domain.extension import Extension
 from pgschemadiff.domain.function import Function, FunctionArgument
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index, IndexKeyColumn
+from pgschemadiff.domain.procedure import Procedure, ProcedureArgument
 from pgschemadiff.domain.schema import Schema
 from pgschemadiff.domain.sequence import Sequence
 from pgschemadiff.domain.table import PartitionOf, Table
@@ -316,6 +318,40 @@ def test_function_signature_types_order_before_create_and_after_drop() -> None:
 
     _assert_precedes(created, create_enum, create_function)
     _assert_precedes(dropped, drop_function, drop_enum)
+
+
+def test_procedure_type_prerequisites_and_table_work_are_ordered() -> None:
+    enum_ref = _ref(ObjectKind.ENUM, "state", namespace="types")
+    enum = EnumType(ref=enum_ref, labels=("ready",))
+    create_enum = CreateEnum(target=enum_ref, enum=enum)
+    drop_enum = DropEnum(target=enum_ref, enum=enum)
+    procedure_ref = ObjectRef(
+        kind=ObjectKind.PROCEDURE,
+        qname=QualifiedName(namespace="public", name="z_routine"),
+        arg_signature=("types.state",),
+    )
+    procedure = Procedure(
+        ref=procedure_ref,
+        arguments=(ProcedureArgument(name="state", data_type="types.state"),),
+        language="sql",
+        security_definer=False,
+        body="SELECT 1",
+        definition="CREATE OR REPLACE PROCEDURE public.z_routine(types.state) ...",
+        type_prerequisites=(enum_ref,),
+    )
+    create_procedure = CreateProcedure(target=procedure_ref, procedure=procedure)
+    drop_procedure = DropProcedure(target=procedure_ref, procedure=procedure)
+    table = _table("a_events")
+    create_table = CreateTable(target=table.ref, table=table)
+    drop_table = DropTable(target=table.ref, table=table)
+
+    created = order_deltas(
+        DeltaSet.from_iterable((create_table, create_procedure, create_enum))
+    ).deltas
+    dropped = order_deltas(DeltaSet.from_iterable((drop_enum, drop_procedure, drop_table))).deltas
+
+    _assert_precedes(created, create_enum, create_procedure, create_table)
+    _assert_precedes(dropped, drop_table, drop_procedure, drop_enum)
 
 
 def test_domain_ordering_covers_column_add_type_change_and_removal() -> None:

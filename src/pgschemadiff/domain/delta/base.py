@@ -310,6 +310,7 @@ from pgschemadiff.domain.delta.domain_type import DomainTypeDelta  # noqa: E402
 from pgschemadiff.domain.delta.enum import EnumDelta  # noqa: E402
 from pgschemadiff.domain.delta.function import FunctionDelta  # noqa: E402
 from pgschemadiff.domain.delta.index import IndexDelta  # noqa: E402
+from pgschemadiff.domain.delta.procedure import ProcedureDelta  # noqa: E402
 from pgschemadiff.domain.delta.schema import ExtensionDelta, SchemaDelta  # noqa: E402
 from pgschemadiff.domain.delta.sequence import SequenceDelta  # noqa: E402
 from pgschemadiff.domain.delta.table import TableDelta  # noqa: E402
@@ -325,6 +326,7 @@ Delta = Annotated[
     | ExtensionDelta
     | EnumDelta
     | FunctionDelta
+    | ProcedureDelta
     | SequenceDelta,
     Field(discriminator="kind"),
 ]

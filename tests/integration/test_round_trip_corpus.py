@@ -600,6 +600,71 @@ def _seed(dsn: str, statements: list[str]) -> None:
             ],
         ),
         pytest.param(
+            "create-overloaded-sql-and-plpgsql-procedures",
+            [_APP],
+            [
+                _APP,
+                "CREATE PROCEDURE app.refresh(value integer) LANGUAGE sql AS $$ SELECT value $$",
+                "CREATE PROCEDURE app.refresh(value text) LANGUAGE plpgsql "
+                "AS $$ BEGIN RAISE NOTICE '%', value; END $$",
+            ],
+        ),
+        pytest.param(
+            # PostgreSQL forbids a function and procedure with the same input
+            # signature; same-name routines with distinct signatures coexist.
+            "create-function-and-procedure-same-name-different-signatures",
+            [_APP],
+            [
+                _APP,
+                "CREATE FUNCTION app.shared(value integer) RETURNS integer LANGUAGE sql "
+                "IMMUTABLE AS $$ SELECT value $$",
+                "CREATE PROCEDURE app.shared(value text) LANGUAGE sql "
+                "AS $$ SELECT length(value) $$",
+            ],
+        ),
+        pytest.param(
+            "replace-procedure-body-and-default",
+            [
+                _APP,
+                "CREATE PROCEDURE app.decorate(value integer, suffix text DEFAULT '!') "
+                "LANGUAGE sql AS $$ SELECT value $$",
+            ],
+            [
+                _APP,
+                "CREATE PROCEDURE app.decorate(value integer, suffix text DEFAULT '?') "
+                "LANGUAGE sql AS $$ SELECT value + length(suffix) $$",
+            ],
+        ),
+        pytest.param(
+            "drop-exact-procedure-overload",
+            [
+                _APP,
+                "CREATE PROCEDURE app.pick(value integer) LANGUAGE sql AS $$ SELECT value $$",
+                "CREATE PROCEDURE app.pick(value text) LANGUAGE sql AS $$ SELECT length(value) $$",
+            ],
+            [
+                _APP,
+                "CREATE PROCEDURE app.pick(value text) LANGUAGE sql AS $$ SELECT length(value) $$",
+            ],
+        ),
+        pytest.param(
+            # With report(IN integer, OUT integer) and report(OUT integer), an unmarked
+            # DROP PROCEDURE app.report(integer) matches both; IN markers avoid that.
+            "drop-procedure-with-out-parameter",
+            [
+                _APP,
+                "CREATE PROCEDURE app.report(IN v integer, OUT r integer) LANGUAGE plpgsql "
+                "AS $$ BEGIN r := v; END $$",
+                "CREATE PROCEDURE app.report(OUT r integer) LANGUAGE plpgsql "
+                "AS $$ BEGIN r := 1; END $$",
+            ],
+            [
+                _APP,
+                "CREATE PROCEDURE app.report(OUT r integer) LANGUAGE plpgsql "
+                "AS $$ BEGIN r := 1; END $$",
+            ],
+        ),
+        pytest.param(
             "unlogged-table-persistence",
             [_APP, "CREATE TABLE app.items (id integer)"],
             [
@@ -672,6 +737,50 @@ async def test_pg18_round_trip_corpus(
     ],
 )
 async def test_unsupported_function_changes_fail_risk_gate_before_emission(
+    current_sql: list[str],
+    desired_sql: list[str],
+    pg_test_dsn: str,
+    pg_test_dsn2: str,
+) -> None:
+    _seed(pg_test_dsn, current_sql)
+    _seed(pg_test_dsn2, desired_sql)
+
+    delta_set = await compare_urls(pg_test_dsn, pg_test_dsn2, schemas=None)
+
+    assert any(classify_risk(delta).level is RiskLevel.BLOCKED for delta in delta_set)
+    with pytest.raises(RiskGateError):
+        generate_migration(delta_set, max_risk=RiskLevel.DESTRUCTIVE)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("current_sql", "desired_sql"),
+    [
+        pytest.param(
+            [_APP],
+            [
+                _APP,
+                "CREATE PROCEDURE app.private_run() LANGUAGE sql SECURITY DEFINER "
+                "AS $$ SELECT 1 $$",
+            ],
+            id="new-security-definer",
+        ),
+        pytest.param(
+            [
+                _APP,
+                "CREATE PROCEDURE app.rename_value(value integer) LANGUAGE sql "
+                "AS $$ SELECT value $$",
+            ],
+            [
+                _APP,
+                "CREATE PROCEDURE app.rename_value(renamed integer) LANGUAGE sql "
+                "AS $$ SELECT renamed $$",
+            ],
+            id="renamed-input-parameter",
+        ),
+    ],
+)
+async def test_unsupported_procedure_changes_fail_risk_gate_before_emission(
     current_sql: list[str],
     desired_sql: list[str],
     pg_test_dsn: str,
