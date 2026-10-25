@@ -151,4 +151,4 @@ P4-UX-01 and P4-TUI-01 DONE. The shell and all seven views are implemented on mo
 | M0 | CI green; layered arch enforced | Phase 0 done except open P0-CI-03 coverage gate; CI fixes committed locally as `5f34d3f`, remote CI not rechecked |
 | M1 | `pgsd inspect` dumps schema JSON | Feature shipped; exit caveat: P1-TEST-02 needs-human and 1000-object benchmark unmeasured |
 | M2 | `pgsd diff` emits typed DeltaSet | ✅ Phase 2 complete; 1,338 unit tests pass; Docker integration not run locally |
-| M3 | round-trip integration test green | ✅ Reached 2026-10-26 (CI `aeef321`): 43 passed, 3 strict xfail for TD-EMIT-01 / TD-INSPECT-01 / TD-INSPECT-02 |
+| M3 | round-trip integration test green | ✅ Reached 2026-10-26 (CI `aeef321`); TD xfails fixed, CI `0c9536b`: 48 passed |

@@ -5,7 +5,7 @@
 | **Phase 0** | Stabilization | M0: CI green on empty project; layered architecture enforced | Done except open P0-CI-03 coverage gate |
 | Phase 1 | Domain & Infrastructure (MVP-A) | M1: `pgsd inspect` dumps a JSON snapshot of a real PG18 database for tables/columns/indexes/FKs/constraints/schemas/extensions | Feature shipped; M1 caveat: P1-TEST-02 needs-human and 1000-object benchmark unmeasured |
 | Phase 2 | Diff engine | M2: `pgsd diff` outputs a typed `DeltaSet` JSON; hypothesis idempotent-diff property passes | Done; M2 reached at unit level; Docker integration not run locally |
-| Phase 3a | Migration generator (MVP-A) | M3: round-trip integration test green for MVP-A scope; `pgsd generate` + `pgsd apply` end-to-end | ✅ M3 reached 2026-10-26: PG18 round-trip corpus 43 passed / 3 strict xfail (TD-EMIT-01, TD-INSPECT-01, TD-INSPECT-02) |
+| Phase 3a | Migration generator (MVP-A) | M3: round-trip integration test green for MVP-A scope; `pgsd generate` + `pgsd apply` end-to-end | ✅ M3 reached 2026-10-26: PG18 round-trip corpus 48 passed, 0 xfail (CI `0c9536b`) |
 | Phase 3b | MVP-B object types | M4: views, matviews, functions, procedures, sequences, enums, triggers, RLS policies, composite/domain types all covered with round-trip tests | _not started_ |
 | Phase 4 | TUI | M5: Textual TUI ships with the screens specified in `docs/ui-design.md` | Shell and seven views implemented on mock data; real-use-case wiring remains |
 | Phase 5 | Production readiness | M6: HTML report, i18n, benchmark suite (10k objects < 10s), PyPI release, safe-migration cookbook | _not started_ |

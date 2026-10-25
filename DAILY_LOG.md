@@ -428,4 +428,6 @@ NEEDS_HUMAN (open): 3 — P1-TEST-02 (PR #3 human-closed; do not recreate); bran
 - CI fixes: Rich ANSI codes on GitHub Actions (CLI conftest forces plain terminal); pytest-asyncio implicit event loop leaked by sync `asyncio.run` tests (root conftest closes it before sync tests).
 - Gate: ruff, format, mypy strict, import-linter 4/4, 1,793 unit tests; CI `9d4e405` green incl. 9 PG18 integration tests.
 - Then (2026-10-25..26): TD-RISK-01 (new-table constraints/indexes SAFE, FK to existing table WARNING), P3-TEST-02 emitter corpus (20 delta types), P3-TEST-01 PG18 corpus (37 scenarios: 43 passed, 3 strict xfail). **M3 reached** on CI `aeef321`.
-- Next: TD-EMIT-01, TD-INSPECT-01, TD-INSPECT-02, then Phase 3b.
+- Then: TD-INSPECT-02 (virtual generated columns), TD-INSPECT-01 (UNLOGGED; ignore rules gained `unlogged`), TD-EMIT-01 (partitioned indexes, attached children skipped). CI `0c9536b`: 48 integration passed, 0 xfail.
+- Ops: Windows Temp cleanup deleted zero-byte `py.typed` files from the scratch venv twice; reinstall with `uv sync --extra dev --reinstall`.
+- Next: Phase 3b MVP-B spec.
