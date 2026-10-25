@@ -9,7 +9,7 @@ SELECT
     pg_catalog.pg_get_userbyid(n.nspowner) AS owner,
     pg_catalog.obj_description(n.oid, 'pg_namespace') AS comment
 FROM pg_catalog.pg_namespace AS n
-WHERE n.nspname NOT LIKE 'pg_%'
+WHERE left(n.nspname, 3) != 'pg_'
   AND n.nspname != 'information_schema'
   AND n.nspname != 'pgschemadiff'
 ORDER BY n.nspname

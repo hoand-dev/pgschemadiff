@@ -73,10 +73,17 @@ def test_catalog_sql_file_ends_with_newline(filename: str) -> None:
 
 @pytest.mark.unit
 @pytest.mark.parametrize("filename", _CATALOG_FILES)
+def test_catalog_sql_file_has_no_like_prefix_filters(filename: str) -> None:
+    """``LIKE 'pg_%'`` treats ``_`` as a wildcard and also skips schemas like ``pga``."""
+    assert "LIKE 'pg_" not in _load_sql(filename), f"{filename} must use left(..., 3) != 'pg_'"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("filename", _CATALOG_FILES)
 def test_catalog_sql_file_has_no_bind_placeholders(filename: str) -> None:
     """Catalog queries run without parameters; schema filtering happens in Python.
 
-    A ``%s`` placeholder makes psycopg also parse the ``%`` in ``LIKE 'pg_%'``
+    A ``%s`` placeholder makes psycopg also parse literal ``%`` characters
     patterns, which breaks the query at run time.
     """
     assert "%s" not in _load_sql(filename), f"{filename} must not use bind placeholders"
@@ -104,7 +111,7 @@ def test_tables_sql_projects_unlogged_persistence() -> None:
 def test_tables_sql_excludes_system_schemas() -> None:
     sql = _load_sql("tables.sql")
     # Must filter out pg_* schemas and information_schema
-    assert "pg_%" in sql
+    assert "3) != 'pg_'" in sql
     assert "information_schema" in sql
 
 
@@ -335,7 +342,7 @@ def test_schemas_sql_selects_from_pg_namespace() -> None:
 @pytest.mark.unit
 def test_schemas_sql_excludes_pg_prefix() -> None:
     sql = _load_sql("schemas.sql")
-    assert "pg_%" in sql
+    assert "3) != 'pg_'" in sql
 
 
 @pytest.mark.unit
@@ -417,7 +424,7 @@ def test_composite_types_sql_selects_only_standalone_composite_relations() -> No
 def test_composite_types_sql_excludes_system_reserved_and_extension_types() -> None:
     sql = _load_sql("composite_types.sql")
 
-    assert "n.nspname NOT LIKE 'pg_%'" in sql
+    assert "left(n.nspname, 3) != 'pg_'" in sql
     assert "n.nspname != 'information_schema'" in sql
     assert "n.nspname != 'pgschemadiff'" in sql
     assert "pg_depend" in sql
@@ -452,7 +459,7 @@ def test_domain_types_sql_excludes_system_reserved_and_extension_domains() -> No
     sql = _load_sql("domain_types.sql")
 
     assert "typtype = 'd'" in sql
-    assert "NOT LIKE 'pg_%'" in sql
+    assert "3) != 'pg_'" in sql
     assert "!= 'information_schema'" in sql
     assert "!= 'pgschemadiff'" in sql
     assert "pg_depend" in sql
@@ -476,7 +483,7 @@ def test_type_prerequisites_sql_follows_enum_array_element_types() -> None:
 @pytest.mark.unit
 def test_type_prerequisites_sql_excludes_system_and_extension_types() -> None:
     sql = _load_sql("type_prerequisites.sql")
-    assert "NOT LIKE 'pg_%'" in sql
+    assert "3) != 'pg_'" in sql
     assert "!= 'information_schema'" in sql
     assert "!= 'pgschemadiff'" in sql
     assert "pg_depend" in sql

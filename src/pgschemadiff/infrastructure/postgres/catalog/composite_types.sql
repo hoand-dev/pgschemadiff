@@ -43,7 +43,7 @@ LEFT JOIN pg_catalog.pg_collation AS col
 LEFT JOIN pg_catalog.pg_namespace AS collation_namespace
     ON collation_namespace.oid = col.collnamespace
 WHERE t.typtype = 'c'
-  AND n.nspname NOT LIKE 'pg_%'
+  AND left(n.nspname, 3) != 'pg_'
   AND n.nspname != 'information_schema'
   AND n.nspname != 'pgschemadiff'
   AND NOT EXISTS (

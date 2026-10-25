@@ -21,7 +21,7 @@ JOIN pg_catalog.pg_namespace AS n
 LEFT JOIN pg_catalog.pg_enum AS e
     ON e.enumtypid = t.oid
 WHERE t.typtype = 'e'
-  AND n.nspname NOT LIKE 'pg_%'
+  AND left(n.nspname, 3) != 'pg_'
   AND n.nspname != 'information_schema'
   AND n.nspname != 'pgschemadiff'
   AND NOT EXISTS (

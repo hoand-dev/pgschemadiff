@@ -53,7 +53,7 @@ JOIN pg_catalog.pg_am am
 LEFT JOIN pg_catalog.pg_constraint con
     ON con.conindid = i.indexrelid
    AND con.contype IN ('p', 'u', 'x')
-WHERE n.nspname NOT LIKE 'pg_%'
+WHERE left(n.nspname, 3) != 'pg_'
   AND n.nspname != 'information_schema'
   AND n.nspname != 'pgschemadiff'
 ORDER BY n.nspname, c.relname, ic.relname

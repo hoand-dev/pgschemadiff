@@ -27,7 +27,7 @@ WITH dependent_columns AS (
     WHERE table_class.relkind IN ('r', 'p')
       AND a.attnum > 0
       AND NOT a.attisdropped
-      AND table_namespace.nspname NOT LIKE 'pg_%'
+      AND left(table_namespace.nspname, 3) != 'pg_'
       AND table_namespace.nspname != 'information_schema'
       AND table_namespace.nspname != 'pgschemadiff'
       AND NOT EXISTS (
@@ -59,7 +59,7 @@ WITH dependent_columns AS (
     JOIN pg_catalog.pg_type AS attribute_type
         ON attribute_type.oid = a.atttypid
     WHERE dependent_type.typtype = 'c'
-      AND dependent_namespace.nspname NOT LIKE 'pg_%'
+      AND left(dependent_namespace.nspname, 3) != 'pg_'
       AND dependent_namespace.nspname != 'information_schema'
       AND dependent_namespace.nspname != 'pgschemadiff'
       AND NOT EXISTS (
@@ -86,7 +86,7 @@ WITH dependent_columns AS (
     JOIN pg_catalog.pg_type AS base_type
         ON base_type.oid = domain_type.typbasetype
     WHERE domain_type.typtype = 'd'
-      AND domain_namespace.nspname NOT LIKE 'pg_%'
+      AND left(domain_namespace.nspname, 3) != 'pg_'
       AND domain_namespace.nspname != 'information_schema'
       AND domain_namespace.nspname != 'pgschemadiff'
       AND NOT EXISTS (
@@ -120,7 +120,7 @@ WHERE (
         OR (prerequisite_type.typtype = 'c' AND prerequisite_relation.relkind = 'c')
         OR prerequisite_type.typtype = 'd'
     )
-  AND prerequisite_namespace.nspname NOT LIKE 'pg_%'
+  AND left(prerequisite_namespace.nspname, 3) != 'pg_'
   AND prerequisite_namespace.nspname != 'information_schema'
   AND prerequisite_namespace.nspname != 'pgschemadiff'
   AND NOT EXISTS (

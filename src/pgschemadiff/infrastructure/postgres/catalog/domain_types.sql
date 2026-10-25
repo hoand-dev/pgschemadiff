@@ -26,7 +26,7 @@ WITH RECURSIVE type_walk(type_oid, inside_container, type_path) AS (
     WHERE owning_relation.relkind IN ('r', 'p')
       AND a.attnum > 0
       AND NOT a.attisdropped
-      AND owning_namespace.nspname NOT LIKE 'pg_%'
+      AND left(owning_namespace.nspname, 3) != 'pg_'
       AND owning_namespace.nspname != 'information_schema'
       AND owning_namespace.nspname != 'pgschemadiff'
       AND NOT EXISTS (
@@ -115,7 +115,7 @@ LEFT JOIN pg_catalog.pg_constraint AS domain_check
    AND domain_check.contype = 'c'
    AND domain_check.conislocal
 WHERE t.typtype = 'd'
-  AND n.nspname NOT LIKE 'pg_%'
+  AND left(n.nspname, 3) != 'pg_'
   AND n.nspname != 'information_schema'
   AND n.nspname != 'pgschemadiff'
   AND NOT EXISTS (

@@ -41,7 +41,7 @@ LEFT JOIN pg_catalog.pg_class pc
 LEFT JOIN pg_catalog.pg_namespace pn
     ON pn.oid = pc.relnamespace
 WHERE c.relkind IN ('r', 'p')
-  AND n.nspname NOT LIKE 'pg_%'
+  AND left(n.nspname, 3) != 'pg_'
   AND n.nspname != 'information_schema'
   AND n.nspname != 'pgschemadiff'
 ORDER BY n.nspname, c.relname

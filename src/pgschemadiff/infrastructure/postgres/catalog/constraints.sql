@@ -34,7 +34,7 @@ LEFT JOIN pg_catalog.pg_class rc
 LEFT JOIN pg_catalog.pg_namespace rn
     ON rn.oid = rc.relnamespace
 WHERE con.contype IN ('p', 'u', 'c', 'f', 'x')
-  AND n.nspname NOT LIKE 'pg_%'
+  AND left(n.nspname, 3) != 'pg_'
   AND n.nspname != 'information_schema'
   AND n.nspname != 'pgschemadiff'
 ORDER BY n.nspname, c.relname, con.conname
