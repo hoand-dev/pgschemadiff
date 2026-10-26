@@ -42,6 +42,7 @@ from pgschemadiff.application.diff.comparators.table import (
     ConstraintComparing,
     TableComparator,
 )
+from pgschemadiff.application.diff.comparators.trigger import TriggerComparator
 from pgschemadiff.application.diff.comparators.view import ViewComparator
 
 __all__ = [
@@ -60,5 +61,6 @@ __all__ = [
     "SchemaComparator",
     "SequenceComparator",
     "TableComparator",
+    "TriggerComparator",
     "ViewComparator",
 ]

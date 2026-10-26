@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import importlib.resources as importlib_resources
 import re
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import psycopg
 import psycopg.rows
@@ -51,6 +51,7 @@ from pgschemadiff.domain.table import (
     PartitionStrategy,
     Table,
 )
+from pgschemadiff.domain.trigger import Trigger
 from pgschemadiff.domain.view import View
 from pgschemadiff.infrastructure.postgres.type_normalizer import normalize_type
 from pgschemadiff.shared.errors import InspectionError
@@ -95,6 +96,7 @@ _SQL_SEQUENCE_PREREQUISITES: str = _load_sql("sequence_prerequisites.sql")
 _SQL_ROUTINES: str = _load_sql("routines.sql")
 _SQL_VIEWS: str = _load_sql("views.sql")
 _SQL_VIEW_PREREQUISITES: str = _load_sql("view_prerequisites.sql")
+_SQL_TRIGGERS: str = _load_sql("triggers.sql")
 
 # ---------------------------------------------------------------------------
 # Regex helpers for parsing pg_get_constraintdef output
@@ -651,6 +653,9 @@ class PgCatalogInspector:
 
                     await cur.execute(_SQL_VIEW_PREREQUISITES)
                     view_prerequisites_rows = await cur.fetchall()
+
+                    await cur.execute(_SQL_TRIGGERS)
+                    triggers_rows = await cur.fetchall()
             finally:
                 await conn.execute("ROLLBACK")
 
@@ -670,6 +675,7 @@ class PgCatalogInspector:
             routines_rows=routines_rows,
             views_rows=views_rows,
             view_prerequisites_rows=view_prerequisites_rows,
+            triggers_rows=triggers_rows,
         )
 
     def _assemble(
@@ -690,6 +696,7 @@ class PgCatalogInspector:
         routines_rows: list[Any] | None = None,
         views_rows: list[Any] | None = None,
         view_prerequisites_rows: list[Any] | None = None,
+        triggers_rows: list[Any] | None = None,
     ) -> Database:
         """Assemble domain objects from raw catalog rows."""
         extensions = self._build_extensions(extensions_rows)
@@ -735,6 +742,7 @@ class PgCatalogInspector:
             allowed,
             view_prerequisites_by_view,
         )
+        triggers_by_table = self._group_triggers(triggers_rows or [], allowed)
 
         tables_by_schema, idxs_by_schema = self._build_tables(
             tables_rows,
@@ -743,6 +751,7 @@ class PgCatalogInspector:
             idxs_by_table,
             cons_by_table,
             prerequisites_by_table,
+            triggers_by_table,
         )
 
         return Database(
@@ -893,6 +902,80 @@ class PgCatalogInspector:
             result.setdefault(row.schema_name, []).append(enum)
         for enums in result.values():
             enums.sort(key=lambda enum: enum.ref.qname.name)
+        return result
+
+    @staticmethod
+    def _group_triggers(
+        rows: list[Any],
+        allowed: set[str] | None,
+    ) -> dict[tuple[str, str], list[Trigger]]:
+        result: dict[tuple[str, str], list[Trigger]] = {}
+        for row in rows:
+            schema_name = row.schema_name
+            table_name = row.table_name
+            if allowed is not None and schema_name not in allowed:
+                continue
+            function_input_types = tuple(row.function_input_types or ())
+            raw_enabled = row.enabled.decode() if isinstance(row.enabled, bytes) else row.enabled
+            if raw_enabled not in {"O", "D", "R", "A"}:
+                raise InspectionError(f"Unsupported trigger enabled state {raw_enabled!r}")
+            enabled = cast("Literal['O', 'D', 'R', 'A']", raw_enabled)
+            referenced_table_schema = row.referenced_table_schema
+            referenced_table_name = row.referenced_table_name
+            if (referenced_table_schema is None) != (referenced_table_name is None):
+                raise InspectionError("Trigger has an incomplete referenced table identity")
+            referenced_table_ref = (
+                None
+                if referenced_table_schema is None
+                else ObjectRef(
+                    kind=ObjectKind.TABLE,
+                    qname=QualifiedName(
+                        namespace=referenced_table_schema,
+                        name=referenced_table_name,
+                    ),
+                )
+            )
+            table_ref = ObjectRef(
+                kind=ObjectKind.TABLE,
+                qname=QualifiedName(namespace=schema_name, name=table_name),
+            )
+            trigger = Trigger(
+                ref=ObjectRef(
+                    kind=ObjectKind.TRIGGER,
+                    qname=QualifiedName(namespace=schema_name, name=row.trigger_name),
+                    parent=table_ref,
+                ),
+                table_ref=table_ref,
+                function_ref=ObjectRef(
+                    kind=ObjectKind.FUNCTION,
+                    qname=QualifiedName(
+                        namespace=row.function_schema,
+                        name=row.function_name,
+                    ),
+                    arg_signature=function_input_types,
+                ),
+                definition=row.definition,
+                timing=row.timing,
+                events=tuple(row.events or ()),
+                row_level=row.row_level,
+                columns=tuple(row.columns or ()),
+                when_expr=row.when_expr,
+                is_constraint=row.is_constraint,
+                deferrable=row.deferrable,
+                initially_deferred=row.initially_deferred,
+                enabled=enabled,
+                referenced_table_ref=referenced_table_ref,
+            )
+            table_key = (schema_name, table_name)
+            triggers = result.setdefault(table_key, [])
+            if any(existing.ref == trigger.ref for existing in triggers):
+                raise InspectionError(
+                    f"Duplicate trigger {schema_name}.{table_name}.{row.trigger_name} "
+                    "in catalog rows"
+                )
+            triggers.append(trigger)
+        for triggers in result.values():
+            triggers.sort(key=lambda trigger: trigger.ref.qname.name)
         return result
 
     @staticmethod
@@ -1541,6 +1624,7 @@ class PgCatalogInspector:
         idxs_by_table: dict[tuple[str, str], list[Index]],
         cons_by_table: dict[tuple[str, str], list[Any]],
         type_prerequisites_by_table: dict[tuple[str, str], list[ObjectRef]] | None = None,
+        triggers_by_table: dict[tuple[str, str], list[Trigger]] | None = None,
     ) -> tuple[dict[str, list[Table]], dict[str, list[Index]]]:
         tables_by_schema: dict[str, list[Table]] = {n: [] for n in schema_names}
         idxs_by_schema: dict[str, list[Index]] = {n: [] for n in schema_names}
@@ -1564,6 +1648,7 @@ class PgCatalogInspector:
                     ),
                     columns=tuple(cols),
                     constraints=tuple(_safe_map_constraints(cons_by_table.get(key, []), col_names)),
+                    triggers=tuple((triggers_by_table or {}).get(key, [])),
                     type_prerequisites=tuple((type_prerequisites_by_table or {}).get(key, [])),
                     unlogged=row.unlogged,
                     owner=row.owner,

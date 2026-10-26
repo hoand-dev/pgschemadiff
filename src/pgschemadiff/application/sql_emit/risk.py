@@ -27,6 +27,7 @@ from pgschemadiff.domain.delta import (
     AlterSequenceOwnedBy,
     AlterSequenceOwner,
     AlterTableAttrs,
+    AlterTriggerEnabled,
     AlterViewOwner,
     CreateCompositeType,
     CreateDomain,
@@ -39,6 +40,7 @@ from pgschemadiff.domain.delta import (
     CreateSchema,
     CreateSequence,
     CreateTable,
+    CreateTrigger,
     CreateView,
     DeltaBase,
     DropColumn,
@@ -55,6 +57,7 @@ from pgschemadiff.domain.delta import (
     DropSchema,
     DropSequence,
     DropTable,
+    DropTrigger,
     DropView,
     RenameColumn,
     RenameTable,
@@ -65,6 +68,7 @@ from pgschemadiff.domain.delta import (
     ReplaceIndex,
     ReplaceMaterializedView,
     ReplaceProcedure,
+    ReplaceTrigger,
     ReplaceView,
     SetColumnDefault,
     SetColumnNullability,
@@ -169,6 +173,10 @@ _SUPPORTED_DELTA_TYPES: tuple[type[DeltaBase], ...] = (
     DropMaterializedView,
     ReplaceMaterializedView,
     AlterMaterializedViewOwner,
+    CreateTrigger,
+    DropTrigger,
+    ReplaceTrigger,
+    AlterTriggerEnabled,
 )
 
 
@@ -335,6 +343,26 @@ def classify_risk(  # noqa: PLR0912, PLR0915
         level, reason = (
             RiskLevel.DANGEROUS,
             "Changes materialized-view ownership, which can change effective access.",
+        )
+    elif isinstance(delta, CreateTrigger):
+        level, reason = (
+            RiskLevel.WARNING,
+            "Creates a trigger that changes behavior on future table writes.",
+        )
+    elif isinstance(delta, ReplaceTrigger):
+        level, reason = (
+            RiskLevel.WARNING,
+            "Replaces a trigger definition and changes behavior on future table writes.",
+        )
+    elif isinstance(delta, AlterTriggerEnabled):
+        level, reason = (
+            RiskLevel.DANGEROUS,
+            "Changes trigger firing state and may bypass or alter write-time behavior.",
+        )
+    elif isinstance(delta, DropTrigger):
+        level, reason = (
+            RiskLevel.DESTRUCTIVE,
+            "Removes trigger behavior from future table writes.",
         )
     elif isinstance(delta, AddColumn):
         conditions = []

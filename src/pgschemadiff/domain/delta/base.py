@@ -315,6 +315,7 @@ from pgschemadiff.domain.delta.procedure import ProcedureDelta  # noqa: E402
 from pgschemadiff.domain.delta.schema import ExtensionDelta, SchemaDelta  # noqa: E402
 from pgschemadiff.domain.delta.sequence import SequenceDelta  # noqa: E402
 from pgschemadiff.domain.delta.table import TableDelta  # noqa: E402
+from pgschemadiff.domain.delta.trigger import TriggerDelta  # noqa: E402
 from pgschemadiff.domain.delta.view import ViewDelta  # noqa: E402
 
 Delta = Annotated[
@@ -331,7 +332,8 @@ Delta = Annotated[
     | ProcedureDelta
     | SequenceDelta
     | ViewDelta
-    | MaterializedViewDelta,
+    | MaterializedViewDelta
+    | TriggerDelta,
     Field(discriminator="kind"),
 ]
 """Global discriminated union over ALL concrete delta types.

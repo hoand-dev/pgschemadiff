@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from itertools import pairwise
 from typing import TYPE_CHECKING
@@ -63,6 +64,7 @@ from pgschemadiff.domain.delta.sequence import (
     DropSequence,
 )
 from pgschemadiff.domain.delta.table import AlterTableAttrs, CreateTable, DropTable, RenameTable
+from pgschemadiff.domain.delta.trigger import CreateTrigger, DropTrigger, ReplaceTrigger
 from pgschemadiff.domain.delta.view import CreateView, DropView, ReplaceView
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 
@@ -71,6 +73,7 @@ if TYPE_CHECKING:
 
     from pgschemadiff.domain.index import Index
     from pgschemadiff.domain.materialized_view import MaterializedView
+    from pgschemadiff.domain.trigger import Trigger
     from pgschemadiff.domain.view import View
 
 
@@ -85,6 +88,7 @@ def order_deltas(delta_set: DeltaSet) -> DeltaSet:
 
     creates, drops, schema_creates = _collect_resources(nodes)
     _add_create_dependencies(nodes, creates, schema_creates, add)
+    _add_trigger_dependencies(nodes, creates, drops, add)
     _add_enum_dependencies(nodes, add)
     _add_routine_table_dependencies(nodes, add)
     _add_drop_dependencies(nodes, drops, add)
@@ -858,6 +862,51 @@ def _index_refs(index: Index) -> tuple[ObjectRef, ...]:
     return (index.table_ref, *(_column_ref(index.table_ref, name) for name in columns))
 
 
+def _add_trigger_dependencies(
+    nodes: tuple[DeltaBase, ...],
+    creates: dict[ObjectRef, list[DeltaBase]],
+    drops: dict[ObjectRef, list[DeltaBase]],
+    add: Callable[[DeltaBase, DeltaBase], None],
+) -> None:
+    for delta in nodes:
+        if isinstance(delta, CreateTrigger):
+            _add_create_prerequisites(delta, _trigger_refs(delta.trigger), creates, add)
+        elif isinstance(delta, ReplaceTrigger):
+            _add_create_prerequisites(delta, _trigger_refs(delta.new_trigger), creates, add)
+
+        if isinstance(delta, DropTrigger):
+            _add_drop_prerequisites(delta, _trigger_refs(delta.trigger), drops, add)
+        elif isinstance(delta, ReplaceTrigger):
+            _add_trigger_drop_dependencies(delta, delta.old_trigger, drops, add)
+
+
+def _add_trigger_drop_dependencies(
+    delta: ReplaceTrigger,
+    trigger: Trigger,
+    drops: dict[ObjectRef, list[DeltaBase]],
+    add: Callable[[DeltaBase, DeltaBase], None],
+) -> None:
+    refs = (
+        ref
+        for ref in _trigger_refs(trigger)
+        if ref is not None
+        and (
+            ref.kind is not ObjectKind.FUNCTION
+            or not any(isinstance(drop, ReplaceFunction) for drop in drops.get(ref, ()))
+        )
+    )
+    _add_drop_prerequisites(delta, refs, drops, add)
+
+
+def _trigger_refs(trigger: Trigger) -> tuple[ObjectRef | None, ...]:
+    return (
+        trigger.table_ref,
+        trigger.function_ref,
+        trigger.referenced_table_ref,
+        *(_column_ref(trigger.table_ref, name) for name in trigger.columns),
+    )
+
+
 def _add_create_prerequisites(
     dependent: DeltaBase,
     refs: Iterable[ObjectRef | None],
@@ -891,8 +940,16 @@ def _add_rename_dependencies(
 
     for rename in table_renames:
         for delta in nodes:
-            if delta != rename and rename.new_name in _referenced_tables(delta):
+            if delta == rename:
+                continue
+            referenced_tables = _referenced_tables(delta)
+            if rename.new_name in referenced_tables:
                 add(rename, delta)
+            if (
+                isinstance(delta, (DropTrigger, ReplaceTrigger))
+                and rename.target.qname in referenced_tables
+            ):
+                add(delta, rename)
 
     for column_rename in column_renames:
         parent = column_rename.target.parent
@@ -952,6 +1009,14 @@ def _uses_new_column(
     ):
         return True
 
+    triggers: tuple[Trigger, ...] = ()
+    if isinstance(delta, CreateTrigger):
+        triggers = (delta.trigger,)
+    elif isinstance(delta, ReplaceTrigger):
+        triggers = (delta.new_trigger,)
+    if any(_trigger_uses_new_column(trigger, parent_names, name) for trigger in triggers):
+        return True
+
     indexes: tuple[Index, ...] = ()
     if isinstance(delta, CreateIndex):
         indexes = (delta.index,)
@@ -991,3 +1056,25 @@ def _uses_new_column(
         and name in constraint.ref_columns
         for constraint in constraints
     )
+
+
+def _trigger_uses_new_column(
+    trigger: Trigger,
+    parent_names: set[QualifiedName],
+    name: str,
+) -> bool:
+    if trigger.table_ref.qname not in parent_names:
+        return False
+    if name in trigger.columns:
+        return True
+    if trigger.when_expr is None:
+        return False
+
+    quoted_name = '"' + name.replace('"', '""') + '"'
+    identifiers = [re.escape(quoted_name)]
+    if re.fullmatch(r"[a-z_][a-z0-9_$]*", name):
+        identifiers.append(re.escape(name))
+    column_ref = "|".join(identifiers)
+    pattern = rf"(?i:\b(?:NEW|OLD))\s*\.\s*(?:{column_ref})(?![\w$])"
+    # ponytail: string literals can look like column refs; add SQL parsing if false edges matter.
+    return re.search(pattern, trigger.when_expr) is not None

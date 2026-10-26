@@ -17,6 +17,7 @@ from pgschemadiff.application.sql_emit import (
     schema_emitter,
     sequence_emitter,
     table_emitter,
+    trigger_emitter,
     view_emitter,
 )
 from pgschemadiff.shared.errors import MigrationError
@@ -31,6 +32,7 @@ def default_handlers() -> dict[type[DeltaBase], SqlHandler]:
     handlers: dict[type[DeltaBase], SqlHandler] = {}
     for emitter_handlers in (
         table_emitter.handlers(),
+        trigger_emitter.handlers(),
         view_emitter.handlers(),
         materialized_view_emitter.handlers(),
         column_emitter.handlers(),

@@ -54,6 +54,7 @@ _CATALOG_FILES = [
     "routines.sql",
     "views.sql",
     "view_prerequisites.sql",
+    "triggers.sql",
 ]
 
 
@@ -687,6 +688,37 @@ def test_view_prerequisites_sql_maps_supported_dependency_kinds_and_excludes_ext
     assert "LIKE 'pg_%'" not in sql
     assert "%s" not in sql
     assert "prerequisite_relation.relkind = 'S'" in sql
+
+
+@pytest.mark.unit
+def test_triggers_sql_captures_supported_trigger_semantics_and_dependency_refs() -> None:
+    sql = _load_sql("triggers.sql")
+
+    for expected in (
+        "pg_trigger",
+        "pg_get_triggerdef",
+        "pg_get_expr",
+        "tgisinternal = false",
+        "tgparentid = 0",
+        "relkind IN ('r', 'p')",
+        "tgconstraint <> 0",
+        "tgdeferrable",
+        "tginitdeferred",
+        "tgenabled",
+        "tgconstrrelid",
+        "referenced_table_namespace.nspname AS referenced_table_schema",
+        "referenced_table_catalog.relname AS referenced_table_name",
+        "tgattr",
+        "pg_depend",
+        "refobjsubid",
+        "left(trigger_namespace.nspname, 3) != 'pg_'",
+        "deptype = 'e'",
+    ):
+        assert expected in sql
+
+    assert "LIKE 'pg_%'" not in sql
+    assert "%s" not in sql
+    assert "AS trigger " not in sql
 
 
 # ---------------------------------------------------------------------------

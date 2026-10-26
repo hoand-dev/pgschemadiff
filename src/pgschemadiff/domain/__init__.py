@@ -43,6 +43,7 @@ from pgschemadiff.domain.table import (
     PartitionStrategy,
     Table,
 )
+from pgschemadiff.domain.trigger import Trigger
 from pgschemadiff.domain.view import View
 
 __all__ = [
@@ -86,6 +87,7 @@ __all__ = [
     "Sequence",
     "SortOrder",
     "Table",
+    "Trigger",
     "UniqueConstraint",
     "View",
 ]

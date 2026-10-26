@@ -18,6 +18,7 @@ from pgschemadiff.application.diff.comparators import (
     SchemaComparator,
     SequenceComparator,
     TableComparator,
+    TriggerComparator,
     ViewComparator,
 )
 from pgschemadiff.application.diff.dependencies import order_deltas
@@ -59,6 +60,7 @@ async def compare_schemas(
         ),
         FunctionComparator(target_functions=target.all_functions()),
         ProcedureComparator(),
+        TriggerComparator(),
         ViewComparator(),
         MaterializedViewComparator(),
         TableComparator(

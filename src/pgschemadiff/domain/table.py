@@ -33,6 +33,7 @@ from pgschemadiff.domain.constraint import (
     UniqueConstraint,
 )
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
+from pgschemadiff.domain.trigger import Trigger
 
 # ---------------------------------------------------------------------------
 # Partition support models
@@ -121,6 +122,9 @@ class Table(BaseModel):
     constraints: tuple[Constraint, ...] = Field(default=())
     """Table-level constraints (PK, unique, check, FK, exclusion)."""
 
+    triggers: tuple[Trigger, ...] = Field(default=())
+    """Non-internal table triggers, ordered by trigger name."""
+
     type_prerequisites: tuple[ObjectRef, ...] = Field(default=())
     """User-defined types required by this table's columns."""
 
@@ -167,6 +171,25 @@ class Table(BaseModel):
     def _check_type_prerequisite_uniqueness(self) -> Self:
         if len(set(self.type_prerequisites)) != len(self.type_prerequisites):
             raise ValueError(f"Duplicate type prerequisite in table {self.ref.qname.fqn}")
+        return self
+
+    @model_validator(mode="after")
+    def _check_trigger_identity_and_columns(self) -> Self:
+        seen: set[str] = set()
+        column_names = {column.name for column in self.columns}
+        for trigger in self.triggers:
+            name = trigger.ref.qname.name
+            if trigger.table_ref != self.ref:
+                raise ValueError(f"Trigger {name!r} does not belong to table {self.ref.qname.fqn}")
+            if name in seen:
+                raise ValueError(f"Duplicate trigger {name!r} in table {self.ref.qname.fqn}")
+            seen.add(name)
+            missing_columns = set(trigger.columns) - column_names
+            if missing_columns:
+                raise ValueError(
+                    f"Trigger {name!r} references missing column(s): "
+                    f"{', '.join(sorted(missing_columns))}"
+                )
         return self
 
     @model_validator(mode="after")

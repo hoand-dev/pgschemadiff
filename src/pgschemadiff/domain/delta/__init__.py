@@ -127,6 +127,13 @@ from pgschemadiff.domain.delta.table import (
     RenameTable,
     TableDelta,
 )
+from pgschemadiff.domain.delta.trigger import (
+    AlterTriggerEnabled,
+    CreateTrigger,
+    DropTrigger,
+    ReplaceTrigger,
+    TriggerDelta,
+)
 from pgschemadiff.domain.delta.view import (
     AlterViewOwner,
     CreateView,
@@ -157,6 +164,7 @@ __all__ = [
     "AlterSequenceOwnedBy",
     "AlterSequenceOwner",
     "AlterTableAttrs",
+    "AlterTriggerEnabled",
     "AlterViewOwner",
     "ColumnDelta",
     "CompositeTypeDelta",
@@ -172,6 +180,7 @@ __all__ = [
     "CreateSchema",
     "CreateSequence",
     "CreateTable",
+    "CreateTrigger",
     "CreateView",
     "Delta",
     "DeltaBase",
@@ -192,6 +201,7 @@ __all__ = [
     "DropSchema",
     "DropSequence",
     "DropTable",
+    "DropTrigger",
     "DropView",
     "EnumDelta",
     "ExtensionDelta",
@@ -208,12 +218,14 @@ __all__ = [
     "ReplaceIndex",
     "ReplaceMaterializedView",
     "ReplaceProcedure",
+    "ReplaceTrigger",
     "ReplaceView",
     "SchemaDelta",
     "SequenceDelta",
     "SetColumnDefault",
     "SetColumnNullability",
     "TableDelta",
+    "TriggerDelta",
     "ValidateDomainCheck",
     "ViewDelta",
 ]

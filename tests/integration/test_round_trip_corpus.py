@@ -832,6 +832,186 @@ def _seed(dsn: str, statements: list[str]) -> None:
             ],
         ),
         pytest.param(
+            "create-before-after-row-and-statement-triggers",
+            [_APP],
+            [
+                _APP,
+                _ITEMS,
+                "CREATE FUNCTION app.audit_row() RETURNS trigger LANGUAGE plpgsql "
+                "AS $$ BEGIN RETURN NEW; END $$",
+                "CREATE FUNCTION app.audit_statement() RETURNS trigger LANGUAGE plpgsql "
+                "AS $$ BEGIN RETURN NULL; END $$",
+                "CREATE TRIGGER items_before_insert BEFORE INSERT ON app.items "
+                "FOR EACH ROW EXECUTE FUNCTION app.audit_row()",
+                "CREATE TRIGGER items_after_update AFTER UPDATE ON app.items "
+                "FOR EACH ROW EXECUTE FUNCTION app.audit_row()",
+                "CREATE TRIGGER items_before_delete_statement BEFORE DELETE ON app.items "
+                "FOR EACH STATEMENT EXECUTE FUNCTION app.audit_statement()",
+                "CREATE TRIGGER items_after_truncate_statement AFTER TRUNCATE ON app.items "
+                "FOR EACH STATEMENT EXECUTE FUNCTION app.audit_statement()",
+            ],
+        ),
+        pytest.param(
+            "create-update-of-when-trigger",
+            [_APP],
+            [
+                _APP,
+                _ITEMS,
+                "CREATE FUNCTION app.audit_row() RETURNS trigger LANGUAGE plpgsql "
+                "AS $$ BEGIN RETURN NEW; END $$",
+                "CREATE TRIGGER items_update_changed BEFORE UPDATE OF value, name ON app.items "
+                "FOR EACH ROW WHEN (NEW.value IS DISTINCT FROM OLD.value) "
+                "EXECUTE FUNCTION app.audit_row()",
+            ],
+        ),
+        pytest.param(
+            "replace-regular-trigger-definition",
+            [
+                _APP,
+                _ITEMS,
+                "CREATE FUNCTION app.audit_row() RETURNS trigger LANGUAGE plpgsql "
+                "AS $$ BEGIN RETURN NEW; END $$",
+                "CREATE TRIGGER items_audit BEFORE INSERT ON app.items "
+                "FOR EACH ROW EXECUTE FUNCTION app.audit_row()",
+            ],
+            [
+                _APP,
+                _ITEMS,
+                "CREATE FUNCTION app.audit_row() RETURNS trigger LANGUAGE plpgsql "
+                "AS $$ BEGIN RETURN NEW; END $$",
+                "CREATE TRIGGER items_audit AFTER INSERT ON app.items "
+                "FOR EACH ROW EXECUTE FUNCTION app.audit_row()",
+            ],
+        ),
+        pytest.param(
+            "replace-deferrable-constraint-trigger",
+            [
+                _APP,
+                _ITEMS,
+                "CREATE FUNCTION app.audit_row() RETURNS trigger LANGUAGE plpgsql "
+                "AS $$ BEGIN RETURN NEW; END $$",
+                "CREATE CONSTRAINT TRIGGER items_constraint_audit AFTER INSERT ON app.items "
+                "DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW "
+                "EXECUTE FUNCTION app.audit_row()",
+            ],
+            [
+                _APP,
+                _ITEMS,
+                "CREATE FUNCTION app.audit_row() RETURNS trigger LANGUAGE plpgsql "
+                "AS $$ BEGIN RETURN NEW; END $$",
+                "CREATE CONSTRAINT TRIGGER items_constraint_audit AFTER INSERT ON app.items "
+                "DEFERRABLE INITIALLY DEFERRED FOR EACH ROW "
+                "EXECUTE FUNCTION app.audit_row()",
+            ],
+        ),
+        pytest.param(
+            "create-constraint-trigger-from-referenced-table",
+            [_APP],
+            [
+                _APP,
+                "CREATE TABLE app.parents (id integer PRIMARY KEY)",
+                "CREATE TABLE app.children (id integer, parent_id integer "
+                "REFERENCES app.parents (id))",
+                "CREATE FUNCTION app.audit_row() RETURNS trigger LANGUAGE plpgsql "
+                "AS $$ BEGIN RETURN NEW; END $$",
+                "CREATE CONSTRAINT TRIGGER children_parent_audit AFTER INSERT ON app.children "
+                "FROM app.parents DEFERRABLE INITIALLY DEFERRED FOR EACH ROW "
+                "EXECUTE FUNCTION app.audit_row()",
+            ],
+        ),
+        pytest.param(
+            "disable-trigger",
+            [
+                _APP,
+                _ITEMS,
+                "CREATE FUNCTION app.audit_row() RETURNS trigger LANGUAGE plpgsql "
+                "AS $$ BEGIN RETURN NEW; END $$",
+                "CREATE TRIGGER items_audit BEFORE INSERT ON app.items "
+                "FOR EACH ROW EXECUTE FUNCTION app.audit_row()",
+            ],
+            [
+                _APP,
+                _ITEMS,
+                "CREATE FUNCTION app.audit_row() RETURNS trigger LANGUAGE plpgsql "
+                "AS $$ BEGIN RETURN NEW; END $$",
+                "CREATE TRIGGER items_audit BEFORE INSERT ON app.items "
+                "FOR EACH ROW EXECUTE FUNCTION app.audit_row()",
+                "ALTER TABLE app.items DISABLE TRIGGER items_audit",
+            ],
+        ),
+        pytest.param(
+            "enable-origin-trigger",
+            [
+                _APP,
+                _ITEMS,
+                "CREATE FUNCTION app.audit_row() RETURNS trigger LANGUAGE plpgsql "
+                "AS $$ BEGIN RETURN NEW; END $$",
+                "CREATE TRIGGER items_audit BEFORE INSERT ON app.items "
+                "FOR EACH ROW EXECUTE FUNCTION app.audit_row()",
+                "ALTER TABLE app.items DISABLE TRIGGER items_audit",
+            ],
+            [
+                _APP,
+                _ITEMS,
+                "CREATE FUNCTION app.audit_row() RETURNS trigger LANGUAGE plpgsql "
+                "AS $$ BEGIN RETURN NEW; END $$",
+                "CREATE TRIGGER items_audit BEFORE INSERT ON app.items "
+                "FOR EACH ROW EXECUTE FUNCTION app.audit_row()",
+            ],
+        ),
+        pytest.param(
+            "enable-replica-trigger",
+            [
+                _APP,
+                _ITEMS,
+                "CREATE FUNCTION app.audit_row() RETURNS trigger LANGUAGE plpgsql "
+                "AS $$ BEGIN RETURN NEW; END $$",
+                "CREATE TRIGGER items_audit BEFORE INSERT ON app.items "
+                "FOR EACH ROW EXECUTE FUNCTION app.audit_row()",
+            ],
+            [
+                _APP,
+                _ITEMS,
+                "CREATE FUNCTION app.audit_row() RETURNS trigger LANGUAGE plpgsql "
+                "AS $$ BEGIN RETURN NEW; END $$",
+                "CREATE TRIGGER items_audit BEFORE INSERT ON app.items "
+                "FOR EACH ROW EXECUTE FUNCTION app.audit_row()",
+                "ALTER TABLE app.items ENABLE REPLICA TRIGGER items_audit",
+            ],
+        ),
+        pytest.param(
+            "enable-always-trigger",
+            [
+                _APP,
+                _ITEMS,
+                "CREATE FUNCTION app.audit_row() RETURNS trigger LANGUAGE plpgsql "
+                "AS $$ BEGIN RETURN NEW; END $$",
+                "CREATE TRIGGER items_audit BEFORE INSERT ON app.items "
+                "FOR EACH ROW EXECUTE FUNCTION app.audit_row()",
+            ],
+            [
+                _APP,
+                _ITEMS,
+                "CREATE FUNCTION app.audit_row() RETURNS trigger LANGUAGE plpgsql "
+                "AS $$ BEGIN RETURN NEW; END $$",
+                "CREATE TRIGGER items_audit BEFORE INSERT ON app.items "
+                "FOR EACH ROW EXECUTE FUNCTION app.audit_row()",
+                "ALTER TABLE app.items ENABLE ALWAYS TRIGGER items_audit",
+            ],
+        ),
+        pytest.param(
+            "drop-trigger-before-function",
+            [
+                _APP,
+                _ITEMS,
+                "CREATE FUNCTION app.audit_row() RETURNS trigger LANGUAGE plpgsql "
+                "AS $$ BEGIN RETURN NEW; END $$",
+                "CREATE TRIGGER items_audit BEFORE INSERT ON app.items "
+                "FOR EACH ROW EXECUTE FUNCTION app.audit_row()",
+            ],
+            [_APP, _ITEMS],
+        ),
+        pytest.param(
             "unlogged-table-persistence",
             [_APP, "CREATE TABLE app.items (id integer)"],
             [
@@ -873,6 +1053,53 @@ async def test_pg18_round_trip_corpus(
 
     remaining = await compare_urls(pg_test_dsn, pg_test_dsn2, schemas=None)
     assert remaining.is_empty(), scenario
+
+
+@pytest.mark.integration
+async def test_internal_foreign_key_triggers_produce_no_deltas(
+    pg_test_dsn: str,
+    pg_test_dsn2: str,
+) -> None:
+    current_sql = [
+        _APP,
+        "CREATE TABLE app.parents (id integer PRIMARY KEY)",
+        "CREATE TABLE app.children (parent_id integer REFERENCES app.parents(id))",
+    ]
+    desired_sql = [*current_sql, "ALTER TABLE app.children DISABLE TRIGGER ALL"]
+    _seed(pg_test_dsn, current_sql)
+    _seed(pg_test_dsn2, desired_sql)
+
+    delta_set = await compare_urls(pg_test_dsn, pg_test_dsn2, schemas=None)
+
+    assert delta_set.is_empty()
+
+
+@pytest.mark.integration
+async def test_partition_trigger_clones_do_not_produce_trigger_deltas(
+    pg_test_dsn: str,
+    pg_test_dsn2: str,
+) -> None:
+    common_sql = [
+        _APP,
+        "CREATE FUNCTION app.audit_row() RETURNS trigger LANGUAGE plpgsql "
+        "AS $$ BEGIN RETURN NEW; END $$",
+        "CREATE TABLE app.events (id integer) PARTITION BY RANGE (id)",
+        "CREATE TRIGGER events_audit AFTER INSERT ON app.events "
+        "FOR EACH ROW EXECUTE FUNCTION app.audit_row()",
+    ]
+    _seed(pg_test_dsn, common_sql)
+    _seed(
+        pg_test_dsn2,
+        [
+            *common_sql,
+            "CREATE TABLE app.events_2026 PARTITION OF app.events FOR VALUES FROM (2026) TO (2027)",
+        ],
+    )
+
+    delta_set = await compare_urls(pg_test_dsn, pg_test_dsn2, schemas=None)
+
+    assert not delta_set.is_empty()
+    assert not any(delta.target.kind.value == "trigger" for delta in delta_set)
 
 
 @pytest.mark.integration

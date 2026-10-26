@@ -44,6 +44,7 @@ from pgschemadiff.domain.delta import (
     AlterSequenceOwnedBy,
     AlterSequenceOwner,
     AlterTableAttrs,
+    AlterTriggerEnabled,
     AlterViewOwner,
     CreateCompositeType,
     CreateDomain,
@@ -56,6 +57,7 @@ from pgschemadiff.domain.delta import (
     CreateSchema,
     CreateSequence,
     CreateTable,
+    CreateTrigger,
     CreateView,
     Delta,
     DeltaBase,
@@ -74,6 +76,7 @@ from pgschemadiff.domain.delta import (
     DropSchema,
     DropSequence,
     DropTable,
+    DropTrigger,
     DropView,
     RenameColumn,
     RenameTable,
@@ -84,6 +87,7 @@ from pgschemadiff.domain.delta import (
     ReplaceIndex,
     ReplaceMaterializedView,
     ReplaceProcedure,
+    ReplaceTrigger,
     ReplaceView,
     SetColumnDefault,
     SetColumnNullability,
@@ -100,6 +104,7 @@ from pgschemadiff.domain.procedure import Procedure, ProcedureArgument
 from pgschemadiff.domain.schema import Schema
 from pgschemadiff.domain.sequence import Sequence
 from pgschemadiff.domain.table import PartitionInfo, PartitionOf, PartitionStrategy, Table
+from pgschemadiff.domain.trigger import Trigger
 from pgschemadiff.domain.view import View
 from pgschemadiff.shared.errors import MigrationError
 
@@ -461,6 +466,36 @@ def _emitter_cases() -> tuple[tuple[str, Delta], ...]:
             "definition": ('SELECT "id" + 1 AS "id", "select" FROM "App ""Schema"."Order""Items"')
         }
     )
+    trigger_function_ref = ObjectRef(
+        kind=ObjectKind.FUNCTION,
+        qname=QualifiedName(namespace='App "Schema', name='audit "row'),
+        arg_signature=(),
+    )
+    trigger_ref = ObjectRef(
+        kind=ObjectKind.TRIGGER,
+        qname=QualifiedName(namespace=plain_table_ref.qname.namespace, name='Audit"Trigger'),
+        parent=plain_table_ref,
+    )
+    trigger_definition = (
+        'CREATE TRIGGER "Audit""Trigger" AFTER INSERT ON "App Schema"."Order""Items" '
+        'FOR EACH ROW EXECUTE FUNCTION "App ""Schema"."audit ""row"()'
+    )
+    trigger = Trigger(
+        ref=trigger_ref,
+        table_ref=plain_table_ref,
+        function_ref=trigger_function_ref,
+        definition=trigger_definition,
+        timing="AFTER",
+        events=("INSERT",),
+        row_level=True,
+        is_constraint=False,
+        deferrable=False,
+        initially_deferred=False,
+        enabled="O",
+    )
+    new_trigger = trigger.model_copy(
+        update={"definition": trigger_definition.replace("AFTER INSERT", "BEFORE INSERT")}
+    )
 
     return (
         ("create function", CreateFunction(target=function_ref, function=function)),
@@ -561,6 +596,20 @@ def _emitter_cases() -> tuple[tuple[str, Delta], ...]:
                 materialized_view=materialized_view,
                 new_owner='New "Owner',
             ),
+        ),
+        ("create trigger", CreateTrigger(target=trigger_ref, trigger=trigger)),
+        ("drop trigger", DropTrigger(target=trigger_ref, trigger=trigger)),
+        (
+            "replace trigger",
+            ReplaceTrigger(
+                target=trigger_ref,
+                old_trigger=trigger,
+                new_trigger=new_trigger,
+            ),
+        ),
+        (
+            "alter trigger enabled",
+            AlterTriggerEnabled(target=trigger_ref, trigger=trigger, new_enabled="D"),
         ),
         ("create sequence", CreateSequence(target=sequence_ref, sequence=sequence)),
         ("drop sequence", DropSequence(target=sequence_ref, sequence=sequence)),

@@ -43,6 +43,7 @@ from pgschemadiff.domain.index import IndexMethod, NullsOrder, SortOrder
 from pgschemadiff.domain.materialized_view import MaterializedView
 from pgschemadiff.domain.ports import SchemaInspector
 from pgschemadiff.domain.table import PartitionStrategy
+from pgschemadiff.domain.trigger import Trigger
 from pgschemadiff.domain.view import View
 from pgschemadiff.infrastructure.postgres.inspector import (
     PgCatalogInspector,
@@ -248,6 +249,29 @@ _ViewPrerequisiteRow = namedtuple(
         "prerequisite_schema",
         "prerequisite_name",
         "prerequisite_signature",
+    ],
+)
+_TriggerRow = namedtuple(
+    "_TriggerRow",
+    [
+        "schema_name",
+        "table_name",
+        "trigger_name",
+        "function_schema",
+        "function_name",
+        "function_input_types",
+        "referenced_table_schema",
+        "referenced_table_name",
+        "definition",
+        "timing",
+        "events",
+        "row_level",
+        "columns",
+        "when_expr",
+        "is_constraint",
+        "deferrable",
+        "initially_deferred",
+        "enabled",
     ],
 )
 _FunctionRow = namedtuple(
@@ -627,6 +651,49 @@ def _make_view_prerequisite_row(
     )
 
 
+def _make_trigger_row(
+    schema: str = "public",
+    table: str = "users",
+    name: str = "users_audit",
+    *,
+    function_schema: str = "public",
+    function_name: str = "audit_row",
+    function_input_types: tuple[str, ...] = (),
+    referenced_table_schema: str | None = None,
+    referenced_table_name: str | None = None,
+    definition: str = "CREATE TRIGGER users_audit AFTER INSERT ON public.users",
+    timing: str = "AFTER",
+    events: tuple[str, ...] = ("INSERT",),
+    row_level: bool = True,
+    columns: tuple[str, ...] = (),
+    when_expr: str | None = None,
+    is_constraint: bool = False,
+    deferrable: bool = False,
+    initially_deferred: bool = False,
+    enabled: str = "O",
+) -> Any:
+    return _TriggerRow(
+        schema,
+        table,
+        name,
+        function_schema,
+        function_name,
+        function_input_types,
+        referenced_table_schema,
+        referenced_table_name,
+        definition,
+        timing,
+        events,
+        row_level,
+        columns,
+        when_expr,
+        is_constraint,
+        deferrable,
+        initially_deferred,
+        enabled,
+    )
+
+
 def _make_composite_type_row(
     schema: str = "public",
     name: str = "address",
@@ -691,6 +758,7 @@ def _build_mock_pool(
     routines_rows: list[Any] | None = None,
     views_rows: list[Any] | None = None,
     view_prerequisites_rows: list[Any] | None = None,
+    triggers_rows: list[Any] | None = None,
 ) -> MagicMock:
     """Build a mock Pool that yields a mocked psycopg connection.
 
@@ -712,6 +780,7 @@ def _build_mock_pool(
         routines_rows or [],
         views_rows or [],
         view_prerequisites_rows or [],
+        triggers_rows or [],
     ]
 
     cur = AsyncMock()
@@ -762,7 +831,7 @@ def test_inspector_is_importable() -> None:
 
 
 @pytest.mark.unit
-async def test_inspect_calls_all_fifteen_queries() -> None:
+async def test_inspect_calls_all_sixteen_queries() -> None:
     """inspect() must execute one query per catalog file."""
     pool = _build_mock_pool(
         schemas_rows=[_SchemaRow("public")],
@@ -777,7 +846,7 @@ async def test_inspect_calls_all_fifteen_queries() -> None:
 
     # fetchall should have been called once per catalog SQL file.
     cur = pool.acquire.return_value.__aenter__.return_value.cursor.return_value
-    assert cur.fetchall.call_count == 15
+    assert cur.fetchall.call_count == 16
     assert isinstance(result, Database)
 
 
@@ -819,7 +888,7 @@ async def test_inspect_sets_local_search_path_before_catalog_queries() -> None:
     assert [mock_call[0] for mock_call in statements] == [
         "execute",
         "execute",
-        *("catalog_cursor.execute" for _ in range(15)),
+        *("catalog_cursor.execute" for _ in range(16)),
         "execute",
     ]
     assert statements[0].args == ("BEGIN ISOLATION LEVEL REPEATABLE READ",)
@@ -876,6 +945,95 @@ async def test_schema_filter_none_includes_all() -> None:
     schema_names = [s.name for s in result.schemas]
     assert "public" in schema_names
     assert "audit" in schema_names
+
+
+@pytest.mark.unit
+async def test_inspect_maps_trigger_fields_and_filters_by_parent_schema() -> None:
+    pool = _build_mock_pool(
+        schemas_rows=[_SchemaRow("public"), _SchemaRow("audit")],
+        tables_rows=[
+            _make_table_row("public", "users"),
+            _make_table_row("audit", "logs"),
+        ],
+        columns_rows=[
+            _make_column_row("public", "users", "id"),
+            _make_column_row("public", "users", "value", position=2, nullable=True),
+            _make_column_row("audit", "logs", "value"),
+        ],
+        triggers_rows=[
+            _make_trigger_row(
+                table="users",
+                definition=(
+                    "CREATE TRIGGER users_audit BEFORE UPDATE OF value ON public.users "
+                    "FOR EACH ROW WHEN (new.value > 0) EXECUTE FUNCTION public.audit_row()"
+                ),
+                timing="BEFORE",
+                events=("UPDATE",),
+                columns=("value",),
+                when_expr="new.value > 0",
+                enabled="R",
+            ),
+            _make_trigger_row("audit", "logs", "logs_audit"),
+        ],
+    )
+
+    database = await PgCatalogInspector(pool, schemas=["public"]).inspect()
+
+    assert len(database.all_triggers()) == 1
+    trigger = database.all_triggers()[0]
+    assert isinstance(trigger, Trigger)
+    assert trigger.ref.parent == trigger.table_ref
+    assert trigger.function_ref == ObjectRef(
+        kind=ObjectKind.FUNCTION,
+        qname=QualifiedName(namespace="public", name="audit_row"),
+        arg_signature=(),
+    )
+    assert (trigger.timing, trigger.events, trigger.row_level) == ("BEFORE", ("UPDATE",), True)
+    assert (trigger.columns, trigger.when_expr, trigger.enabled) == (
+        ("value",),
+        "new.value > 0",
+        "R",
+    )
+
+
+@pytest.mark.unit
+async def test_inspect_maps_constraint_trigger_referenced_table() -> None:
+    pool = _build_mock_pool(
+        schemas_rows=[_SchemaRow("public")],
+        tables_rows=[_make_table_row()],
+        triggers_rows=[
+            _make_trigger_row(
+                is_constraint=True,
+                deferrable=True,
+                referenced_table_schema="audit",
+                referenced_table_name="parents",
+                definition=(
+                    "CREATE CONSTRAINT TRIGGER users_audit AFTER UPDATE ON public.users "
+                    "FROM audit.parents DEFERRABLE FOR EACH ROW "
+                    "EXECUTE FUNCTION public.audit_row()"
+                ),
+            )
+        ],
+    )
+
+    database = await PgCatalogInspector(pool, schemas=["public"]).inspect()
+
+    assert database.all_triggers()[0].referenced_table_ref == ObjectRef(
+        kind=ObjectKind.TABLE,
+        qname=QualifiedName(namespace="audit", name="parents"),
+    )
+
+
+@pytest.mark.unit
+async def test_inspect_rejects_unknown_trigger_enabled_state() -> None:
+    pool = _build_mock_pool(
+        schemas_rows=[_SchemaRow("public")],
+        tables_rows=[_make_table_row()],
+        triggers_rows=[_make_trigger_row(enabled="X")],
+    )
+
+    with pytest.raises(InspectionError, match="Unsupported trigger enabled state"):
+        await PgCatalogInspector(pool).inspect()
 
 
 @pytest.mark.unit

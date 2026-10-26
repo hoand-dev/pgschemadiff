@@ -30,6 +30,7 @@ from pgschemadiff.domain.procedure import Procedure
 from pgschemadiff.domain.schema import Schema
 from pgschemadiff.domain.sequence import Sequence
 from pgschemadiff.domain.table import Table
+from pgschemadiff.domain.trigger import Trigger
 from pgschemadiff.domain.view import View
 
 
@@ -197,6 +198,13 @@ class Database(BaseModel):
         result: list[MaterializedView] = []
         for schema in self.schemas:
             result.extend(schema.materialized_views)
+        return tuple(result)
+
+    def all_triggers(self) -> tuple[Trigger, ...]:
+        """Return table-owned triggers across every schema."""
+        result: list[Trigger] = []
+        for table in self.all_tables():
+            result.extend(table.triggers)
         return tuple(result)
 
     def all_indexes(self) -> tuple[Index, ...]:
