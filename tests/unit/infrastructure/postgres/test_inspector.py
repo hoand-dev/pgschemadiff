@@ -41,6 +41,7 @@ from pgschemadiff.domain.domain_type import DomainCheck
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import IndexMethod, NullsOrder, SortOrder
 from pgschemadiff.domain.materialized_view import MaterializedView
+from pgschemadiff.domain.policy import Policy, PolicyCommand
 from pgschemadiff.domain.ports import SchemaInspector
 from pgschemadiff.domain.table import PartitionStrategy
 from pgschemadiff.domain.trigger import Trigger
@@ -89,6 +90,8 @@ _TableRow = namedtuple(
         "partition_of_schema",
         "partition_of_table",
         "partition_bound",
+        "row_security",
+        "force_row_security",
     ],
 )
 _ColumnRow = namedtuple(
@@ -274,6 +277,19 @@ _TriggerRow = namedtuple(
         "enabled",
     ],
 )
+_PolicyRow = namedtuple(
+    "_PolicyRow",
+    [
+        "schema_name",
+        "table_name",
+        "policy_name",
+        "command",
+        "permissive",
+        "roles",
+        "using_expr",
+        "with_check_expr",
+    ],
+)
 _FunctionRow = namedtuple(
     "_FunctionRow",
     [
@@ -319,6 +335,8 @@ def _make_table_row(
     partition_of_schema: str | None = None,
     partition_of_table: str | None = None,
     partition_bound: str | None = None,
+    row_security: bool = False,
+    force_row_security: bool = False,
 ) -> Any:
     return _TableRow(
         schema_name=schema,
@@ -332,6 +350,8 @@ def _make_table_row(
         partition_of_schema=partition_of_schema,
         partition_of_table=partition_of_table,
         partition_bound=partition_bound,
+        row_security=row_security,
+        force_row_security=force_row_security,
     )
 
 
@@ -694,6 +714,29 @@ def _make_trigger_row(
     )
 
 
+def _make_policy_row(
+    schema: str = "public",
+    table: str = "users",
+    name: str = "users_policy",
+    *,
+    command: str = "UPDATE",
+    permissive: bool = True,
+    roles: tuple[str, ...] = ("public",),
+    using_expr: str | None = "id > 0",
+    with_check_expr: str | None = "id > 0",
+) -> Any:
+    return _PolicyRow(
+        schema,
+        table,
+        name,
+        command,
+        permissive,
+        roles,
+        using_expr,
+        with_check_expr,
+    )
+
+
 def _make_composite_type_row(
     schema: str = "public",
     name: str = "address",
@@ -759,6 +802,7 @@ def _build_mock_pool(
     views_rows: list[Any] | None = None,
     view_prerequisites_rows: list[Any] | None = None,
     triggers_rows: list[Any] | None = None,
+    policies_rows: list[Any] | None = None,
 ) -> MagicMock:
     """Build a mock Pool that yields a mocked psycopg connection.
 
@@ -781,6 +825,7 @@ def _build_mock_pool(
         views_rows or [],
         view_prerequisites_rows or [],
         triggers_rows or [],
+        policies_rows or [],
     ]
 
     cur = AsyncMock()
@@ -831,7 +876,7 @@ def test_inspector_is_importable() -> None:
 
 
 @pytest.mark.unit
-async def test_inspect_calls_all_sixteen_queries() -> None:
+async def test_inspect_calls_all_seventeen_queries() -> None:
     """inspect() must execute one query per catalog file."""
     pool = _build_mock_pool(
         schemas_rows=[_SchemaRow("public")],
@@ -846,7 +891,7 @@ async def test_inspect_calls_all_sixteen_queries() -> None:
 
     # fetchall should have been called once per catalog SQL file.
     cur = pool.acquire.return_value.__aenter__.return_value.cursor.return_value
-    assert cur.fetchall.call_count == 16
+    assert cur.fetchall.call_count == 17
     assert isinstance(result, Database)
 
 
@@ -888,7 +933,7 @@ async def test_inspect_sets_local_search_path_before_catalog_queries() -> None:
     assert [mock_call[0] for mock_call in statements] == [
         "execute",
         "execute",
-        *("catalog_cursor.execute" for _ in range(16)),
+        *("catalog_cursor.execute" for _ in range(17)),
         "execute",
     ]
     assert statements[0].args == ("BEGIN ISOLATION LEVEL REPEATABLE READ",)
@@ -997,6 +1042,53 @@ async def test_inspect_maps_trigger_fields_and_filters_by_parent_schema() -> Non
 
 
 @pytest.mark.unit
+async def test_inspect_maps_policies_and_row_security_state() -> None:
+    pool = _build_mock_pool(
+        schemas_rows=[_SchemaRow("public"), _SchemaRow("audit")],
+        tables_rows=[
+            _make_table_row("public", "users", row_security=True, force_row_security=True),
+            _make_table_row("audit", "logs", row_security=True),
+        ],
+        policies_rows=[
+            _make_policy_row(
+                name="users_update",
+                command="UPDATE",
+                permissive=False,
+                roles=("app_reader", "public"),
+                using_expr="id > 0",
+                with_check_expr="id >= 0",
+            ),
+            _make_policy_row("audit", "logs", "audit_select", command="SELECT"),
+        ],
+    )
+
+    database = await PgCatalogInspector(pool, schemas=["public"]).inspect()
+
+    assert len(database.schemas) == 1
+    table = database.schemas[0].tables[0]
+    assert (table.row_security, table.force_row_security) == (True, True)
+    assert len(table.policies) == 1
+    policy = table.policies[0]
+    assert isinstance(policy, Policy)
+    assert policy.command is PolicyCommand.UPDATE
+    assert policy.permissive is False
+    assert policy.roles == ("app_reader", "public")
+    assert (policy.using_expr, policy.with_check_expr) == ("id > 0", "id >= 0")
+
+
+@pytest.mark.unit
+async def test_inspect_rejects_unknown_policy_command() -> None:
+    pool = _build_mock_pool(
+        schemas_rows=[_SchemaRow("public")],
+        tables_rows=[_make_table_row()],
+        policies_rows=[_make_policy_row(command="UNKNOWN")],
+    )
+
+    with pytest.raises(InspectionError, match="Unsupported policy command"):
+        await PgCatalogInspector(pool).inspect()
+
+
+@pytest.mark.unit
 async def test_inspect_maps_constraint_trigger_referenced_table() -> None:
     pool = _build_mock_pool(
         schemas_rows=[_SchemaRow("public")],
@@ -1061,6 +1153,20 @@ def test_build_tables_maps_unlogged_state() -> None:
     )
 
     assert tables_by_schema["public"][0].unlogged is True
+
+
+@pytest.mark.unit
+def test_build_tables_maps_row_security_state() -> None:
+    tables_by_schema, _ = PgCatalogInspector._build_tables(
+        [_make_table_row(row_security=True, force_row_security=True)],
+        ["public"],
+        {},
+        {},
+        {},
+    )
+
+    table = tables_by_schema["public"][0]
+    assert (table.row_security, table.force_row_security) == (True, True)
 
 
 @pytest.mark.unit

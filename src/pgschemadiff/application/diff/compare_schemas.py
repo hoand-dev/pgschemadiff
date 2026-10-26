@@ -14,6 +14,7 @@ from pgschemadiff.application.diff.comparators import (
     FunctionComparator,
     IndexComparator,
     MaterializedViewComparator,
+    PolicyComparator,
     ProcedureComparator,
     SchemaComparator,
     SequenceComparator,
@@ -61,6 +62,7 @@ async def compare_schemas(
         FunctionComparator(target_functions=target.all_functions()),
         ProcedureComparator(),
         TriggerComparator(),
+        PolicyComparator(),
         ViewComparator(),
         MaterializedViewComparator(),
         TableComparator(

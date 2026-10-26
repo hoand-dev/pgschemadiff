@@ -33,6 +33,7 @@ from pgschemadiff.domain.constraint import (
     UniqueConstraint,
 )
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
+from pgschemadiff.domain.policy import Policy
 from pgschemadiff.domain.trigger import Trigger
 
 # ---------------------------------------------------------------------------
@@ -125,6 +126,15 @@ class Table(BaseModel):
     triggers: tuple[Trigger, ...] = Field(default=())
     """Non-internal table triggers, ordered by trigger name."""
 
+    policies: tuple[Policy, ...] = Field(default=())
+    """Row-level security policies, ordered by policy name."""
+
+    row_security: bool = False
+    """Whether row-level security is enabled for this table."""
+
+    force_row_security: bool = False
+    """Whether the table owner is subject to row-level security policies."""
+
     type_prerequisites: tuple[ObjectRef, ...] = Field(default=())
     """User-defined types required by this table's columns."""
 
@@ -190,6 +200,18 @@ class Table(BaseModel):
                     f"Trigger {name!r} references missing column(s): "
                     f"{', '.join(sorted(missing_columns))}"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def _check_policy_identity(self) -> Self:
+        seen: set[str] = set()
+        for policy in self.policies:
+            name = policy.ref.qname.name
+            if policy.table_ref != self.ref:
+                raise ValueError(f"Policy {name!r} does not belong to table {self.ref.qname.fqn}")
+            if name in seen:
+                raise ValueError(f"Duplicate policy {name!r} in table {self.ref.qname.fqn}")
+            seen.add(name)
         return self
 
     @model_validator(mode="after")

@@ -49,6 +49,15 @@
     transactional=true new_unit=false isolated=false sql=CREATE OR REPLACE TRIGGER "Audit""Trigger" BEFORE INSERT ON "App Schema"."Order""Items" FOR EACH ROW EXECUTE FUNCTION "App ""Schema"."audit ""row"()
   alter trigger enabled: alter_trigger_enabled target=trigger "App Schema"."Order""Items"."Audit""Trigger"
     transactional=true new_unit=false isolated=false sql=ALTER TABLE "App Schema"."Order""Items" DISABLE TRIGGER "Audit""Trigger"
+  create policy: create_policy target=policy "App Schema"."Order""Items"."Order ""policy"
+    transactional=true new_unit=false isolated=false sql=CREATE POLICY "Order ""policy" ON "App Schema"."Order""Items" AS PERMISSIVE FOR UPDATE TO "Role ""Owner", PUBLIC USING ("select" > 0) WITH CHECK ("select" >= 0)
+  drop policy: drop_policy target=policy "App Schema"."Order""Items"."Order ""policy"
+    transactional=true new_unit=false isolated=false sql=DROP POLICY "Order ""policy" ON "App Schema"."Order""Items"
+  alter policy: alter_policy target=policy "App Schema"."Order""Items"."Order ""policy"
+    transactional=true new_unit=false isolated=false sql=ALTER POLICY "Order ""policy" ON "App Schema"."Order""Items" TO PUBLIC USING ("select" >= 0)
+  replace policy: replace_policy target=policy "App Schema"."Order""Items"."Order ""policy"
+    transactional=true new_unit=false isolated=false sql=DROP POLICY "Order ""policy" ON "App Schema"."Order""Items"
+    transactional=true new_unit=false isolated=false sql=CREATE POLICY "Order ""policy" ON "App Schema"."Order""Items" AS RESTRICTIVE FOR ALL TO "Role ""Owner", PUBLIC USING ("select" > 0) WITH CHECK ("select" >= 0)
   create sequence: create_sequence target=sequence "App ""Schema"."Serial""ID"
     transactional=true new_unit=false isolated=false sql=CREATE SEQUENCE "App ""Schema"."Serial""ID" AS bigint INCREMENT BY 5 MINVALUE 1 MAXVALUE 999 START WITH 7 CACHE 3 CYCLE
     transactional=true new_unit=false isolated=false sql=ALTER SEQUENCE "App ""Schema"."Serial""ID" OWNER TO "Role ""Owner"
@@ -237,6 +246,10 @@
     transactional=true new_unit=false isolated=false sql=COMMENT ON TABLE "App Schema"."Order""Items" IS 'Customer''s order table'
   create unlogged table: create_table target=table "App Schema"."Order""Items"
     transactional=true new_unit=false isolated=false sql=CREATE UNLOGGED TABLE "App Schema"."Order""Items" ("id" integer)
+  create table with row security: create_table target=table "App Schema"."accounts"
+    transactional=true new_unit=false isolated=false sql=CREATE TABLE "App Schema"."accounts" ("id" integer)
+    transactional=true new_unit=false isolated=false sql=ALTER TABLE "App Schema"."accounts" ENABLE ROW LEVEL SECURITY
+    transactional=true new_unit=false isolated=false sql=ALTER TABLE "App Schema"."accounts" FORCE ROW LEVEL SECURITY
   create table with virtual generated column: create_table target=table "App Schema"."accounts"
     transactional=true new_unit=false isolated=false sql=CREATE TABLE "App Schema"."accounts" ("value" integer, "doubled" integer GENERATED ALWAYS AS (value * 2) VIRTUAL)
   create partitioned parent: create_table target=table "App Schema"."events"
@@ -254,6 +267,9 @@
     transactional=true new_unit=false isolated=false sql=COMMENT ON TABLE "App Schema"."Order""Items" IS NULL
   set table unlogged: alter_table_attrs target=table "App Schema"."Order""Items"
     transactional=true new_unit=false isolated=false sql=ALTER TABLE "App Schema"."Order""Items" SET UNLOGGED
+  enable and force row security: alter_table_attrs target=table "App Schema"."Order""Items"
+    transactional=true new_unit=false isolated=false sql=ALTER TABLE "App Schema"."Order""Items" ENABLE ROW LEVEL SECURITY
+    transactional=true new_unit=false isolated=false sql=ALTER TABLE "App Schema"."Order""Items" FORCE ROW LEVEL SECURITY
   add nullable column: add_column target=column "App Schema"."accounts"."optional_note"
     transactional=true new_unit=false isolated=false sql=ALTER TABLE "App Schema"."accounts" ADD COLUMN "optional_note" text
   add not-null column with default: add_column target=column "App Schema"."accounts"."priority"

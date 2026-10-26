@@ -78,6 +78,10 @@ def emit_create_table(delta: DeltaBase) -> tuple[SqlStatement, ...]:
                 delta,
             )
         )
+    if table.row_security:
+        statements.append(_statement(f"ALTER TABLE {table_name} ENABLE ROW LEVEL SECURITY", delta))
+    if table.force_row_security:
+        statements.append(_statement(f"ALTER TABLE {table_name} FORCE ROW LEVEL SECURITY", delta))
     return tuple(statements)
 
 
@@ -131,6 +135,16 @@ def emit_alter_table_attrs(delta: DeltaBase) -> tuple[SqlStatement, ...]:
     if delta.new_comment is not None:
         comment = "NULL" if delta.new_comment == "" else quote_literal(delta.new_comment)
         statements.append(_statement(f"COMMENT ON TABLE {table_name} IS {comment}", delta))
+    if delta.new_row_security is not None:
+        action = "ENABLE" if delta.new_row_security else "DISABLE"
+        statements.append(
+            _statement(f"ALTER TABLE {table_name} {action} ROW LEVEL SECURITY", delta)
+        )
+    if delta.new_force_row_security is not None:
+        action = "FORCE" if delta.new_force_row_security else "NO FORCE"
+        statements.append(
+            _statement(f"ALTER TABLE {table_name} {action} ROW LEVEL SECURITY", delta)
+        )
     if not statements:
         raise MigrationError("AlterTableAttrs contains no supported table attribute changes.")
     return tuple(statements)

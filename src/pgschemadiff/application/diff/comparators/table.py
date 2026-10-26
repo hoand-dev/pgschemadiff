@@ -465,6 +465,14 @@ class TableComparator:
         new_partition_of = (
             target.partition_of if target.partition_of != source_partition_of else None
         )
+        new_row_security = (
+            target.row_security if target.row_security != source.row_security else None
+        )
+        new_force_row_security = (
+            target.force_row_security
+            if target.force_row_security != source.force_row_security
+            else None
+        )
 
         # Nothing changed → no delta
         if (
@@ -474,6 +482,8 @@ class TableComparator:
             and new_unlogged is None
             and new_partition_info is None
             and new_partition_of is None
+            and new_row_security is None
+            and new_force_row_security is None
         ):
             return None
 
@@ -485,6 +495,8 @@ class TableComparator:
             new_unlogged=new_unlogged,
             new_partition_info=new_partition_info,
             new_partition_of=new_partition_of,
+            new_row_security=new_row_security,
+            new_force_row_security=new_force_row_security,
         )
 
 

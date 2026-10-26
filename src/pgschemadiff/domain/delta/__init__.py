@@ -96,6 +96,13 @@ from pgschemadiff.domain.delta.materialized_view import (
     MaterializedViewDelta,
     ReplaceMaterializedView,
 )
+from pgschemadiff.domain.delta.policy import (
+    AlterPolicy,
+    CreatePolicy,
+    DropPolicy,
+    PolicyDelta,
+    ReplacePolicy,
+)
 from pgschemadiff.domain.delta.procedure import (
     AlterProcedureOwner,
     CreateProcedure,
@@ -159,6 +166,7 @@ __all__ = [
     "AlterExtension",
     "AlterFunctionOwner",
     "AlterMaterializedViewOwner",
+    "AlterPolicy",
     "AlterProcedureOwner",
     "AlterSequenceOptions",
     "AlterSequenceOwnedBy",
@@ -176,6 +184,7 @@ __all__ = [
     "CreateFunction",
     "CreateIndex",
     "CreateMaterializedView",
+    "CreatePolicy",
     "CreateProcedure",
     "CreateSchema",
     "CreateSequence",
@@ -197,6 +206,7 @@ __all__ = [
     "DropFunction",
     "DropIndex",
     "DropMaterializedView",
+    "DropPolicy",
     "DropProcedure",
     "DropSchema",
     "DropSequence",
@@ -208,6 +218,7 @@ __all__ = [
     "FunctionDelta",
     "IndexDelta",
     "MaterializedViewDelta",
+    "PolicyDelta",
     "ProcedureDelta",
     "RenameColumn",
     "RenameTable",
@@ -217,6 +228,7 @@ __all__ = [
     "ReplaceFunction",
     "ReplaceIndex",
     "ReplaceMaterializedView",
+    "ReplacePolicy",
     "ReplaceProcedure",
     "ReplaceTrigger",
     "ReplaceView",

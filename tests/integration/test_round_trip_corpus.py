@@ -1020,6 +1020,93 @@ def _seed(dsn: str, statements: list[str]) -> None:
                 "CREATE UNLOGGED TABLE app.unlogged_items (id integer)",
             ],
         ),
+        pytest.param(
+            "create-rls-policy-and-table-flags",
+            [_APP],
+            [
+                _APP,
+                "CREATE TABLE app.items (id integer)",
+                "ALTER TABLE app.items ENABLE ROW LEVEL SECURITY",
+                "ALTER TABLE app.items FORCE ROW LEVEL SECURITY",
+                "CREATE POLICY items_policy ON app.items AS RESTRICTIVE FOR UPDATE TO PUBLIC "
+                "USING (id > 0) WITH CHECK (id >= 0)",
+            ],
+            id="create-policy-and-rls-flags",
+        ),
+        pytest.param(
+            "alter-rls-policy-roles-and-expressions",
+            [
+                _APP,
+                "CREATE TABLE app.items (id integer)",
+                "ALTER TABLE app.items ENABLE ROW LEVEL SECURITY",
+                "CREATE POLICY items_policy ON app.items FOR UPDATE TO PUBLIC "
+                "USING (id > 0) WITH CHECK (id > 0)",
+            ],
+            [
+                _APP,
+                "CREATE TABLE app.items (id integer)",
+                "ALTER TABLE app.items ENABLE ROW LEVEL SECURITY",
+                "CREATE POLICY items_policy ON app.items FOR UPDATE TO CURRENT_USER "
+                "USING (id >= 0) WITH CHECK (id >= 0)",
+            ],
+            id="alter-policy-roles-and-expressions",
+        ),
+        pytest.param(
+            "replace-rls-policy-permissiveness",
+            [
+                _APP,
+                "CREATE TABLE app.items (id integer)",
+                "CREATE POLICY items_policy ON app.items AS PERMISSIVE FOR UPDATE TO PUBLIC "
+                "USING (id > 0) WITH CHECK (id > 0)",
+            ],
+            [
+                _APP,
+                "CREATE TABLE app.items (id integer)",
+                "CREATE POLICY items_policy ON app.items AS RESTRICTIVE FOR UPDATE TO PUBLIC "
+                "USING (id > 0) WITH CHECK (id > 0)",
+            ],
+            id="replace-policy-permissiveness",
+        ),
+        pytest.param(
+            "replace-rls-policy-when-removing-using-clause",
+            [
+                _APP,
+                "CREATE TABLE app.items (id integer)",
+                "CREATE POLICY items_policy ON app.items FOR SELECT TO PUBLIC USING (id > 0)",
+            ],
+            [
+                _APP,
+                "CREATE TABLE app.items (id integer)",
+                "CREATE POLICY items_policy ON app.items FOR SELECT TO PUBLIC",
+            ],
+            id="replace-policy-clear-using",
+        ),
+        pytest.param(
+            "drop-policy-before-disabling-row-security",
+            [
+                _APP,
+                "CREATE TABLE app.items (id integer)",
+                "ALTER TABLE app.items ENABLE ROW LEVEL SECURITY",
+                "ALTER TABLE app.items FORCE ROW LEVEL SECURITY",
+                "CREATE POLICY items_policy ON app.items FOR SELECT TO PUBLIC USING (id > 0)",
+            ],
+            [_APP, "CREATE TABLE app.items (id integer)"],
+            id="drop-policy-disable-rls",
+        ),
+        pytest.param(
+            "rename-policy-as-drop-create",
+            [
+                _APP,
+                "CREATE TABLE app.items (id integer)",
+                "CREATE POLICY old_items_policy ON app.items FOR SELECT TO PUBLIC USING (id > 0)",
+            ],
+            [
+                _APP,
+                "CREATE TABLE app.items (id integer)",
+                "CREATE POLICY new_items_policy ON app.items FOR SELECT TO PUBLIC USING (id > 0)",
+            ],
+            id="rename-policy-drop-create",
+        ),
     ],
 )
 async def test_pg18_round_trip_corpus(

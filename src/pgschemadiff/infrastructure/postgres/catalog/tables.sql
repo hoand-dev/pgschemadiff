@@ -8,6 +8,8 @@
 --   owner                text      -- role owning the table
 --   tablespace           text|null -- non-default tablespace name
 --   comment              text|null -- table comment
+--   row_security         bool      -- whether RLS is enabled
+--   force_row_security   bool      -- whether table owner is subject to RLS
 --   partition_strategy   text|null -- 'h' hash / 'l' list / 'r' range, null if not partitioned
 --   partition_expr       text|null -- pg_get_partkeydef(c.oid) or null
 --   partition_of_schema  text|null -- parent schema if this table IS a partition
@@ -20,6 +22,8 @@ SELECT
     pg_catalog.pg_get_userbyid(c.relowner)             AS owner,
     table_space.spcname                                AS tablespace,
     pg_catalog.obj_description(c.oid, 'pg_class')      AS comment,
+    c.relrowsecurity                                   AS row_security,
+    c.relforcerowsecurity                              AS force_row_security,
     pt.partstrat::text                                 AS partition_strategy,
     CASE
         WHEN pt.partrelid IS NOT NULL

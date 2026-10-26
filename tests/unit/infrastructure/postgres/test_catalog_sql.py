@@ -55,6 +55,7 @@ _CATALOG_FILES = [
     "views.sql",
     "view_prerequisites.sql",
     "triggers.sql",
+    "policies.sql",
 ]
 
 
@@ -109,6 +110,15 @@ def test_tables_sql_projects_unlogged_persistence() -> None:
     sql = _load_sql("tables.sql")
     assert "c.relpersistence = 'u'" in sql
     assert "AS unlogged" in sql
+
+
+@pytest.mark.unit
+def test_tables_sql_projects_row_security_flags() -> None:
+    sql = _load_sql("tables.sql")
+    assert "relrowsecurity" in sql
+    assert "AS row_security" in sql
+    assert "relforcerowsecurity" in sql
+    assert "AS force_row_security" in sql
 
 
 @pytest.mark.unit
@@ -393,6 +403,7 @@ def test_schemas_sql_selects_owner_and_comment() -> None:
         pytest.param("routines.sql"),
         pytest.param("views.sql"),
         pytest.param("view_prerequisites.sql"),
+        pytest.param("policies.sql"),
     ],
 )
 def test_catalog_sql_excludes_reserved_history_schema(filename: str) -> None:
@@ -719,6 +730,33 @@ def test_triggers_sql_captures_supported_trigger_semantics_and_dependency_refs()
     assert "LIKE 'pg_%'" not in sql
     assert "%s" not in sql
     assert "AS trigger " not in sql
+
+
+@pytest.mark.unit
+def test_policies_sql_captures_policy_semantics_and_checks_extension_membership_on_policy() -> None:
+    sql = _load_sql("policies.sql")
+
+    for expected in (
+        "pg_policy",
+        "polcmd",
+        "polpermissive",
+        "polroles",
+        "pg_catalog.pg_get_userbyid",
+        "polqual",
+        "polwithcheck",
+        "pg_catalog.pg_get_expr",
+        "relkind IN ('r', 'p')",
+        "deptype = 'e'",
+        "pgschemadiff",
+    ):
+        assert expected in sql
+
+    assert "d.classid = 'pg_catalog.pg_policy'::regclass" in sql
+    assert "d.objid = p.oid" in sql
+    assert "d.classid = 'pg_catalog.pg_class'::regclass" not in sql
+    assert "d.objid = c.oid" not in sql
+    assert "LIKE 'pg_%'" not in sql
+    assert "%s" not in sql
 
 
 # ---------------------------------------------------------------------------

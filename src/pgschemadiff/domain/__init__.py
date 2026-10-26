@@ -33,6 +33,7 @@ from pgschemadiff.domain.index import (
     SortOrder,
 )
 from pgschemadiff.domain.materialized_view import MaterializedView
+from pgschemadiff.domain.policy import Policy, PolicyCommand
 from pgschemadiff.domain.ports import SchemaInspector
 from pgschemadiff.domain.procedure import Procedure, ProcedureArgument
 from pgschemadiff.domain.schema import Schema
@@ -78,6 +79,8 @@ __all__ = [
     "PartitionInfo",
     "PartitionOf",
     "PartitionStrategy",
+    "Policy",
+    "PolicyCommand",
     "PrimaryKeyConstraint",
     "Procedure",
     "ProcedureArgument",

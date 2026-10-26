@@ -39,6 +39,7 @@ from pgschemadiff.domain.delta import (
     AlterExtension,
     AlterFunctionOwner,
     AlterMaterializedViewOwner,
+    AlterPolicy,
     AlterProcedureOwner,
     AlterSequenceOptions,
     AlterSequenceOwnedBy,
@@ -53,6 +54,7 @@ from pgschemadiff.domain.delta import (
     CreateFunction,
     CreateIndex,
     CreateMaterializedView,
+    CreatePolicy,
     CreateProcedure,
     CreateSchema,
     CreateSequence,
@@ -72,6 +74,7 @@ from pgschemadiff.domain.delta import (
     DropFunction,
     DropIndex,
     DropMaterializedView,
+    DropPolicy,
     DropProcedure,
     DropSchema,
     DropSequence,
@@ -86,6 +89,7 @@ from pgschemadiff.domain.delta import (
     ReplaceFunction,
     ReplaceIndex,
     ReplaceMaterializedView,
+    ReplacePolicy,
     ReplaceProcedure,
     ReplaceTrigger,
     ReplaceView,
@@ -100,6 +104,7 @@ from pgschemadiff.domain.function import Function, FunctionArgument
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index, IndexKeyColumn, IndexMethod, SortOrder
 from pgschemadiff.domain.materialized_view import MaterializedView
+from pgschemadiff.domain.policy import Policy, PolicyCommand
 from pgschemadiff.domain.procedure import Procedure, ProcedureArgument
 from pgschemadiff.domain.schema import Schema
 from pgschemadiff.domain.sequence import Sequence
@@ -496,6 +501,20 @@ def _emitter_cases() -> tuple[tuple[str, Delta], ...]:
     new_trigger = trigger.model_copy(
         update={"definition": trigger_definition.replace("AFTER INSERT", "BEFORE INSERT")}
     )
+    policy = Policy(
+        ref=ObjectRef(
+            kind=ObjectKind.POLICY,
+            qname=QualifiedName(namespace=plain_table_ref.qname.namespace, name='Order "policy'),
+            parent=plain_table_ref,
+        ),
+        table_ref=plain_table_ref,
+        command=PolicyCommand.UPDATE,
+        permissive=True,
+        roles=('Role "Owner', "public"),
+        using_expr='"select" > 0',
+        with_check_expr='"select" >= 0',
+    )
+    new_policy = policy.model_copy(update={"command": PolicyCommand.ALL, "permissive": False})
 
     return (
         ("create function", CreateFunction(target=function_ref, function=function)),
@@ -610,6 +629,21 @@ def _emitter_cases() -> tuple[tuple[str, Delta], ...]:
         (
             "alter trigger enabled",
             AlterTriggerEnabled(target=trigger_ref, trigger=trigger, new_enabled="D"),
+        ),
+        ("create policy", CreatePolicy(target=policy.ref, policy=policy)),
+        ("drop policy", DropPolicy(target=policy.ref, policy=policy)),
+        (
+            "alter policy",
+            AlterPolicy(
+                target=policy.ref,
+                policy=policy,
+                new_roles=("public",),
+                new_using_expr='"select" >= 0',
+            ),
+        ),
+        (
+            "replace policy",
+            ReplacePolicy(target=policy.ref, old_policy=policy, new_policy=new_policy),
         ),
         ("create sequence", CreateSequence(target=sequence_ref, sequence=sequence)),
         ("drop sequence", DropSequence(target=sequence_ref, sequence=sequence)),
@@ -812,6 +846,18 @@ def _emitter_cases() -> tuple[tuple[str, Delta], ...]:
             ),
         ),
         (
+            "create table with row security",
+            CreateTable(
+                target=account_ref,
+                table=Table(
+                    ref=account_ref,
+                    columns=(Column(name="id", position=1, data_type="integer"),),
+                    row_security=True,
+                    force_row_security=True,
+                ),
+            ),
+        ),
+        (
             "create table with virtual generated column",
             CreateTable(
                 target=account_ref,
@@ -882,6 +928,14 @@ def _emitter_cases() -> tuple[tuple[str, Delta], ...]:
         (
             "set table unlogged",
             AlterTableAttrs(target=plain_table_ref, new_unlogged=True),
+        ),
+        (
+            "enable and force row security",
+            AlterTableAttrs(
+                target=plain_table_ref,
+                new_row_security=True,
+                new_force_row_security=True,
+            ),
         ),
         (
             "add nullable column",

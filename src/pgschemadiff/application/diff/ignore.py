@@ -26,6 +26,8 @@ _ATTRIBUTE_FIELDS: dict[ObjectKind, dict[str, str]] = {
         "unlogged": "new_unlogged",
         "partition_info": "new_partition_info",
         "partition_of": "new_partition_of",
+        "row_security": "new_row_security",
+        "force_row_security": "new_force_row_security",
     },
     ObjectKind.EXTENSION: {"version": "new_version", "schema": "new_schema"},
     ObjectKind.COLUMN: {
@@ -43,7 +45,8 @@ class IgnoreRules(BaseModel):
     ``objects`` matches the full :class:`ObjectRef` and suppresses deltas whose
     target is that object. ``attributes`` contains ``(ObjectRef, attribute)``
     pairs. Attribute names are ``owner``, ``tablespace``, ``comment``,
-    ``unlogged``, ``partition_info``, and ``partition_of`` for tables; ``version`` and
+    ``unlogged``, ``partition_info``, ``partition_of``, ``row_security``, and
+    ``force_row_security`` for tables; ``version`` and
     ``schema`` for extensions; and ``type``, ``default``, ``nullability``, and
     ``name`` for columns. Rules do not use globs or cascade to dependent objects.
 

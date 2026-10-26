@@ -82,6 +82,28 @@ def test_ignoring_owner_keeps_persistence_change() -> None:
     assert len(dropped) == 0
 
 
+def test_attribute_rules_filter_row_security_flags_independently() -> None:
+    table = _table_ref()
+    delta = AlterTableAttrs(
+        target=table,
+        new_row_security=True,
+        new_force_row_security=True,
+    )
+
+    kept = IgnoreRules(attributes=frozenset({(table, "row_security")})).apply(
+        DeltaSet.from_iterable((delta,))
+    )
+    dropped = IgnoreRules(
+        attributes=frozenset({(table, "row_security"), (table, "force_row_security")})
+    ).apply(DeltaSet.from_iterable((delta,)))
+
+    assert len(kept) == 1
+    assert isinstance(kept.deltas[0], AlterTableAttrs)
+    assert kept.deltas[0].new_row_security is None
+    assert kept.deltas[0].new_force_row_security is True
+    assert dropped.is_empty()
+
+
 def test_attribute_rule_filters_atomic_column_delta_only() -> None:
     table = _table_ref()
     column = _column_ref(table, "status")

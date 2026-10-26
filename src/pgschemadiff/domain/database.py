@@ -26,6 +26,7 @@ from pgschemadiff.domain.function import Function
 from pgschemadiff.domain.identity import ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index
 from pgschemadiff.domain.materialized_view import MaterializedView
+from pgschemadiff.domain.policy import Policy
 from pgschemadiff.domain.procedure import Procedure
 from pgschemadiff.domain.schema import Schema
 from pgschemadiff.domain.sequence import Sequence
@@ -205,6 +206,13 @@ class Database(BaseModel):
         result: list[Trigger] = []
         for table in self.all_tables():
             result.extend(table.triggers)
+        return tuple(result)
+
+    def all_policies(self) -> tuple[Policy, ...]:
+        """Return table-owned row-security policies across every schema."""
+        result: list[Policy] = []
+        for table in self.all_tables():
+            result.extend(table.policies)
         return tuple(result)
 
     def all_indexes(self) -> tuple[Index, ...]:

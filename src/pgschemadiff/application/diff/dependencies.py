@@ -48,6 +48,7 @@ from pgschemadiff.domain.delta.materialized_view import (
     DropMaterializedView,
     ReplaceMaterializedView,
 )
+from pgschemadiff.domain.delta.policy import AlterPolicy, CreatePolicy, DropPolicy, ReplacePolicy
 from pgschemadiff.domain.delta.procedure import CreateProcedure, DropProcedure, ReplaceProcedure
 from pgschemadiff.domain.delta.schema import (
     AlterExtension,
@@ -88,6 +89,7 @@ def order_deltas(delta_set: DeltaSet) -> DeltaSet:
     creates, drops, schema_creates = _collect_resources(nodes)
     _add_create_dependencies(nodes, creates, schema_creates, add)
     _add_trigger_dependencies(nodes, creates, drops, add)
+    _add_policy_dependencies(nodes, creates, drops, add)
     _add_enum_dependencies(nodes, add)
     _add_routine_table_dependencies(nodes, add)
     _add_drop_dependencies(nodes, drops, add)
@@ -879,6 +881,114 @@ def _add_trigger_dependencies(
             _add_trigger_drop_dependencies(delta, delta.old_trigger, drops, add)
 
 
+def _add_policy_dependencies(
+    nodes: tuple[DeltaBase, ...],
+    creates: dict[ObjectRef, list[DeltaBase]],
+    drops: dict[ObjectRef, list[DeltaBase]],
+    add: Callable[[DeltaBase, DeltaBase], None],
+) -> None:
+    policy_deltas = tuple(
+        delta
+        for delta in nodes
+        if isinstance(delta, (CreatePolicy, DropPolicy, AlterPolicy, ReplacePolicy))
+    )
+    column_additions = tuple(
+        delta
+        for delta in nodes
+        if isinstance(
+            delta,
+            (AddColumn, AlterColumnType, SetColumnDefault, SetColumnNullability, RenameColumn),
+        )
+    )
+    column_drops = tuple(delta for delta in nodes if isinstance(delta, DropColumn))
+    routine_creates = tuple(
+        delta
+        for delta in nodes
+        if isinstance(delta, (CreateFunction, ReplaceFunction, CreateProcedure, ReplaceProcedure))
+    )
+    routine_drops = tuple(
+        delta for delta in nodes if isinstance(delta, (DropFunction, DropProcedure))
+    )
+    _add_policy_type_dependencies(nodes, policy_deltas, add)
+
+    for delta in policy_deltas:
+        policy = (
+            delta.policy
+            if isinstance(delta, (CreatePolicy, DropPolicy, AlterPolicy))
+            else delta.new_policy
+        )
+        table_ref = policy.table_ref
+
+        if not isinstance(delta, DropPolicy):
+            _add_create_prerequisites(delta, (table_ref,), creates, add)
+            for column_change in column_additions:
+                if column_change.target.parent == table_ref:
+                    add(column_change, delta)
+            for routine_create in routine_creates:
+                add(routine_create, delta)
+
+        for column_drop in column_drops:
+            if column_drop.target.parent == table_ref:
+                add(delta, column_drop)
+        for routine_drop in routine_drops:
+            add(delta, routine_drop)
+        for table_drop in drops.get(table_ref, ()):
+            if isinstance(table_drop, DropTable):
+                add(delta, table_drop)
+
+        for table_attrs in nodes:
+            if (
+                isinstance(table_attrs, AlterTableAttrs)
+                and table_attrs.target == table_ref
+                and (
+                    table_attrs.new_row_security is not None
+                    or table_attrs.new_force_row_security is not None
+                )
+            ):
+                add(delta, table_attrs)
+
+
+def _add_policy_type_dependencies(
+    nodes: tuple[DeltaBase, ...],
+    policy_deltas: tuple[DeltaBase, ...],
+    add: Callable[[DeltaBase, DeltaBase], None],
+) -> None:
+    type_creates = tuple(
+        delta
+        for delta in nodes
+        if isinstance(
+            delta,
+            (
+                AddEnumValue,
+                AlterCompositeAddAttribute,
+                CreateCompositeType,
+                CreateDomain,
+                CreateEnum,
+            ),
+        )
+    )
+    type_drops = tuple(
+        delta
+        for delta in nodes
+        if isinstance(
+            delta,
+            (
+                AlterCompositeDropAttribute,
+                DropCompositeType,
+                DropDomain,
+                DropEnum,
+            ),
+        )
+    )
+    for policy_delta in policy_deltas:
+        if not isinstance(policy_delta, DropPolicy):
+            for type_create in type_creates:
+                add(type_create, policy_delta)
+        if not isinstance(policy_delta, CreatePolicy):
+            for type_drop in type_drops:
+                add(policy_delta, type_drop)
+
+
 def _add_trigger_drop_dependencies(
     delta: ReplaceTrigger,
     trigger: Trigger,
@@ -945,7 +1055,7 @@ def _add_rename_dependencies(
             if rename.new_name in referenced_tables:
                 add(rename, delta)
             if (
-                isinstance(delta, (DropTrigger, ReplaceTrigger))
+                isinstance(delta, (DropTrigger, ReplaceTrigger, DropPolicy))
                 and rename.target.qname in referenced_tables
             ):
                 add(delta, rename)

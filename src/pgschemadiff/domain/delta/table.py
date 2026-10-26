@@ -248,6 +248,12 @@ class AlterTableAttrs(DeltaBase):
     new_partition_of: PartitionOf | None = None
     """New partition-child reference, or ``None`` if not changed."""
 
+    new_row_security: bool | None = None
+    """New row-security enabled state, or ``None`` if it has not changed."""
+
+    new_force_row_security: bool | None = None
+    """New forced row-security state, or ``None`` if it has not changed."""
+
     @model_validator(mode="after")
     def _check_at_least_one_change(self) -> Self:
         if (
@@ -257,10 +263,12 @@ class AlterTableAttrs(DeltaBase):
             and self.new_unlogged is None
             and self.new_partition_info is None
             and self.new_partition_of is None
+            and self.new_row_security is None
+            and self.new_force_row_security is None
         ):
             raise ValueError(
                 "AlterTableAttrs must change at least one attribute; "
-                "all six new_* fields are None (no-op)"
+                "all new_* fields are None (no-op)"
             )
         return self
 

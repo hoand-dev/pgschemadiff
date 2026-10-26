@@ -42,6 +42,7 @@ from pgschemadiff.domain.function import Function, FunctionArgument
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index, IndexKeyColumn, IndexMethod, NullsOrder, SortOrder
 from pgschemadiff.domain.materialized_view import MaterializedView
+from pgschemadiff.domain.policy import Policy, PolicyCommand
 from pgschemadiff.domain.procedure import Procedure, ProcedureArgument
 from pgschemadiff.domain.schema import Schema
 from pgschemadiff.domain.sequence import Sequence
@@ -97,6 +98,7 @@ _SQL_ROUTINES: str = _load_sql("routines.sql")
 _SQL_VIEWS: str = _load_sql("views.sql")
 _SQL_VIEW_PREREQUISITES: str = _load_sql("view_prerequisites.sql")
 _SQL_TRIGGERS: str = _load_sql("triggers.sql")
+_SQL_POLICIES: str = _load_sql("policies.sql")
 
 # ---------------------------------------------------------------------------
 # Regex helpers for parsing pg_get_constraintdef output
@@ -656,6 +658,9 @@ class PgCatalogInspector:
 
                     await cur.execute(_SQL_TRIGGERS)
                     triggers_rows = await cur.fetchall()
+
+                    await cur.execute(_SQL_POLICIES)
+                    policies_rows = await cur.fetchall()
             finally:
                 await conn.execute("ROLLBACK")
 
@@ -676,6 +681,7 @@ class PgCatalogInspector:
             views_rows=views_rows,
             view_prerequisites_rows=view_prerequisites_rows,
             triggers_rows=triggers_rows,
+            policies_rows=policies_rows,
         )
 
     def _assemble(
@@ -697,6 +703,7 @@ class PgCatalogInspector:
         views_rows: list[Any] | None = None,
         view_prerequisites_rows: list[Any] | None = None,
         triggers_rows: list[Any] | None = None,
+        policies_rows: list[Any] | None = None,
     ) -> Database:
         """Assemble domain objects from raw catalog rows."""
         extensions = self._build_extensions(extensions_rows)
@@ -743,6 +750,7 @@ class PgCatalogInspector:
             view_prerequisites_by_view,
         )
         triggers_by_table = self._group_triggers(triggers_rows or [], allowed)
+        policies_by_table = self._group_policies(policies_rows or [], allowed)
 
         tables_by_schema, idxs_by_schema = self._build_tables(
             tables_rows,
@@ -752,6 +760,7 @@ class PgCatalogInspector:
             cons_by_table,
             prerequisites_by_table,
             triggers_by_table,
+            policies_by_table,
         )
 
         return Database(
@@ -976,6 +985,54 @@ class PgCatalogInspector:
             triggers.append(trigger)
         for triggers in result.values():
             triggers.sort(key=lambda trigger: trigger.ref.qname.name)
+        return result
+
+    @staticmethod
+    def _group_policies(
+        rows: list[Any],
+        allowed: set[str] | None,
+    ) -> dict[tuple[str, str], list[Policy]]:
+        commands = {
+            "ALL": PolicyCommand.ALL,
+            "SELECT": PolicyCommand.SELECT,
+            "INSERT": PolicyCommand.INSERT,
+            "UPDATE": PolicyCommand.UPDATE,
+            "DELETE": PolicyCommand.DELETE,
+        }
+        result: dict[tuple[str, str], list[Policy]] = {}
+        for row in rows:
+            if allowed is not None and row.schema_name not in allowed:
+                continue
+            command = commands.get(row.command)
+            if command is None:
+                raise InspectionError(f"Unsupported policy command {row.command!r}")
+            table_ref = ObjectRef(
+                kind=ObjectKind.TABLE,
+                qname=QualifiedName(namespace=row.schema_name, name=row.table_name),
+            )
+            policy = Policy(
+                ref=ObjectRef(
+                    kind=ObjectKind.POLICY,
+                    qname=QualifiedName(namespace=row.schema_name, name=row.policy_name),
+                    parent=table_ref,
+                ),
+                table_ref=table_ref,
+                command=command,
+                permissive=row.permissive,
+                roles=tuple(sorted(row.roles or ())),
+                using_expr=row.using_expr,
+                with_check_expr=row.with_check_expr,
+            )
+            key = (row.schema_name, row.table_name)
+            policies = result.setdefault(key, [])
+            if any(existing.ref == policy.ref for existing in policies):
+                raise InspectionError(
+                    f"Duplicate policy {row.schema_name}.{row.table_name}.{row.policy_name} "
+                    "in catalog rows"
+                )
+            policies.append(policy)
+        for policies in result.values():
+            policies.sort(key=lambda policy: policy.ref.qname.name)
         return result
 
     @staticmethod
@@ -1625,6 +1682,7 @@ class PgCatalogInspector:
         cons_by_table: dict[tuple[str, str], list[Any]],
         type_prerequisites_by_table: dict[tuple[str, str], list[ObjectRef]] | None = None,
         triggers_by_table: dict[tuple[str, str], list[Trigger]] | None = None,
+        policies_by_table: dict[tuple[str, str], list[Policy]] | None = None,
     ) -> tuple[dict[str, list[Table]], dict[str, list[Index]]]:
         tables_by_schema: dict[str, list[Table]] = {n: [] for n in schema_names}
         idxs_by_schema: dict[str, list[Index]] = {n: [] for n in schema_names}
@@ -1649,6 +1707,9 @@ class PgCatalogInspector:
                     columns=tuple(cols),
                     constraints=tuple(_safe_map_constraints(cons_by_table.get(key, []), col_names)),
                     triggers=tuple((triggers_by_table or {}).get(key, [])),
+                    policies=tuple((policies_by_table or {}).get(key, [])),
+                    row_security=row.row_security,
+                    force_row_security=row.force_row_security,
                     type_prerequisites=tuple((type_prerequisites_by_table or {}).get(key, [])),
                     unlogged=row.unlogged,
                     owner=row.owner,

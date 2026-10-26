@@ -34,6 +34,7 @@ from pgschemadiff.application.diff.comparators.extension import ExtensionCompara
 from pgschemadiff.application.diff.comparators.function import FunctionComparator
 from pgschemadiff.application.diff.comparators.index import IndexComparator
 from pgschemadiff.application.diff.comparators.materialized_view import MaterializedViewComparator
+from pgschemadiff.application.diff.comparators.policy import PolicyComparator
 from pgschemadiff.application.diff.comparators.procedure import ProcedureComparator
 from pgschemadiff.application.diff.comparators.schema import SchemaComparator
 from pgschemadiff.application.diff.comparators.sequence import SequenceComparator
@@ -57,6 +58,7 @@ __all__ = [
     "FunctionComparator",
     "IndexComparator",
     "MaterializedViewComparator",
+    "PolicyComparator",
     "ProcedureComparator",
     "SchemaComparator",
     "SequenceComparator",

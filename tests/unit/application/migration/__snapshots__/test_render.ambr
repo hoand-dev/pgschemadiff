@@ -330,6 +330,9 @@
                 ],
                 "constraints": [],
                 "triggers": [],
+                "policies": [],
+                "row_security": false,
+                "force_row_security": false,
                 "type_prerequisites": [],
                 "owner": null,
                 "tablespace": null,
@@ -458,7 +461,7 @@
         - `up.sql`: `a6e992690fd58b789759956c7ec05f9c01aa1694ab140f106d2a915c6f8bd526`
         - `down.sql`: `e87201d8d4470825bb2bea1bd7a4503e7152abd3a22dbd70418d51cfa851166e`
         - `manifest.json`: `04fa4ef4e470362e9755d7177a7988b21c8d956dd3254c962b5702bb05a8deb8`
-        - `deltas.json`: `daa089f0e887b0f9d26b8d88c2fb2d350c66ff44ae9e3c94448777cdb8e7e078`
+        - `deltas.json`: `57f1524c4b9a5529b02b99ff8baec47046be4ec3ef2084281f99017702f15e3e`
         
         ## Warnings
         

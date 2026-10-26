@@ -13,6 +13,7 @@ from pgschemadiff.application.sql_emit import (
     function_emitter,
     index_emitter,
     materialized_view_emitter,
+    policy_emitter,
     procedure_emitter,
     schema_emitter,
     sequence_emitter,
@@ -45,6 +46,7 @@ def default_handlers() -> dict[type[DeltaBase], SqlHandler]:
         procedure_emitter.handlers(),
         schema_emitter.handlers(),
         sequence_emitter.handlers(),
+        policy_emitter.handlers(),
     ):
         for delta_type, handler in emitter_handlers.items():
             if delta_type in handlers:

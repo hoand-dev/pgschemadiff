@@ -32,6 +32,8 @@ def _table(
     partition_of: PartitionOf | None = None,
     comment: str | None = None,
     unlogged: bool = False,
+    row_security: bool = False,
+    force_row_security: bool = False,
 ) -> Table:
     return Table(
         ref=ref or _table_ref(),
@@ -43,6 +45,8 @@ def _table(
         partition_of=partition_of,
         comment=comment,
         unlogged=unlogged,
+        row_security=row_security,
+        force_row_security=force_row_security,
     )
 
 
@@ -130,6 +134,40 @@ def test_create_unlogged_table_uses_unlogged_keyword() -> None:
 
     assert tuple(statement.sql for statement in statements) == (
         'CREATE UNLOGGED TABLE "Sales"."Order""Items" ("id" integer)',
+    )
+
+
+def test_create_table_emits_row_security_flags() -> None:
+    ref = _table_ref()
+    table = _table(
+        ref=ref,
+        columns=(Column(name="id", position=1, data_type="integer"),),
+        row_security=True,
+        force_row_security=True,
+    )
+    delta = CreateTable(target=ref, table=table)
+
+    statements = _assert_emitted(handlers()[CreateTable](delta), delta, 3)
+
+    assert tuple(statement.sql for statement in statements) == (
+        'CREATE TABLE "Sales"."Order""Items" ("id" integer)',
+        'ALTER TABLE "Sales"."Order""Items" ENABLE ROW LEVEL SECURITY',
+        'ALTER TABLE "Sales"."Order""Items" FORCE ROW LEVEL SECURITY',
+    )
+
+
+def test_alter_table_attrs_emits_rls_disable_and_no_force() -> None:
+    delta = AlterTableAttrs(
+        target=_table_ref(),
+        new_row_security=False,
+        new_force_row_security=False,
+    )
+
+    statements = _assert_emitted(handlers()[AlterTableAttrs](delta), delta, 2)
+
+    assert tuple(statement.sql for statement in statements) == (
+        'ALTER TABLE "Sales"."Order""Items" DISABLE ROW LEVEL SECURITY',
+        'ALTER TABLE "Sales"."Order""Items" NO FORCE ROW LEVEL SECURITY',
     )
 
 

@@ -311,6 +311,7 @@ from pgschemadiff.domain.delta.enum import EnumDelta  # noqa: E402
 from pgschemadiff.domain.delta.function import FunctionDelta  # noqa: E402
 from pgschemadiff.domain.delta.index import IndexDelta  # noqa: E402
 from pgschemadiff.domain.delta.materialized_view import MaterializedViewDelta  # noqa: E402
+from pgschemadiff.domain.delta.policy import PolicyDelta  # noqa: E402
 from pgschemadiff.domain.delta.procedure import ProcedureDelta  # noqa: E402
 from pgschemadiff.domain.delta.schema import ExtensionDelta, SchemaDelta  # noqa: E402
 from pgschemadiff.domain.delta.sequence import SequenceDelta  # noqa: E402
@@ -330,6 +331,7 @@ Delta = Annotated[
     | EnumDelta
     | FunctionDelta
     | ProcedureDelta
+    | PolicyDelta
     | SequenceDelta
     | ViewDelta
     | MaterializedViewDelta

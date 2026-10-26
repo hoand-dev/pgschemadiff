@@ -22,6 +22,7 @@ from pgschemadiff.domain.delta import (
     AlterExtension,
     AlterFunctionOwner,
     AlterMaterializedViewOwner,
+    AlterPolicy,
     AlterProcedureOwner,
     AlterSequenceOptions,
     AlterSequenceOwnedBy,
@@ -36,6 +37,7 @@ from pgschemadiff.domain.delta import (
     CreateFunction,
     CreateIndex,
     CreateMaterializedView,
+    CreatePolicy,
     CreateProcedure,
     CreateSchema,
     CreateSequence,
@@ -53,6 +55,7 @@ from pgschemadiff.domain.delta import (
     DropFunction,
     DropIndex,
     DropMaterializedView,
+    DropPolicy,
     DropProcedure,
     DropSchema,
     DropSequence,
@@ -67,6 +70,7 @@ from pgschemadiff.domain.delta import (
     ReplaceFunction,
     ReplaceIndex,
     ReplaceMaterializedView,
+    ReplacePolicy,
     ReplaceProcedure,
     ReplaceTrigger,
     ReplaceView,
@@ -177,6 +181,10 @@ _SUPPORTED_DELTA_TYPES: tuple[type[DeltaBase], ...] = (
     DropTrigger,
     ReplaceTrigger,
     AlterTriggerEnabled,
+    CreatePolicy,
+    DropPolicy,
+    AlterPolicy,
+    ReplacePolicy,
 )
 
 
@@ -230,7 +238,12 @@ def classify_risk(  # noqa: PLR0912, PLR0915
                 "Extension schema relocation is operationally sensitive.",
             )
     elif isinstance(delta, CreateTable):
-        if delta.table.partition_of is not None:
+        if delta.table.row_security or delta.table.force_row_security:
+            level, reason = (
+                RiskLevel.DANGEROUS,
+                "Creates a table with row-level security access behavior enabled.",
+            )
+        elif delta.table.partition_of is not None:
             level, reason = (
                 RiskLevel.WARNING,
                 "Creating a partition child affects its parent table.",
@@ -248,7 +261,12 @@ def classify_risk(  # noqa: PLR0912, PLR0915
         has_partition_change = (
             delta.new_partition_info is not None or delta.new_partition_of is not None
         )
-        if delta.new_unlogged is not None:
+        if delta.new_row_security is not None or delta.new_force_row_security is not None:
+            level, reason = (
+                RiskLevel.DANGEROUS,
+                "Changes row-level security access behavior.",
+            )
+        elif delta.new_unlogged is not None:
             level, reason = (
                 RiskLevel.DANGEROUS,
                 "Changing table persistence rewrites the table under an ACCESS EXCLUSIVE lock.",
@@ -364,6 +382,10 @@ def classify_risk(  # noqa: PLR0912, PLR0915
             RiskLevel.DESTRUCTIVE,
             "Removes trigger behavior from future table writes.",
         )
+    elif isinstance(delta, (CreatePolicy, AlterPolicy, ReplacePolicy)):
+        level, reason = RiskLevel.DANGEROUS, "Changes row-level security access behavior."
+    elif isinstance(delta, DropPolicy):
+        level, reason = RiskLevel.DESTRUCTIVE, "Removes a row-level security policy."
     elif isinstance(delta, AddColumn):
         conditions = []
         is_virtual_generated = (
