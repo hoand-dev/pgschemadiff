@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pgschemadiff"
-version = "0.0.0"
+version = "0.1.0"
 description = "Compare PostgreSQL schemas, generate safe migrations, with TUI and CLI."
 readme = "README.md"
 requires-python = ">=3.13"
@@ -12,7 +12,7 @@ license = { file = "LICENSE" }
 authors = [{ name = "hoand-dev", email = "hoand.dev@mdfhongnghi.vn" }]
 keywords = ["postgres", "postgresql", "schema", "diff", "migration", "tui", "cli"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",

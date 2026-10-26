@@ -14,14 +14,19 @@
 - Apply migrations with per-unit transaction semantics and lock-timeout safety
 - Drive everything from a Textual TUI or a `pgsd` CLI
 
-## Quickstart
-
-> `pgsd inspect`, `pgsd diff`, `pgsd generate` and `pgsd apply` are implemented for the MVP-A object set (schemas, extensions, tables, columns, indexes, constraints). The TUI still runs on mock data.
+## Installation
 
 ```bash
-# install (Phase 5)
 uv tool install pgschemadiff
+# or
+pipx install pgschemadiff
+```
 
+## Quickstart
+
+> `pgsd inspect`, `pgsd diff`, `pgsd generate` and `pgsd apply` cover schemas, extensions, tables, columns, indexes, constraints, sequences, enum/composite/domain types, functions, procedures, views, materialized views, triggers and RLS policies. The TUI runs the same pipeline against your profiles.
+
+```bash
 # launch the TUI
 pgsd                  # or: pgsd tui
 
@@ -86,20 +91,6 @@ domain/         ← pure Pydantic models, no IO
 ```
 
 See [`docs/architecture.md`](docs/architecture.md) and [`docs/adr/`](docs/adr/) for the decision log.
-
-## Home screen prototype (legacy)
-
-A standalone Home-screen prototype lives at the **repository root** (`app.py`, `home.py`, `profile.py`, `profile_detail.py`, `profile_item.py`, `yaml_loader.py`, `__main__.py`, `styles.tcss`, `profiles.yaml`). It pre-dates the Clean Architecture refactor and is preserved as a reference for the Connection-screen behaviour the user designed.
-
-Run it directly:
-
-```bash
-PYTHONPATH=. python -m pgschemadiff           # uses the root-level __main__.py
-# or
-python app.py
-```
-
-It is **not** wired into the `pgsd` CLI. The Phase 4 task `P4-TUI-02 (ConnectionView)` will integrate its `Profile` / `ConnectionInfo` data model and the `profiles.yaml` loader into `src/pgschemadiff/{domain,infrastructure,presentation}/`. Until then the two trees coexist; new development goes under `src/pgschemadiff/`.
 
 ## License
 

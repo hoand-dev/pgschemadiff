@@ -120,3 +120,34 @@ jobs:
         run: uv sync --extra dev
       - name: pytest (benchmark)
         run: uv run pytest tests/benchmark -m benchmark -v -s --benchmark-columns=min,mean,max
+
+  package:
+    name: Build package
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+      - name: Build distributions
+        run: uv build
+      - name: Check package metadata
+        run: uvx twine check --strict dist/*
+      - name: Check distribution contents
+        run: python scripts/check_dist.py dist
+      - name: Smoke test wheel
+        run: |
+          uv venv --python ${{ env.PYTHON_VERSION }} /tmp/smoke
+          uv pip install --python /tmp/smoke dist/*.whl
+          /tmp/smoke/bin/pgsd --version
+          /tmp/smoke/bin/pgsd --help
+          /tmp/smoke/bin/python -c 'from importlib import resources; catalog = resources.files("pgschemadiff.infrastructure.postgres.catalog"); sql_files = [path for path in catalog.iterdir() if path.name.endswith(".sql")]; assert sql_files and all(path.read_text(encoding="utf-8") for path in sql_files)'
+      - name: Upload distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: distributions
+          path: dist/
+          retention-days: 7
