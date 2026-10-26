@@ -1,187 +1,353 @@
-"""Apply view (``ga``) — pre-flight checklist, progress worker, live log."""
+"""Apply a validated saved bundle to the selected profile's target."""
 
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING
 
-from rich.markup import escape
-from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.reactive import reactive
+from textual.containers import Horizontal, VerticalScroll
+from textual.message import Message
 from textual.widget import Widget
-from textual.widgets import Log, ProgressBar, Static
-from textual.worker import Worker, get_current_worker
+from textual.widgets import Button, Input, ProgressBar, Static
 
-from pgschemadiff.presentation.tui._mock import APPLY_STEPS, PREFLIGHT
-from pgschemadiff.presentation.tui.views._common import Panel, SectionHeader
+from pgschemadiff.application.migration.apply import (
+    ApplyEvent,
+    ApplyResult,
+    RunCancelled,
+    RunFinished,
+    RunStarted,
+    StatementFinished,
+    StatementStarted,
+    UnitFailed,
+    UnitFinished,
+    UnitStarted,
+)
+from pgschemadiff.application.sql_emit.risk import RiskLevel
+from pgschemadiff.presentation.tui.views._common import Panel, SectionHeader, markup
 
 if TYPE_CHECKING:
-    from textual import events
     from textual.app import ComposeResult
+    from textual.content import Content
 
-# Seconds between simulated steps — small so the demo (and tests) move quickly.
-_STEP_DELAY = 0.05
-_SEV_COLOUR = {"ok": "$success", "warn": "$warning", "err": "$error", "info": "$secondary"}
+    from pgschemadiff.application.migration.bundle import ValidatedBundle
+    from pgschemadiff.presentation.tui.session import TuiSession
+
+
+class ApplyOperationRequested(Message):
+    """Request a dry-run connectivity check or confirmed apply."""
+
+    def __init__(self, *, dry_run: bool, lock_timeout: str, statement_timeout: str) -> None:
+        super().__init__()
+        self.dry_run = dry_run
+        self.lock_timeout = lock_timeout
+        self.statement_timeout = statement_timeout
+
+
+class CancelApplyRequested(Message):
+    """Cancel the active apply worker."""
 
 
 class ApplyView(Widget):
-    """Confirm → run → success/failed lifecycle with a streaming log."""
-
-    phase: reactive[str] = reactive("confirm")
-    dry_run: reactive[bool] = reactive(True)
-
-    _worker_ref: Worker[None] | None = None
+    """Show the saved bundle, apply options, event progress, and result."""
 
     DEFAULT_CSS = """
     ApplyView { height: 1fr; }
     ApplyView > VerticalScroll { height: 1fr; padding: 1 2; }
-    ApplyView .toolbar { height: 1; margin-bottom: 1; }
-    ApplyView .action { padding: 0 1; margin-left: 1; background: $boost; color: $text; }
-    ApplyView .action.primary { background: $primary; color: $background; text-style: bold; }
-    ApplyView .action.danger { background: $error; color: $background; text-style: bold; }
-    ApplyView .action:hover { background: $surface-lighten-1; }
-    ApplyView .pf-item { padding: 0 1; height: 1; }
-    ApplyView #steps { height: auto; padding: 1 0; color: $text-muted; }
-    ApplyView Log { height: 16; background: $panel; border: round $surface-lighten-1; }
-
-    /* phase-driven visibility */
-    ApplyView #pf-panel, ApplyView #progress-panel, ApplyView #log-panel { display: none; }
-    ApplyView.confirm #pf-panel { display: block; }
-    ApplyView.running #progress-panel, ApplyView.running #log-panel { display: block; }
-    ApplyView.success #progress-panel, ApplyView.success #log-panel { display: block; }
-    ApplyView.failed #progress-panel, ApplyView.failed #log-panel { display: block; }
-
-    ApplyView #btn-run { display: none; }
-    ApplyView #btn-abort { display: none; }
-    ApplyView #btn-new { display: none; }
-    ApplyView.confirm #btn-run { display: block; }
-    ApplyView.confirm #btn-dry { display: block; }
-    ApplyView.running #btn-abort { display: block; }
-    ApplyView.success #btn-new { display: block; }
-    ApplyView.failed #btn-new { display: block; }
+    ApplyView .toolbar { height: auto; margin-bottom: 1; }
+    ApplyView .toolbar > * { margin-right: 1; }
+    ApplyView Input { width: 15; }
+    ApplyView #apply-target, ApplyView #apply-bundle, ApplyView #apply-summary,
+    ApplyView #apply-warning, ApplyView #apply-status, ApplyView #apply-result,
+    ApplyView #apply-progress-label { height: auto; }
+    ApplyView #apply-warning { color: $warning; }
+    ApplyView #apply-status.error { color: $error; }
+    ApplyView #apply-result { color: $success; }
+    ApplyView #apply-log { height: auto; min-height: 8; background: $panel; padding: 1; }
     """
 
     def compose(self) -> ComposeResult:
-        yield SectionHeader("Apply migration", "→ acme_staging · 25 changes · est ~26 min")
+        yield SectionHeader("Apply migration")
         with VerticalScroll():
-            with Horizontal(classes="toolbar"):
-                yield Static("✓ dry-run", classes="action", id="btn-dry")
-                yield Static("⏎ run dry-run", classes="action primary", id="btn-run")
-                yield Static("⌘. abort & rollback", classes="action danger", id="btn-abort")
-                yield Static("new run", classes="action primary", id="btn-new")
-            with Panel("Pre-flight checklist", subtitle="AI verified", id="pf-panel"):
-                for item in PREFLIGHT:
-                    colour = _SEV_COLOUR[item.sev]
-                    yield Static(
-                        f"[{colour} bold]{item.glyph}[/] [$text]{escape(item.text)}[/]",
-                        classes="pf-item",
-                    )
-                yield Static(
-                    "\n[$text-muted]command preview:[/]  "
-                    "[$primary]pgschemadiff apply --target acme_staging "
-                    "--plan migration_20260523_142208.sql --auto-rollback-on-error[/]",
-                    classes="pf-item",
-                )
-            with Panel("Progress", id="progress-panel"):
-                yield ProgressBar(total=len(APPLY_STEPS), show_eta=False, id="apply-bar")
-                yield Static(self._steps_markup(0), id="steps")
-            with Vertical(id="log-panel"):
-                yield Static("[$text-muted]tail -f migration.log[/]")
-                yield Log(id="apply-log", highlight=False)
-
-    # ------------------------------------------------------------- lifecycle
-
-    def watch_phase(self, phase: str) -> None:
-        for name in ("confirm", "running", "success", "failed"):
-            self.set_class(name == phase, name)
-
-    def watch_dry_run(self, value: bool) -> None:
-        try:
-            self.query_one("#btn-dry", Static).update("✓ dry-run" if value else "✗ dry-run")
-            self.query_one("#btn-run", Static).update("⏎ run dry-run" if value else "⏎ apply now")
-        except Exception:
-            return
-
-    def on_mount(self) -> None:
-        self.phase = "confirm"
-
-    @staticmethod
-    def _steps_markup(done: int) -> str:
-        cells = []
-        for i in range(len(APPLY_STEPS)):
-            if i < done:
-                cells.append("[$success]▰[/]")
-            elif i == done:
-                cells.append("[$primary]▰[/]")
-            else:
-                cells.append("[$surface-lighten-1]▱[/]")
-        return " ".join(cells)
-
-    @staticmethod
-    def _stamp(i: int) -> str:
-        secs = 8 + i
-        return f"14:22:{secs % 60:02d}"
-
-    def _start(self) -> None:
-        self.phase = "running"
-        bar = self.query_one("#apply-bar", ProgressBar)
-        bar.update(total=len(APPLY_STEPS), progress=0)
-        log = self.query_one("#apply-log", Log)
-        log.clear()
-        target = "dry-run sandbox" if self.dry_run else "acme_staging"
-        log.write_line(f"14:22:08 [info] connecting to {target} …")
-        log.write_line("14:22:08 [ ok ] connected (postgres 16.2, ssl verify-full)")
-        log.write_line("14:22:08 [info] BEGIN; SET lock_timeout='5s';")
-        self._run_steps()
-
-    def _run_steps(self) -> None:
-        self._worker_ref = self.run_worker(self._worker(), exclusive=True, name="apply")
-
-    async def _worker(self) -> None:
-        worker = get_current_worker()
-        log = self.query_one("#apply-log", Log)
-        bar = self.query_one("#apply-bar", ProgressBar)
-        steps = self.query_one("#steps", Static)
-        for i, step in enumerate(APPLY_STEPS):
-            if worker.is_cancelled:
-                return
-            steps.update(self._steps_markup(i))
-            log.write_line(f"{self._stamp(i)} [info] [{step.id}] {step.label} …")
-            await asyncio.sleep(_STEP_DELAY)
-            note = (
-                "warning: brief AccessExclusive lock" if step.kind == "warn" else "0 rows affected"
+            yield Static("No profile selected.", id="apply-target")
+            yield Static("No saved bundle.", id="apply-bundle")
+            yield Static(
+                "Load a saved migration bundle to inspect its validated contents.",
+                id="apply-summary",
             )
-            tag = "[warn]" if step.kind == "warn" else "[ ok ]"
-            log.write_line(f"{self._stamp(i)} {tag}   ↳ done · {note}")
-            bar.advance(1)
-        steps.update(self._steps_markup(len(APPLY_STEPS)))
-        log.write_line("14:22:30 [ ok ] ✓ migration complete · 18 steps · 0 errors")
-        self.phase = "success"
+            yield Static(" ", id="apply-warning")
+            with Panel("Apply options"):
+                with Horizontal(classes="toolbar"):
+                    yield Static("Lock timeout (ms or s/min)")
+                    yield Input("5000ms", id="apply-lock-timeout")
+                    yield Static("Statement timeout (0 = unlimited)")
+                    yield Input("0", id="apply-statement-timeout")
+                with Horizontal(classes="toolbar"):
+                    yield Button("Dry run — connectivity only", id="apply-dry-run")
+                    yield Button("Apply…", id="apply-start", variant="primary")
+                    yield Button("Cancel run", id="apply-cancel", variant="error")
+            yield Static("", id="apply-status", classes="status")
+            yield Static("", id="apply-result")
+            with Panel("Progress"):
+                yield ProgressBar(total=1, show_eta=False, id="apply-bar")
+                yield Static("No apply events yet.", id="apply-progress-label")
+            with Panel("Apply event log"):
+                yield Static("", id="apply-log")
 
-    def _abort(self) -> None:
-        if self._worker_ref is not None:
-            self._worker_ref.cancel()
-        log = self.query_one("#apply-log", Log)
-        log.write_line("14:22:30 [ err] ✗ aborted by user · ROLLBACK; ✓ done")
-        self.phase = "failed"
+    def update_from_session(self, session: TuiSession) -> None:
+        """Render session state without exposing DSNs, SQL, or driver text."""
+        profile = session.selected_profile
+        if profile is None:
+            target_content = markup("No profile selected.")
+        else:
+            target_content = markup(
+                "Target: $profile · database $database",
+                profile=profile.name,
+                database=profile.target.database,
+            )
+        self.query_one("#apply-target", Static).update(target_content)
 
-    def _reset(self) -> None:
-        if self._worker_ref is not None:
-            self._worker_ref.cancel()
-        self.query_one("#apply-bar", ProgressBar).update(progress=0)
-        self.query_one("#apply-log", Log).clear()
-        self.query_one("#steps", Static).update(self._steps_markup(0))
-        self.phase = "confirm"
+        path = session.written_bundle_path
+        if path is None:
+            self.query_one("#apply-bundle", Static).update(
+                "No saved bundle. Save a bundle in Migration before applying."
+            )
+        else:
+            self.query_one("#apply-bundle", Static).update(markup("Bundle path: $path", path=path))
 
-    # ----------------------------------------------------------------- events
+        bundle = session.validated_bundle
+        if bundle is None:
+            summary = (
+                "Bundle not loaded."
+                if path is None
+                else "Bundle is loading or could not be validated."
+            )
+            self.query_one("#apply-summary", Static).update(markup("$summary", summary=summary))
+            warning_content = markup(" ")
+            unit_count = 0
+        else:
+            risk = bundle.overall_max_risk.value if bundle.overall_max_risk is not None else "none"
+            summary = (
+                f"{bundle.delta_count} delta(s) · {len(bundle.units)} unit(s) · highest risk {risk}"
+            )
+            self.query_one("#apply-summary", Static).update(markup("$summary", summary=summary))
+            warning_content = _risk_warning(bundle)
+            unit_count = len(bundle.units)
 
-    def on_click(self, event: events.Click) -> None:
-        wid = getattr(event.widget, "id", None) or ""
-        if wid == "btn-dry":
-            self.dry_run = not self.dry_run
-        elif wid == "btn-run":
-            self._start()
-        elif wid == "btn-abort":
-            self._abort()
-        elif wid == "btn-new":
-            self._reset()
+        self.query_one("#apply-warning", Static).update(warning_content)
+        status_widget = self.query_one("#apply-status", Static)
+        status_widget.update(
+            markup("$status", status=session.apply_status) if session.apply_status else " "
+        )
+        status_widget.set_class(
+            session.apply_status
+            in {
+                "Could not load migration bundle.",
+                "Database connection failed.",
+                "Migration apply failed.",
+            }
+            or session.apply_status.startswith("Error:"),
+            "error",
+        )
+
+        result_content = _result_summary(session.apply_result)
+        self.query_one("#apply-result", Static).update(result_content)
+
+        total = max(1, unit_count)
+        completed_units = sum(isinstance(event, UnitFinished) for event in session.apply_events)
+        if session.apply_result is not None:
+            completed_units = session.apply_result.applied_unit_count
+        bar = self.query_one("#apply-bar", ProgressBar)
+        bar.update(total=total, progress=min(completed_units, total))
+        progress_text = _progress_label(session.apply_events, unit_count)
+        self.query_one("#apply-progress-label", Static).update(
+            markup("$progress", progress=progress_text)
+        )
+
+        log = self.query_one("#apply-log", Static)
+        log.update(_event_log_content(session.apply_event_timestamps, session.apply_events))
+
+        busy = session.apply_operation in {"loading", "dry-run", "apply"}
+        ready = bundle is not None and path is not None and profile is not None
+        self.query_one("#apply-dry-run", Button).disabled = busy or not ready
+        self.query_one("#apply-start", Button).disabled = busy or not ready
+        cancel = self.query_one("#apply-cancel", Button)
+        cancel.display = session.apply_operation == "apply"
+        cancel.disabled = session.apply_operation != "apply"
+        self.query_one("#apply-lock-timeout", Input).disabled = busy
+        self.query_one("#apply-statement-timeout", Input).disabled = busy
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        button_id = event.button.id
+        if button_id in {"apply-dry-run", "apply-start"}:
+            self.post_message(
+                ApplyOperationRequested(
+                    dry_run=button_id == "apply-dry-run",
+                    lock_timeout=self.query_one("#apply-lock-timeout", Input).value.strip(),
+                    statement_timeout=self.query_one(
+                        "#apply-statement-timeout", Input
+                    ).value.strip(),
+                )
+            )
+        elif button_id == "apply-cancel":
+            self.post_message(CancelApplyRequested())
+        else:
+            return
+        event.stop()
+
+
+def _risk_warning(bundle: ValidatedBundle) -> Content:
+    assessments = {assessment.delta_id: assessment for assessment in bundle.assessments}
+    lines = []
+    for unit in bundle.units:
+        if unit.max_risk not in {RiskLevel.DESTRUCTIVE, RiskLevel.BLOCKED}:
+            continue
+        reasons = "; ".join(
+            dict.fromkeys(assessments[delta_id].reason for delta_id in unit.delta_ids)
+        )
+        label = "BLOCKED" if unit.max_risk is RiskLevel.BLOCKED else "DESTRUCTIVE"
+        lines.append(
+            markup(
+                "[$warning bold]$label[/] unit $index · deltas $delta_ids · $reasons",
+                label=label,
+                index=unit.index,
+                delta_ids=", ".join(unit.delta_ids),
+                reasons=reasons,
+            )
+        )
+    if not lines:
+        return markup("No destructive or blocked units.")
+    content = markup(" ")
+    for line in lines:
+        if content.plain.strip():
+            content = content.append("\n")
+        content = content.append(line)
+    if any(unit.max_risk is RiskLevel.DESTRUCTIVE for unit in bundle.units):
+        content = content.append("\n").append(
+            markup(
+                "Dry-run executes no migration SQL; destructive apply requires explicit approval."
+            )
+        )
+    return content
+
+
+def _progress_label(events: list[ApplyEvent], unit_count: int) -> str:
+    if not events:
+        return "No apply events yet."
+    event = events[-1]
+    if isinstance(event, UnitStarted | UnitFinished | UnitFailed):
+        return f"Unit {event.unit_index + 1}/{event.unit_count} · elapsed {event.elapsed:.2f}s"
+    if isinstance(event, StatementStarted | StatementFinished):
+        return (
+            f"Unit {event.unit_index + 1}/{event.unit_count} · "
+            f"statement {event.statement_index + 1}/{event.statement_count} · "
+            f"delta {event.delta_id} · elapsed {event.elapsed:.2f}s"
+        )
+    if isinstance(event, RunStarted):
+        return f"Run started · {unit_count} unit(s) · elapsed {event.elapsed:.2f}s"
+    if isinstance(event, RunFinished):
+        return (
+            f"Run {event.status} · {event.applied_unit_count}/{event.unit_count} units · "
+            f"elapsed {event.elapsed:.2f}s"
+        )
+    if isinstance(event, RunCancelled):
+        return f"Run cancelled · elapsed {event.elapsed:.2f}s"
+
+
+def _event_log_content(timestamps: list[str], events: list[ApplyEvent]) -> Content:
+    rendered_log = markup("")
+    for timestamp, event in zip(timestamps, events, strict=False):
+        kind, details = _event_log_parts(event)
+        if rendered_log.plain:
+            rendered_log = rendered_log.append("\n")
+        rendered_log = rendered_log.append(
+            markup(
+                "[$text-muted]$time[/] [$primary]$kind[/] $details",
+                time=timestamp,
+                kind=kind,
+                details=details,
+            )
+        )
+    return rendered_log
+
+
+def _event_log_parts(event: ApplyEvent) -> tuple[str, str]:
+    if isinstance(event, RunStarted):
+        return (
+            "RunStarted",
+            f"units={event.unit_count} resumed={str(event.resumed).lower()} "
+            f"elapsed={event.elapsed:.2f}s",
+        )
+    if isinstance(event, UnitStarted):
+        return (
+            "UnitStarted",
+            f"unit={event.unit_index + 1}/{event.unit_count} statements={event.statement_count} "
+            f"deltas={','.join(event.delta_ids)} elapsed={event.elapsed:.2f}s",
+        )
+    if isinstance(event, (StatementStarted, StatementFinished)):
+        return (
+            type(event).__name__,
+            f"unit={event.unit_index + 1}/{event.unit_count} "
+            f"statement={event.statement_index + 1}/{event.statement_count} "
+            f"delta={event.delta_id} elapsed={event.elapsed:.2f}s",
+        )
+    if isinstance(event, UnitFinished):
+        return (
+            "UnitFinished",
+            f"unit={event.unit_index + 1}/{event.unit_count} status=applied "
+            f"deltas={','.join(event.delta_ids)} elapsed={event.elapsed:.2f}s",
+        )
+    if isinstance(event, UnitFailed):
+        return (
+            "UnitFailed",
+            f"unit={event.unit_index + 1}/{event.unit_count} "
+            f"statement={event.statement_index + 1}/{event.statement_count} "
+            f"delta={event.delta_id} error={event.error_class} "
+            f"SQLSTATE={event.sqlstate or 'unknown'} elapsed={event.elapsed:.2f}s",
+        )
+    if isinstance(event, RunFinished):
+        return (
+            "RunFinished",
+            f"status={event.status} units={event.applied_unit_count}/{event.unit_count} "
+            f"elapsed={event.elapsed:.2f}s",
+        )
+    if isinstance(event, RunCancelled):
+        current_unit = (
+            "unknown" if event.current_unit_index is None else str(event.current_unit_index)
+        )
+        current_statement = (
+            "unknown"
+            if event.current_statement_index is None
+            else str(event.current_statement_index)
+        )
+        return (
+            "RunCancelled",
+            f"unit_index={current_unit} statement_index={current_statement} "
+            f"elapsed={event.elapsed:.2f}s",
+        )
+
+
+def _result_summary(result: ApplyResult | None) -> Content | str:
+    if result is None:
+        return " "
+    content = markup(
+        "Result: status=$status · units=$applied/$total · resumed=$resumed · elapsed=$elapsed",
+        status=result.status,
+        applied=result.applied_unit_count,
+        total=result.unit_count,
+        resumed="yes" if result.resumed else "no",
+        elapsed=f"{result.elapsed:.2f}s",
+    )
+    if result.failed_unit_index is not None:
+        content = content.append("\n").append(
+            markup(
+                "Failure: unit_index=$unit · statement_index=$statement · delta=$delta · "
+                "error=$error · SQLSTATE=$sqlstate",
+                unit=result.failed_unit_index,
+                statement=result.failed_statement_index,
+                delta=result.delta_id or "unknown",
+                error=result.error_class or "unknown",
+                sqlstate=result.sqlstate or "unknown",
+            )
+        )
+        if result.manual_inspection_required:
+            content = content.append("\n").append(markup("Manual inspection required."))
+    return content

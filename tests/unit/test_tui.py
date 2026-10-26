@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import threading
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, cast
 from unittest.mock import Mock
 
 import pytest
+from psycopg import OperationalError
 from rich.text import Text
 from textual.content import Content
 from textual.widgets import Button, ContentSwitcher, DataTable, Input, Select, Static
@@ -15,7 +18,9 @@ from typer.testing import CliRunner
 
 import pgschemadiff.presentation.tui.app as tui_app_module
 from pgschemadiff.application.diff.compare_schemas import SchemaComparisonResult
+from pgschemadiff.application.migration.apply import apply_migration
 from pgschemadiff.application.migration.generate import generate_migration
+from pgschemadiff.application.migration.ports import UnitFailure
 from pgschemadiff.application.migration.render import RenderedBundle, render_bundle
 from pgschemadiff.application.sql_emit.risk import RiskLevel
 from pgschemadiff.domain.database import Database
@@ -32,7 +37,7 @@ from pgschemadiff.presentation.tui.app import _VIEW_CHORDS
 from pgschemadiff.presentation.tui.screens.ai import AiModal
 from pgschemadiff.presentation.tui.screens.help import HelpScreen
 from pgschemadiff.presentation.tui.screens.main import MainScreen
-from pgschemadiff.presentation.tui.views import ApplyView, DiffView, MigrationView
+from pgschemadiff.presentation.tui.views import DiffView, MigrationView
 from pgschemadiff.presentation.tui.views._common import (
     AiRequested,
     ApplyRequested,
@@ -45,10 +50,20 @@ from pgschemadiff.presentation.tui.views.history import HistoryView
 from pgschemadiff.presentation.tui.widgets import Cmdbar
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Callable
     from pathlib import Path
 
+    from pgschemadiff.application.migration.apply import ApplyEvent, ApplyResult
+    from pgschemadiff.application.migration.bundle import BundleUnit, ValidatedBundle
     from pgschemadiff.application.migration.model import MigrationPlan
-    from pgschemadiff.application.migration.ports import BundleReader, MigrationWriter
+    from pgschemadiff.application.migration.ports import (
+        BundleReader,
+        MigrationExecutor,
+        MigrationWriter,
+        RunFailure,
+        RunFinishStatus,
+        StatementObserver,
+    )
     from pgschemadiff.infrastructure.config.yaml_loader import ProfileLoader
     from pgschemadiff.presentation.composition import (
         CompareCallable,
@@ -78,20 +93,110 @@ class _RecordingMigrationWriter:
         return self.delegate.write(plan, output_dir)
 
 
+class _FakeBundleReader:
+    def __init__(self, files: tuple[bytes, bytes], error: Exception | None = None) -> None:
+        self.files = files
+        self.error = error
+        self.paths: list[Path] = []
+        self.thread_id: int | None = None
+
+    def read(self, bundle_dir: Path) -> tuple[bytes, bytes]:
+        self.paths.append(bundle_dir)
+        self.thread_id = threading.get_ident()
+        if self.error is not None:
+            raise self.error
+        return self.files
+
+
+class _FakeMigrationExecutor:
+    def __init__(
+        self,
+        *,
+        started: asyncio.Event | None = None,
+        release: asyncio.Event | None = None,
+        failure: UnitFailure | None = None,
+    ) -> None:
+        self.started = started
+        self.release = release
+        self.failure = failure
+        self.calls: list[tuple[str, object]] = []
+
+    async def load_history(self, bundle_id: str) -> None:
+        self.calls.append(("load_history", bundle_id))
+
+    async def start_run(self, bundle: ValidatedBundle, *, resume: bool) -> None:
+        self.calls.append(("start_run", resume))
+
+    async def apply_unit(
+        self,
+        bundle_id: str,
+        unit: BundleUnit,
+        on_statement: StatementObserver,
+    ) -> UnitFailure | None:
+        self.calls.append(("apply_unit", unit.index))
+        for statement_index in range(len(unit.statements)):
+            on_statement(statement_index, True)
+            if self.started is not None:
+                self.started.set()
+            if self.release is not None:
+                await self.release.wait()
+            if self.failure is not None:
+                return self.failure
+            on_statement(statement_index, False)
+        return None
+
+    async def finish_run(
+        self,
+        bundle_id: str,
+        status: RunFinishStatus,
+        failure: RunFailure | None,
+    ) -> None:
+        self.calls.append(("finish_run", status))
+
+
+class _RecordingExecutorFactory:
+    def __init__(
+        self,
+        executor: _FakeMigrationExecutor,
+        error: Exception | None = None,
+    ) -> None:
+        self.executor = executor
+        self.error = error
+        self.calls: list[tuple[str, int, int]] = []
+
+    def __call__(
+        self,
+        conninfo: str,
+        *,
+        lock_timeout_ms: int = 5_000,
+        statement_timeout_ms: int = 0,
+    ) -> object:
+        self.calls.append((conninfo, lock_timeout_ms, statement_timeout_ms))
+        return self._scope()
+
+    @asynccontextmanager
+    async def _scope(self) -> AsyncIterator[MigrationExecutor]:
+        if self.error is not None:
+            raise self.error
+        yield cast("MigrationExecutor", self.executor)
+
+
 def _migration_dependencies(
     tmp_path: Path,
     writer: _RecordingMigrationWriter,
     *,
     profiles: list[Profile] | None = None,
     compare: object | None = None,
+    bundle_reader: object | None = None,
+    executor_factory: object | None = None,
 ) -> TuiDependencies:
     loader = _FakeProfileLoader(tmp_path / "profiles.yaml", profiles or [])
     return TuiDependencies(
         profile_loader=cast("ProfileLoader", loader),
         inspector_scope=cast("InspectorScope", Mock()),
         migration_writer=cast("MigrationWriter", writer),
-        bundle_reader=cast("BundleReader", Mock()),
-        executor_factory=cast("ExecutorFactory", Mock()),
+        bundle_reader=cast("BundleReader", bundle_reader or Mock()),
+        executor_factory=cast("ExecutorFactory", executor_factory or Mock()),
         compare=cast("CompareCallable", compare) if compare is not None else _no_compare,
     )
 
@@ -145,6 +250,24 @@ def _profile(name: str) -> Profile:
             password="secret",
         ),
     )
+
+
+def _bundle_files(
+    delta: DeltaBase,
+    *,
+    max_risk: RiskLevel = RiskLevel.DANGEROUS,
+    force_risk: RiskLevel | None = None,
+) -> tuple[bytes, bytes]:
+    plan = generate_migration(DeltaSet.from_iterable([delta]), max_risk=max_risk)
+    files = dict(render_bundle(plan).files)
+    manifest = json.loads(files["manifest.json"])
+    if force_risk is not None:
+        manifest["overall_max_risk"] = force_risk.value
+        for assessment in manifest["assessments"]:
+            assessment["level"] = force_risk.value
+        for unit in manifest["units"]:
+            unit["max_risk"] = force_risk.value
+    return json.dumps(manifest).encode(), files["up.sql"]
 
 
 def _plain(widget: Static) -> str:
@@ -374,16 +497,499 @@ async def test_apply_requested_switches_view() -> None:
 
 
 @pytest.mark.unit
-async def test_apply_run_worker_completes() -> None:
-    app = PgsdApp()
-    async with app.run_test(size=(140, 44)) as pilot:
-        await pilot.press("g", "a")
-        await pilot.pause()
-        apply_view = app.query_one("#apply", ApplyView)
-        apply_view._start()
+async def test_apply_loads_saved_bundle_off_ui_loop_and_shows_safe_summary(
+    tmp_path: Path,
+) -> None:
+    files = _bundle_files(_create_schema_delta())
+    reader = _FakeBundleReader(files)
+    executor_factory = _RecordingExecutorFactory(_FakeMigrationExecutor())
+    app = PgsdApp(
+        dependencies=_migration_dependencies(
+            tmp_path,
+            _RecordingMigrationWriter(),
+            profiles=[_profile("pilot")],
+            bundle_reader=reader,
+            executor_factory=executor_factory,
+        )
+    )
+    caller_thread = threading.get_ident()
+    bundle_path = tmp_path / "saved-bundle"
+
+    async with app.run_test(size=(150, 50)) as pilot:
         await app.workers.wait_for_complete()
         await pilot.pause()
-        assert apply_view.phase == "success"
+        app.session.written_bundle_path = bundle_path
+        app.switch_view("apply")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        text = "\n".join(_plain(widget) for widget in app.query_one("#apply").query(Static))
+        assert reader.paths == [bundle_path]
+        assert reader.thread_id != caller_thread
+        assert "pilot" in text
+        assert "pilot_target" in text
+        assert str(bundle_path) in text
+        assert "1 delta" in text
+        assert "1 unit" in text
+        assert "safe" in text
+        assert "secret" not in text
+        assert app.query_one("#apply-lock-timeout", Input).value == "5000ms"
+        assert app.query_one("#apply-statement-timeout", Input).value == "0"
+
+
+@pytest.mark.unit
+async def test_apply_always_opens_confirmation_and_cancel_does_not_open_executor(
+    tmp_path: Path,
+) -> None:
+    reader = _FakeBundleReader(_bundle_files(_create_schema_delta()))
+    executor_factory = _RecordingExecutorFactory(_FakeMigrationExecutor())
+    app = PgsdApp(
+        dependencies=_migration_dependencies(
+            tmp_path,
+            _RecordingMigrationWriter(),
+            profiles=[_profile("pilot")],
+            bundle_reader=reader,
+            executor_factory=executor_factory,
+        )
+    )
+
+    async with app.run_test(size=(150, 50)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        app.session.written_bundle_path = tmp_path / "saved-bundle"
+        app.switch_view("apply")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        await pilot.click("#apply-start")
+        await pilot.pause()
+
+        assert app.screen.__class__.__name__ == "ConfirmApplyModal"
+        await pilot.press("escape")
+        await pilot.pause()
+
+        assert isinstance(app.screen, MainScreen)
+        assert executor_factory.calls == []
+        assert app.session.apply_events == []
+
+
+@pytest.mark.unit
+async def test_destructive_apply_requires_explicit_modal_action_and_passes_approval(
+    tmp_path: Path,
+) -> None:
+    reader = _FakeBundleReader(_bundle_files(_drop_schema_delta(), max_risk=RiskLevel.DESTRUCTIVE))
+    executor_factory = _RecordingExecutorFactory(_FakeMigrationExecutor())
+    app = PgsdApp(
+        dependencies=_migration_dependencies(
+            tmp_path,
+            _RecordingMigrationWriter(),
+            profiles=[_profile("pilot")],
+            bundle_reader=reader,
+            executor_factory=executor_factory,
+        )
+    )
+
+    async with app.run_test(size=(150, 50)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        app.session.written_bundle_path = tmp_path / "saved-bundle"
+        app.switch_view("apply")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        await pilot.click("#apply-start")
+        await pilot.pause()
+
+        assert app.screen.__class__.__name__ == "ConfirmApplyModal"
+        modal_text = "\n".join(_plain(widget) for widget in app.screen.query(Static))
+        assert "pilot_target" in modal_text
+        assert "unit index 0" in modal_text
+        assert "d0001" in modal_text
+        assert "Removes a schema and its objects." in modal_text
+        assert len(app.screen.query("#confirm-apply")) == 0
+        assert len(app.screen.query("#confirm-destructive")) == 1
+
+        await pilot.click("#confirm-destructive")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        assert len(executor_factory.calls) == 1
+        assert executor_factory.calls[0][1:] == (5_000, 0)
+        assert app.session.apply_result is not None
+        assert app.session.apply_result.status == "applied"
+
+
+@pytest.mark.unit
+async def test_blocked_bundle_has_no_proceed_action_and_app_guard_skips_executor(
+    tmp_path: Path,
+) -> None:
+    files = _bundle_files(
+        _drop_schema_delta(),
+        max_risk=RiskLevel.DESTRUCTIVE,
+        force_risk=RiskLevel.BLOCKED,
+    )
+    reader = _FakeBundleReader(files)
+    executor_factory = _RecordingExecutorFactory(_FakeMigrationExecutor())
+    app = PgsdApp(
+        dependencies=_migration_dependencies(
+            tmp_path,
+            _RecordingMigrationWriter(),
+            profiles=[_profile("pilot")],
+            bundle_reader=reader,
+            executor_factory=executor_factory,
+        )
+    )
+
+    async with app.run_test(size=(150, 50)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        app.session.written_bundle_path = tmp_path / "blocked-bundle"
+        app.switch_view("apply")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        await pilot.click("#apply-start")
+        await pilot.pause()
+
+        assert app.screen.__class__.__name__ == "ConfirmApplyModal"
+        assert len(app.screen.query("#confirm-apply")) == 0
+        assert len(app.screen.query("#confirm-destructive")) == 0
+        app._on_apply_confirmation(True)
+        await pilot.pause()
+
+        assert executor_factory.calls == []
+        assert "BLOCKED" in app.session.apply_status
+
+
+@pytest.mark.unit
+async def test_low_risk_apply_passes_false_approval_and_renders_ordered_real_events(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reader = _FakeBundleReader(_bundle_files(_create_schema_delta()))
+    executor_factory = _RecordingExecutorFactory(_FakeMigrationExecutor())
+    app = PgsdApp(
+        dependencies=_migration_dependencies(
+            tmp_path,
+            _RecordingMigrationWriter(),
+            profiles=[_profile("pilot")],
+            bundle_reader=reader,
+            executor_factory=executor_factory,
+        )
+    )
+    approval_values: list[bool] = []
+    original_apply = apply_migration
+
+    async def record_approval(
+        bundle: ValidatedBundle,
+        executor: MigrationExecutor,
+        *,
+        approve_destructive: bool,
+        on_event: Callable[[ApplyEvent], None] | None = None,
+    ) -> ApplyResult:
+        approval_values.append(approve_destructive)
+        return await original_apply(
+            bundle,
+            executor,
+            approve_destructive=approve_destructive,
+            on_event=on_event,
+        )
+
+    monkeypatch.setattr(tui_app_module, "apply_migration", record_approval)
+
+    async with app.run_test(size=(150, 50)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        app.session.written_bundle_path = tmp_path / "saved-bundle"
+        app.switch_view("apply")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        await pilot.click("#apply-start")
+        await pilot.pause()
+
+        assert app.screen.__class__.__name__ == "ConfirmApplyModal"
+        assert len(app.screen.query("#confirm-apply")) == 1
+        await pilot.click("#confirm-apply")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        assert approval_values == [False]
+        event_names = [type(event).__name__ for event in app.session.apply_events]
+        expected = ["RunStarted", "UnitStarted"]
+        bundle = app.session.validated_bundle
+        assert bundle is not None
+        for _ in range(len(bundle.units[0].statements)):
+            expected.extend(["StatementStarted", "StatementFinished"])
+        expected.extend(["UnitFinished", "RunFinished"])
+        assert event_names == expected
+        log_text = _plain(app.query_one("#apply-log", Static))
+        assert "StatementStarted" in log_text
+        assert "unit=1/1" in log_text
+        assert "delta=d0001" in log_text
+        assert "CREATE SCHEMA" not in log_text
+        assert app.session.apply_result is not None
+        assert app.session.apply_result.applied_unit_count == 1
+
+
+@pytest.mark.unit
+async def test_apply_failure_renders_only_safe_result_metadata(tmp_path: Path) -> None:
+    executor = _FakeMigrationExecutor(
+        failure=UnitFailure(statement_index=0, error_class="UndefinedTable", sqlstate="42P01")
+    )
+    reader = _FakeBundleReader(_bundle_files(_create_schema_delta()))
+    executor_factory = _RecordingExecutorFactory(executor)
+    app = PgsdApp(
+        dependencies=_migration_dependencies(
+            tmp_path,
+            _RecordingMigrationWriter(),
+            profiles=[_profile("pilot")],
+            bundle_reader=reader,
+            executor_factory=executor_factory,
+        )
+    )
+
+    async with app.run_test(size=(150, 50)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        app.session.written_bundle_path = tmp_path / "saved-bundle"
+        app.switch_view("apply")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        await pilot.click("#apply-start")
+        await pilot.pause()
+        await pilot.click("#confirm-apply")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        result = app.session.apply_result
+        assert result is not None
+        assert result.status == "failed"
+        assert result.failed_unit_index == 0
+        assert result.failed_statement_index == 0
+        assert result.delta_id == "d0001"
+        assert result.error_class == "UndefinedTable"
+        assert result.sqlstate == "42P01"
+        result_text = _plain(app.query_one("#apply-result", Static))
+        assert "status=failed" in result_text
+        assert "error=UndefinedTable" in result_text
+        assert "SQLSTATE=42P01" in result_text
+        assert app.session.apply_status == "Migration apply failed."
+
+
+@pytest.mark.unit
+async def test_apply_cancel_disables_actions_and_reports_partial_apply_semantics(
+    tmp_path: Path,
+) -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+    executor = _FakeMigrationExecutor(started=started, release=release)
+    reader = _FakeBundleReader(_bundle_files(_create_schema_delta()))
+    executor_factory = _RecordingExecutorFactory(executor)
+    profiles = [_profile("first"), _profile("second")]
+    app = PgsdApp(
+        dependencies=_migration_dependencies(
+            tmp_path,
+            _RecordingMigrationWriter(),
+            profiles=profiles,
+            bundle_reader=reader,
+            executor_factory=executor_factory,
+        )
+    )
+
+    async with app.run_test(size=(150, 50)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        app.session.written_bundle_path = tmp_path / "saved-bundle"
+        app.switch_view("apply")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        await pilot.click("#apply-start")
+        await pilot.pause()
+        await pilot.click("#confirm-apply")
+        await started.wait()
+        await pilot.pause()
+
+        assert app.query_one("#saved-profiles", DataTable).disabled
+        assert app.query_one("#btn-test-both", Button).disabled
+        assert app.query_one("#mig-generate", Button).disabled
+        assert app.query_one("#mig-save", Button).disabled
+        assert app.query_one("#apply-start", Button).disabled
+        app.on_profile_selected(ProfileSelected(1))
+        assert app.session.selected_profile == profiles[0]
+
+        await pilot.click("#apply-cancel")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        assert executor.calls[-1] == ("finish_run", "cancelled")
+        assert app.session.apply_status == (
+            "Cancelled — earlier units remain applied; an in-flight non-transactional "
+            "statement may be indeterminate."
+        )
+        apply_text = "\n".join(_plain(widget) for widget in app.query_one("#apply").query(Static))
+        assert "rollback" not in apply_text.lower()
+
+
+@pytest.mark.unit
+async def test_dry_run_uses_connectivity_only_and_never_opens_executor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reader = _FakeBundleReader(_bundle_files(_drop_schema_delta(), max_risk=RiskLevel.DESTRUCTIVE))
+    executor_factory = _RecordingExecutorFactory(_FakeMigrationExecutor())
+    app = PgsdApp(
+        dependencies=_migration_dependencies(
+            tmp_path,
+            _RecordingMigrationWriter(),
+            profiles=[_profile("pilot")],
+            bundle_reader=reader,
+            executor_factory=executor_factory,
+        )
+    )
+    checked: list[str] = []
+
+    async def check_connectivity(conninfo: str) -> None:
+        checked.append(conninfo)
+
+    monkeypatch.setattr(tui_app_module, "_check_connectivity", check_connectivity)
+
+    async with app.run_test(size=(150, 50)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        app.session.written_bundle_path = tmp_path / "saved-bundle"
+        app.switch_view("apply")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert "destructive" in _plain(app.query_one("#apply-warning", Static)).lower()
+
+        await pilot.click("#apply-dry-run")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        assert len(checked) == 1
+        checked_target = checked[0].rsplit("/", maxsplit=1)[-1] if checked else ""
+        assert checked_target == "pilot_target"
+        assert executor_factory.calls == []
+        assert app.session.apply_status == (
+            "Dry-run connectivity check passed; no migration SQL or history was touched."
+        )
+
+
+@pytest.mark.unit
+async def test_apply_timeout_validation_reuses_cli_limits(tmp_path: Path) -> None:
+    reader = _FakeBundleReader(_bundle_files(_create_schema_delta()))
+    executor_factory = _RecordingExecutorFactory(_FakeMigrationExecutor())
+    app = PgsdApp(
+        dependencies=_migration_dependencies(
+            tmp_path,
+            _RecordingMigrationWriter(),
+            profiles=[_profile("pilot")],
+            bundle_reader=reader,
+            executor_factory=executor_factory,
+        )
+    )
+
+    async with app.run_test(size=(150, 50)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        app.session.written_bundle_path = tmp_path / "saved-bundle"
+        app.switch_view("apply")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        app.query_one("#apply-lock-timeout", Input).value = "86400001ms"
+        await pilot.click("#apply-start")
+        await pilot.pause()
+
+        assert app.screen.__class__.__name__ == "MainScreen"
+        assert "must not exceed 24 hours" in app.session.apply_status
+        assert executor_factory.calls == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("exception", "expected_status"),
+    [
+        (
+            OperationalError("password-sentinel@exception-host-sentinel"),
+            "Database connection failed.",
+        ),
+        (RuntimeError("password-sentinel@exception-host-sentinel"), "Migration apply failed."),
+    ],
+    ids=["driver-error", "unexpected-error"],
+)
+async def test_apply_failure_redacts_driver_message_from_view_and_logs(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    exception: Exception,
+    expected_status: str,
+) -> None:
+    reader = _FakeBundleReader(_bundle_files(_create_schema_delta()))
+    executor_factory = _RecordingExecutorFactory(_FakeMigrationExecutor(), error=exception)
+    profile = _profile("pilot")
+    profile = Profile(
+        name=profile.name,
+        source=profile.source,
+        target=ConnectionInfo(
+            host="profile-host",
+            port=profile.target.port,
+            database=profile.target.database,
+            user=profile.target.user,
+            password="password-sentinel",
+        ),
+    )
+    app = PgsdApp(
+        dependencies=_migration_dependencies(
+            tmp_path,
+            _RecordingMigrationWriter(),
+            profiles=[profile],
+            bundle_reader=reader,
+            executor_factory=executor_factory,
+        )
+    )
+
+    async with app.run_test(size=(150, 50)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        app.session.written_bundle_path = tmp_path / "saved-bundle"
+        app.switch_view("apply")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        await pilot.click("#apply-start")
+        await pilot.pause()
+        await pilot.click("#confirm-apply")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        text = "\n".join(_plain(widget) for widget in app.query(Static))
+        assert app.session.apply_status == expected_status
+        assert "password-sentinel" not in text
+        assert "exception-host-sentinel" not in text
+        assert "password-sentinel" not in caplog.text
+        assert "exception-host-sentinel" not in caplog.text
+
+
+@pytest.mark.unit
+async def test_bundle_read_failure_is_generic(tmp_path: Path) -> None:
+    reader = _FakeBundleReader((b"", b""), error=OSError("password-sentinel host-sentinel"))
+    app = PgsdApp(
+        dependencies=_migration_dependencies(
+            tmp_path,
+            _RecordingMigrationWriter(),
+            profiles=[_profile("pilot")],
+            bundle_reader=reader,
+            executor_factory=_RecordingExecutorFactory(_FakeMigrationExecutor()),
+        )
+    )
+
+    async with app.run_test(size=(150, 50)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        app.session.written_bundle_path = tmp_path / "unreadable-bundle"
+        app.switch_view("apply")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        assert app.session.apply_status == "Could not load migration bundle."
+        text = "\n".join(_plain(widget) for widget in app.query_one("#apply").query(Static))
+        assert "password-sentinel" not in text
+        assert "host-sentinel" not in text
 
 
 @pytest.mark.unit

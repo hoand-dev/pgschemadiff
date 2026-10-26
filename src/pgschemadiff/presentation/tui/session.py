@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from pgschemadiff.application.diff.compare_schemas import SchemaComparisonResult
+    from pgschemadiff.application.migration.apply import ApplyEvent, ApplyResult
+    from pgschemadiff.application.migration.bundle import ValidatedBundle
     from pgschemadiff.application.migration.model import MigrationPlan
     from pgschemadiff.application.migration.render import RenderedBundle
     from pgschemadiff.domain.models import Profile
@@ -24,6 +26,13 @@ class TuiSession:
     migration_plan: MigrationPlan | None = None
     rendered_bundle: RenderedBundle | None = None
     written_bundle_path: Path | None = None
+    validated_bundle: ValidatedBundle | None = None
+    validated_bundle_path: Path | None = None
+    apply_events: list[ApplyEvent] = field(default_factory=list)
+    apply_event_timestamps: list[str] = field(default_factory=list)
+    apply_result: ApplyResult | None = None
+    apply_status: str = ""
+    apply_operation: Literal["loading", "dry-run", "apply"] | None = None
 
     def set_profiles(self, profiles: list[Profile]) -> None:
         """Replace loaded profiles and select first entry when available."""
@@ -42,3 +51,14 @@ class TuiSession:
         self.migration_plan = None
         self.rendered_bundle = None
         self.written_bundle_path = None
+        self.clear_apply()
+
+    def clear_apply(self) -> None:
+        """Discard validation and execution state for the current bundle."""
+        self.validated_bundle = None
+        self.validated_bundle_path = None
+        self.apply_events.clear()
+        self.apply_event_timestamps.clear()
+        self.apply_result = None
+        self.apply_status = ""
+        self.apply_operation = None

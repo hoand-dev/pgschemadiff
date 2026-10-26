@@ -7,32 +7,40 @@ and screen composition described in ``docs/ui-design.md``.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+import psycopg_pool
 from psycopg import Error as PsycopgError
 from textual.app import App
 from textual.binding import Binding
 from textual.message import Message
-from textual.widgets import ContentSwitcher, Input
-from textual.worker import Worker
+from textual.widgets import Button, ContentSwitcher, DataTable, Input
 
+from pgschemadiff.application.migration.apply import (
+    ApplyEvent,
+    ApplyResult,
+    apply_migration,
+)
+from pgschemadiff.application.migration.bundle import ValidatedBundle, load_bundle
 from pgschemadiff.application.migration.generate import generate_migration
 from pgschemadiff.application.migration.render import render_bundle
 from pgschemadiff.application.sql_emit.risk import RiskLevel
+from pgschemadiff.presentation.cli.commands.apply import _check_connectivity, _parse_timeout
 from pgschemadiff.presentation.tui._mock import ai_for
-from pgschemadiff.presentation.tui.screens import AiModal, HelpScreen, MainScreen
+from pgschemadiff.presentation.tui.screens import (
+    AiModal,
+    ConfirmApplyModal,
+    HelpScreen,
+    MainScreen,
+)
 from pgschemadiff.presentation.tui.session import TuiSession
+from pgschemadiff.presentation.tui.views import ApplyView, DiffView, MigrationView
 from pgschemadiff.presentation.tui.views.connection import (
     ConnectionView,
     ProfileSelected,
     TestBothRequested,
-)
-from pgschemadiff.presentation.tui.views import DiffView, MigrationView
-from pgschemadiff.presentation.tui.views._common import (
-    AiRequested,
-    ApplyRequested,
-    DiffRequested,
 )
 from pgschemadiff.presentation.tui.views.migration import (
     GenerateMigrationRequested,
@@ -49,16 +57,32 @@ from pgschemadiff.presentation.tui.widgets import (
     TabActivated,
     ViewTabs,
 )
-from pgschemadiff.shared.errors import DiffError, InspectionError, RiskGateError
+from pgschemadiff.shared.errors import (
+    ApplyMigrationError,
+    DiffError,
+    InspectionError,
+    RiskGateError,
+)
 from pgschemadiff.shared.logging import get_logger
 
 if TYPE_CHECKING:
     from textual.events import Key
+    from textual.worker import Worker
 
     from pgschemadiff.application.diff.compare_schemas import SchemaComparisonResult
     from pgschemadiff.application.migration.model import MigrationPlan
+    from pgschemadiff.application.migration.ports import BundleReader
     from pgschemadiff.domain.models import Profile
     from pgschemadiff.presentation.composition import TuiDependencies
+    from pgschemadiff.presentation.tui.views._common import (
+        AiRequested,
+        ApplyRequested,
+        DiffRequested,
+    )
+    from pgschemadiff.presentation.tui.views.apply import (
+        ApplyOperationRequested,
+        CancelApplyRequested,
+    )
 
 _VIEW_CHORDS: dict[str, str] = {
     "c": "connection",
@@ -98,6 +122,11 @@ _LOGGED_COMMANDS: dict[str, str] = {
 }
 
 
+def _read_and_validate_bundle(reader: BundleReader, path: Path) -> ValidatedBundle:
+    manifest, up_sql = reader.read(path)
+    return load_bundle(manifest, up_sql)
+
+
 class ProfilesLoaded(Message):
     """Signal that profile state is ready for view refresh."""
 
@@ -112,6 +141,47 @@ class ComparisonFailed(Message):
     def __init__(self, message: str) -> None:
         super().__init__()
         self.message = message
+
+
+class ApplyBundleLoaded(Message):
+    """Carry one validated saved bundle back to the UI loop."""
+
+    def __init__(self, path: Path, bundle: ValidatedBundle) -> None:
+        super().__init__()
+        self.path = path
+        self.bundle = bundle
+
+
+class ApplyBundleLoadFailed(Message):
+    """Signal a bundle read or validation error without its exception text."""
+
+    def __init__(self, path: Path) -> None:
+        super().__init__()
+        self.path = path
+
+
+class ApplyEventReceived(Message):
+    """Forward one real applier event to the UI loop."""
+
+    def __init__(self, event: ApplyEvent) -> None:
+        super().__init__()
+        self.event = event
+
+
+class ApplyOperationFinished(Message):
+    """Carry an apply/dry-run result or safe outcome to the UI loop."""
+
+    def __init__(
+        self,
+        *,
+        result: ApplyResult | None = None,
+        error_message: str | None = None,
+        cancelled: bool = False,
+    ) -> None:
+        super().__init__()
+        self.result = result
+        self.error_message = error_message
+        self.cancelled = cancelled
 
 
 class PgsdApp(App[None]):
@@ -144,6 +214,10 @@ class PgsdApp(App[None]):
         self._profile_load_error = False
         self._comparison_worker: Worker[None] | None = None
         self._migration_generation_worker: Worker[None] | None = None
+        self._bundle_load_worker: Worker[None] | None = None
+        self._bundle_load_path: Path | None = None
+        self._apply_worker: Worker[None] | None = None
+        self._pending_apply_request: tuple[Profile, ValidatedBundle, int, int] | None = None
         self._mode = "normal"
         self._chord: str | None = None
         self._active_view = "overview"
@@ -199,6 +273,8 @@ class PgsdApp(App[None]):
         )
 
     def _start_test_both(self) -> None:
+        if self.session.apply_operation in {"dry-run", "apply"}:
+            return
         profile = self.session.selected_profile
         if self.dependencies is None:
             self._refresh_connection(status="No profile loader configured.")
@@ -258,19 +334,21 @@ class PgsdApp(App[None]):
     def on_profiles_loaded(self, _message: ProfilesLoaded) -> None:
         status = "Could not load profiles." if self._profile_load_error else None
         self._refresh_connection(status=status)
-        cast(MainScreen, self.screen_stack[0]).update_from_session(self.session)
+        cast("MainScreen", self.screen_stack[0]).update_from_session(self.session)
 
     def on_comparison_completed(self, _message: ComparisonCompleted) -> None:
         self._refresh_connection(status="Comparison complete.")
-        cast(MainScreen, self.screen_stack[0]).update_from_session(self.session)
+        cast("MainScreen", self.screen_stack[0]).update_from_session(self.session)
         self._refresh_migration_view()
 
     def on_comparison_failed(self, message: ComparisonFailed) -> None:
         self._report_comparison_error(message.message)
-        cast(MainScreen, self.screen_stack[0]).update_from_session(self.session)
+        cast("MainScreen", self.screen_stack[0]).update_from_session(self.session)
         self._refresh_migration_view()
 
     def on_profile_selected(self, message: ProfileSelected) -> None:
+        if self.session.apply_operation in {"dry-run", "apply"}:
+            return
         if not 0 <= message.index < len(self.session.profiles):
             return
         profile = self.session.profiles[message.index]
@@ -279,11 +357,13 @@ class PgsdApp(App[None]):
         if self._comparison_worker is not None:
             self._comparison_worker.cancel()
             self._comparison_worker = None
+        self._cancel_bundle_load()
         self._cancel_migration_generation()
         self.session.select_profile(profile)
         self._refresh_connection()
-        cast(MainScreen, self.screen_stack[0]).update_from_session(self.session)
+        cast("MainScreen", self.screen_stack[0]).update_from_session(self.session)
         self._refresh_migration_view(status="", busy=False)
+        self._refresh_apply_controls()
 
     def on_test_both_requested(self, _message: TestBothRequested) -> None:
         self._start_test_both()
@@ -297,9 +377,11 @@ class PgsdApp(App[None]):
             self._migration_generation_worker = None
 
     def _invalidate_migration(self) -> None:
+        self._cancel_bundle_load()
         self._cancel_migration_generation()
         self.session.clear_migration()
         self._refresh_migration_view(status="", busy=False)
+        self._refresh_apply_controls()
 
     def _refresh_migration_view(
         self,
@@ -315,6 +397,9 @@ class PgsdApp(App[None]):
             view.busy = busy
 
     def on_generate_migration_requested(self, message: GenerateMigrationRequested) -> None:
+        if self.session.apply_operation in {"dry-run", "apply"}:
+            message.stop()
+            return
         if not isinstance(message.max_risk, RiskLevel) or message.max_risk is RiskLevel.BLOCKED:
             self._refresh_migration_view(status="Could not generate migration bundle.", busy=False)
             message.stop()
@@ -375,6 +460,9 @@ class PgsdApp(App[None]):
         message.stop()
 
     def on_save_bundle_requested(self, message: SaveBundleRequested) -> None:
+        if self.session.apply_operation in {"dry-run", "apply"}:
+            message.stop()
+            return
         plan = self.session.migration_plan
         output_dir = message.output_dir.strip()
         if plan is None or not output_dir or self.dependencies is None:
@@ -409,14 +497,324 @@ class PgsdApp(App[None]):
     def on_migration_bundle_written(self, message: MigrationBundleWritten) -> None:
         if self.session.migration_plan is not message.plan:
             return
+        self._cancel_bundle_load()
+        self.session.clear_apply()
         self.session.written_bundle_path = message.path
         self._refresh_migration_view(status="Migration bundle saved.", busy=False)
+        if self._active_view == "apply":
+            self._ensure_apply_bundle_loaded()
         message.stop()
 
     def on_migration_bundle_write_failed(self, message: MigrationBundleWriteFailed) -> None:
         if self.session.migration_plan is not message.plan:
             return
         self._refresh_migration_view(status="Could not save migration bundle.", busy=False)
+        message.stop()
+
+    # ---------------------------------------------------------------- apply
+
+    def _cancel_bundle_load(self) -> None:
+        if self._bundle_load_worker is not None:
+            self._bundle_load_worker.cancel()
+        self._bundle_load_worker = None
+        self._bundle_load_path = None
+
+    def _ensure_apply_bundle_loaded(self) -> None:
+        path = self.session.written_bundle_path
+        if path is None:
+            self._cancel_bundle_load()
+            self.session.clear_apply()
+            self.session.apply_status = "Save a bundle in Migration before applying."
+            self._refresh_apply_controls()
+            return
+        if self.session.validated_bundle is not None and self.session.validated_bundle_path == path:
+            self._refresh_apply_controls()
+            return
+        if self._bundle_load_path == path and self._bundle_load_worker is not None:
+            return
+
+        self._cancel_bundle_load()
+        self.session.validated_bundle = None
+        self.session.validated_bundle_path = None
+        self.session.apply_operation = "loading"
+        self.session.apply_status = "Loading and validating bundle…"
+        self._bundle_load_path = path
+        self._refresh_apply_controls()
+        self._bundle_load_worker = self.run_worker(
+            self._load_apply_bundle(path),
+            name="apply-bundle-load",
+            group="apply-bundle-load",
+            exclusive=True,
+        )
+
+    async def _load_apply_bundle(self, path: Path) -> None:
+        dependencies = self.dependencies
+        if dependencies is None:
+            self.post_message(ApplyBundleLoadFailed(path))
+            return
+        try:
+            bundle = await asyncio.to_thread(
+                _read_and_validate_bundle,
+                dependencies.bundle_reader,
+                path,
+            )
+        except Exception:
+            self.post_message(ApplyBundleLoadFailed(path))
+        else:
+            self.post_message(ApplyBundleLoaded(path, bundle))
+
+    def on_apply_bundle_loaded(self, message: ApplyBundleLoaded) -> None:
+        if self._bundle_load_path != message.path:
+            return
+        self._bundle_load_worker = None
+        self._bundle_load_path = None
+        if self.session.written_bundle_path != message.path:
+            return
+        self.session.validated_bundle = message.bundle
+        self.session.validated_bundle_path = message.path
+        self.session.apply_operation = None
+        self.session.apply_status = "Bundle validated."
+        self._refresh_apply_controls()
+        message.stop()
+
+    def on_apply_bundle_load_failed(self, message: ApplyBundleLoadFailed) -> None:
+        if self._bundle_load_path != message.path:
+            return
+        self._bundle_load_worker = None
+        self._bundle_load_path = None
+        if self.session.written_bundle_path != message.path:
+            return
+        self.session.validated_bundle = None
+        self.session.validated_bundle_path = None
+        self.session.apply_operation = None
+        self.session.apply_status = "Could not load migration bundle."
+        self._refresh_apply_controls()
+        message.stop()
+
+    def _refresh_apply_controls(self) -> None:
+        apply_view = self.query_one("#apply", ApplyView)
+        apply_view.update_from_session(self.session)
+        busy = self.session.apply_operation in {"dry-run", "apply"}
+        self.query_one("#saved-profiles", DataTable).disabled = busy
+        self.query_one("#btn-test-both", Button).disabled = (
+            busy or self.session.selected_profile is None
+        )
+        migration = self.query_one("#migration", MigrationView)
+        self.query_one("#mig-generate", Button).disabled = (
+            busy or self.session.last_comparison is None or migration.busy
+        )
+        self.query_one("#mig-save", Button).disabled = (
+            busy or self.session.migration_plan is None or migration.busy
+        )
+        self.query_one("#mig-apply", Button).disabled = (
+            busy or self.session.written_bundle_path is None or migration.busy
+        )
+
+    def on_apply_operation_requested(self, message: ApplyOperationRequested) -> None:
+        if self.session.apply_operation in {"loading", "dry-run", "apply"}:
+            message.stop()
+            return
+        profile = self.session.selected_profile
+        bundle = self.session.validated_bundle
+        if (
+            profile is None
+            or bundle is None
+            or self.session.validated_bundle_path != self.session.written_bundle_path
+        ):
+            self.session.apply_status = "Could not load migration bundle."
+            self._refresh_apply_controls()
+            message.stop()
+            return
+
+        try:
+            lock_timeout_ms = _parse_timeout(message.lock_timeout, "--lock-timeout")
+            statement_timeout_ms = _parse_timeout(
+                message.statement_timeout,
+                "--statement-timeout",
+            )
+        except ValueError as error:
+            self.session.apply_status = str(error)
+            self._refresh_apply_controls()
+            message.stop()
+            return
+
+        if message.dry_run:
+            if any(unit.max_risk is RiskLevel.BLOCKED for unit in bundle.units):
+                self.session.apply_status = (
+                    "Migration bundle contains a BLOCKED unit and cannot be applied."
+                )
+                self._refresh_apply_controls()
+                message.stop()
+                return
+            self._start_apply_worker(
+                profile,
+                bundle,
+                lock_timeout_ms=lock_timeout_ms,
+                statement_timeout_ms=statement_timeout_ms,
+                dry_run=True,
+                approve_destructive=False,
+            )
+        else:
+            self._pending_apply_request = (
+                profile,
+                bundle,
+                lock_timeout_ms,
+                statement_timeout_ms,
+            )
+            self.push_screen(
+                ConfirmApplyModal(profile, bundle),
+                callback=self._on_apply_confirmation,
+            )
+        message.stop()
+
+    def _on_apply_confirmation(self, confirmed: bool | None) -> None:
+        request = self._pending_apply_request
+        self._pending_apply_request = None
+        if confirmed is not True or request is None:
+            return
+        profile, bundle, lock_timeout_ms, statement_timeout_ms = request
+        if (
+            profile != self.session.selected_profile
+            or bundle is not self.session.validated_bundle
+            or self.session.validated_bundle_path != self.session.written_bundle_path
+        ):
+            return
+        if any(unit.max_risk is RiskLevel.BLOCKED for unit in bundle.units):
+            self.session.apply_status = (
+                "Migration bundle contains a BLOCKED unit and cannot be applied."
+            )
+            self._refresh_apply_controls()
+            return
+        destructive = any(unit.max_risk is RiskLevel.DESTRUCTIVE for unit in bundle.units)
+        self._start_apply_worker(
+            profile,
+            bundle,
+            lock_timeout_ms=lock_timeout_ms,
+            statement_timeout_ms=statement_timeout_ms,
+            dry_run=False,
+            approve_destructive=destructive,
+        )
+
+    def _start_apply_worker(
+        self,
+        profile: Profile,
+        bundle: ValidatedBundle,
+        *,
+        lock_timeout_ms: int,
+        statement_timeout_ms: int,
+        dry_run: bool,
+        approve_destructive: bool,
+    ) -> None:
+        self.session.apply_events.clear()
+        self.session.apply_event_timestamps.clear()
+        self.session.apply_result = None
+        self.session.apply_operation = "dry-run" if dry_run else "apply"
+        self.session.apply_status = (
+            "Checking target connectivity…" if dry_run else "Applying migration bundle…"
+        )
+        self._refresh_apply_controls()
+        self._apply_worker = self.run_worker(
+            self._run_apply_operation(
+                profile,
+                bundle,
+                lock_timeout_ms=lock_timeout_ms,
+                statement_timeout_ms=statement_timeout_ms,
+                dry_run=dry_run,
+                approve_destructive=approve_destructive,
+            ),
+            name="apply",
+            group="apply",
+            exclusive=True,
+        )
+
+    async def _run_apply_operation(
+        self,
+        profile: Profile,
+        bundle: ValidatedBundle,
+        *,
+        lock_timeout_ms: int,
+        statement_timeout_ms: int,
+        dry_run: bool,
+        approve_destructive: bool,
+    ) -> None:
+        try:
+            if dry_run:
+                await _check_connectivity(profile.target.dsn())
+            else:
+                dependencies = self.dependencies
+                if dependencies is None:
+                    raise RuntimeError
+
+                def forward_event(event: ApplyEvent) -> None:
+                    self.post_message(ApplyEventReceived(event))
+
+                async with dependencies.executor_factory(
+                    profile.target.dsn(),
+                    lock_timeout_ms=lock_timeout_ms,
+                    statement_timeout_ms=statement_timeout_ms,
+                ) as executor:
+                    result = await apply_migration(
+                        bundle,
+                        executor,
+                        approve_destructive=approve_destructive,
+                        on_event=forward_event,
+                    )
+                self.post_message(ApplyOperationFinished(result=result))
+                return
+        except asyncio.CancelledError:
+            self.post_message(ApplyOperationFinished(cancelled=True))
+            raise
+        except (PsycopgError, psycopg_pool.PoolTimeout):
+            self.post_message(ApplyOperationFinished(error_message="Database connection failed."))
+        except RiskGateError as error:
+            self.post_message(ApplyOperationFinished(error_message=str(error)))
+        except ApplyMigrationError as error:
+            failure_result = error.result if isinstance(error.result, ApplyResult) else None
+            self.post_message(
+                ApplyOperationFinished(
+                    result=failure_result,
+                    error_message="Migration apply failed.",
+                )
+            )
+        except Exception:
+            self.post_message(ApplyOperationFinished(error_message="Migration apply failed."))
+        else:
+            self.post_message(ApplyOperationFinished())
+
+    def on_apply_event_received(self, message: ApplyEventReceived) -> None:
+        if self.session.apply_operation != "apply":
+            return
+        self.session.apply_events.append(message.event)
+        self.session.apply_event_timestamps.append(datetime.now().astimezone().strftime("%H:%M:%S"))
+        self._refresh_apply_controls()
+        message.stop()
+
+    def on_apply_operation_finished(self, message: ApplyOperationFinished) -> None:
+        operation = self.session.apply_operation
+        self._apply_worker = None
+        self.session.apply_operation = None
+        self.session.apply_result = message.result
+        if message.cancelled:
+            self.session.apply_status = (
+                "Cancelled — earlier units remain applied; an in-flight non-transactional "
+                "statement may be indeterminate."
+                if operation == "apply"
+                else "Dry-run cancelled."
+            )
+        elif message.error_message is not None:
+            self.session.apply_status = message.error_message
+        elif operation == "dry-run":
+            self.session.apply_status = (
+                "Dry-run connectivity check passed; no migration SQL or history was touched."
+            )
+        else:
+            self.session.apply_status = "Migration apply finished."
+        self._refresh_apply_controls()
+        message.stop()
+
+    def on_cancel_apply_requested(self, message: CancelApplyRequested) -> None:
+        if self.session.apply_operation == "apply" and self._apply_worker is not None:
+            self._apply_worker.cancel()
         message.stop()
 
     # ------------------------------------------------------------------ helpers
@@ -443,6 +841,8 @@ class PgsdApp(App[None]):
         self.query_one(ViewTabs).active = view_id
         self.query_one(Statusbar).view = view_id
         self._active_view = view_id
+        if view_id == "apply":
+            self._ensure_apply_bundle_loaded()
 
     def toggle_theme(self) -> None:
         current = self.theme
@@ -506,22 +906,7 @@ class PgsdApp(App[None]):
             event.stop()
             return
         if self._chord == "g":
-            self._chord = None
-            key = event.character or event.key
-            if key in _VIEW_CHORDS:
-                self.switch_view(_VIEW_CHORDS[key])
-                self._set_hint(f"g{key} — {_VIEW_CHORDS[key]}")
-                event.stop()
-                return
-            if key in {"T", "shift+t"}:
-                self.toggle_theme()
-                event.stop()
-                return
-            if key == "g":
-                self._set_hint("top")
-                event.stop()
-                return
-            self._set_hint("(chord cancelled)")
+            self._handle_g_chord(event)
             return
         if self._chord == "Z":
             self._chord = None
@@ -531,6 +916,24 @@ class PgsdApp(App[None]):
                 event.stop()
                 return
             self._set_hint("(chord cancelled)")
+
+    def _handle_g_chord(self, event: Key) -> None:
+        self._chord = None
+        key = event.character or event.key
+        if key in _VIEW_CHORDS:
+            self.switch_view(_VIEW_CHORDS[key])
+            self._set_hint(f"g{key} — {_VIEW_CHORDS[key]}")
+            event.stop()
+            return
+        if key in {"T", "shift+t"}:
+            self.toggle_theme()
+            event.stop()
+            return
+        if key == "g":
+            self._set_hint("top")
+            event.stop()
+            return
+        self._set_hint("(chord cancelled)")
 
     # -------------------------------------------------------- tabs & command submission
 
