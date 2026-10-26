@@ -14,8 +14,10 @@ from textual.widgets import ContentSwitcher, Label, Static, Tree
 import pgschemadiff.application.migration.generate as migration_generator
 import pgschemadiff.presentation.tui.views.overview as overview_module
 from pgschemadiff.application.diff.compare_schemas import SchemaComparisonResult
+from pgschemadiff.domain.column import Column
 from pgschemadiff.domain.database import Database
 from pgschemadiff.domain.delta import DeltaOp, DeltaSet
+from pgschemadiff.domain.delta.column import AlterColumnType
 from pgschemadiff.domain.delta.enum import ReplaceEnumLabels
 from pgschemadiff.domain.delta.materialized_view import ReplaceMaterializedView
 from pgschemadiff.domain.delta.table import AlterTableAttrs, CreateTable, DropTable
@@ -33,12 +35,14 @@ from pgschemadiff.presentation.tui.screens.main import MainScreen
 from pgschemadiff.presentation.tui.views._common import DiffRequested
 from pgschemadiff.presentation.tui.views.diff import DiffView
 from pgschemadiff.presentation.tui.views.overview import OverviewView, _object_name
-from pgschemadiff.presentation.tui.widgets import Statusbar
+from pgschemadiff.presentation.tui.widgets import Cmdbar, Statusbar
 
 if TYPE_CHECKING:
     from textual.message import Message
+    from textual.pilot import Pilot
 
     from pgschemadiff.application.migration.ports import BundleReader, MigrationWriter
+    from pgschemadiff.domain.delta.base import DeltaBase
     from pgschemadiff.infrastructure.config.yaml_loader import ProfileLoader
     from pgschemadiff.presentation.composition import ExecutorFactory, InspectorScope
 
@@ -187,9 +191,128 @@ def _contextual_comparison() -> SchemaComparisonResult:
     )
 
 
+def _single_table_comparison(
+    operation: str,
+    *,
+    schema_name: str = "public",
+    table_name: str = "users",
+) -> SchemaComparisonResult:
+    ref = _ref(ObjectKind.TABLE, table_name, schema=schema_name)
+    column = Column(name="id", position=1, data_type="integer", nullable=False)
+    before = Table(ref=ref, columns=(column,), comment="before")
+    after = Table(ref=ref, columns=(column,), comment="after")
+    delta: DeltaBase
+    source_tables: tuple[Table, ...]
+    target_tables: tuple[Table, ...]
+
+    if operation == "create":
+        delta = CreateTable(target=ref, table=after)
+        source_tables = ()
+        target_tables = (after,)
+    elif operation == "drop":
+        delta = DropTable(target=ref, table=before)
+        source_tables = (before,)
+        target_tables = ()
+    else:
+        delta = AlterTableAttrs(target=ref, new_comment="after")
+        source_tables = (before,)
+        target_tables = (after,)
+
+    return SchemaComparisonResult(
+        source=Database(name="source_db", schemas=(_schema(schema_name, tables=source_tables),)),
+        target=Database(name="target_db", schemas=(_schema(schema_name, tables=target_tables),)),
+        deltas=DeltaSet.from_iterable((delta,)),
+    )
+
+
+def _column_comparison() -> SchemaComparisonResult:
+    table_ref = _ref(ObjectKind.TABLE, "users")
+    column_ref = ObjectRef(
+        kind=ObjectKind.COLUMN,
+        qname=QualifiedName(namespace="public", name="id"),
+        parent=table_ref,
+    )
+    old_column = Column(name="id", position=1, data_type="integer", nullable=False)
+    new_column = Column(name="id", position=1, data_type="bigint", nullable=False)
+    old_table = Table(ref=table_ref, columns=(old_column,))
+    new_table = Table(ref=table_ref, columns=(new_column,))
+    return SchemaComparisonResult(
+        source=Database(name="source_db", schemas=(_schema("public", tables=(old_table,)),)),
+        target=Database(name="target_db", schemas=(_schema("public", tables=(new_table,)),)),
+        deltas=DeltaSet.from_iterable(
+            (AlterColumnType(target=column_ref, new_data_type="bigint"),)
+        ),
+    )
+
+
 def _plain(widget: Static) -> str:
     rendered = widget.render()
     return rendered.plain if isinstance(rendered, Text) else str(rendered)
+
+
+def _diff_text(view: DiffView) -> str:
+    return "\n".join(_plain(widget) for widget in view.query(Static))
+
+
+async def _open_diff(app: PgsdApp, pilot: Pilot[None], delta_id: str = "d0001") -> DiffView:
+    await app.workers.wait_for_complete()
+    await pilot.pause()
+    app.action_test_both()
+    await app.workers.wait_for_complete()
+    await pilot.pause()
+    await pilot.click(f"#change-{delta_id}")
+    await pilot.pause()
+    return app.query_one("#diff", DiffView)
+
+
+def _assert_diff_summary(view: DiffView, operation: str, result: SchemaComparisonResult) -> None:
+    text = _diff_text(view)
+    assessment = migration_generator.assess_deltas(result.deltas)[0][1]
+    assert "profile[a]" in text
+    assert '"public"."users"' in text
+    assert "table" in text
+    assert operation.upper() in text
+    assert assessment.level.value in text
+    assert assessment.reason in text
+
+
+def _assert_side_mode(view: DiffView, operation: str) -> None:
+    text = _diff_text(view)
+    assert "definitions" in text
+    assert "SOURCE" in text
+    assert "TARGET" in text
+    if operation == "create":
+        assert "SOURCE · source_db · definitions" in text
+        assert "absent" in text
+        assert "after" in text
+    elif operation == "drop":
+        assert "TARGET · target_db · definitions" in text
+        assert "absent" in text
+        assert "before" in text
+    else:
+        assert "before" in text
+        assert "after" in text
+
+
+def _assert_inline_mode(view: DiffView, operation: str) -> None:
+    text = _diff_text(view)
+    if operation == "create":
+        assert "+ table:" in text
+    elif operation == "drop":
+        assert "- table:" in text
+    else:
+        assert "comment: 'before' → 'after'" in text
+
+
+def _assert_tree_mode(view: DiffView) -> None:
+    text = _diff_text(view)
+    assert "ref:" in text
+    assert "namespace:" in text
+    assert "columns:" in text
+    assert "[0]:" in text
+    assert "Generate a plan to preview SQL" in text
+    assert "Rollback SQL is not generated" in text
+    assert "tested" not in text.lower()
 
 
 @pytest.mark.unit
@@ -404,7 +527,7 @@ async def test_overview_renders_ordered_real_deltas_and_op_counts() -> None:
 
         await pilot.click(f"#change-{expected_ids[0]}")
         await pilot.pause()
-        assert app.query_one("#diff", DiffView).object_key == expected_ids[0]
+        assert app.query_one("#diff", DiffView).delta_id == expected_ids[0]
 
 
 @pytest.mark.unit
@@ -430,3 +553,167 @@ async def test_overview_and_statusbar_use_contextual_view_dependency_risk() -> N
         assert "2 changes" in _plain(app.query_one("#sb-counts", Label))
         row = app.query_one(f"#change-{materialized[0]}", Static)
         assert "dangerous" in _plain(row)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("operation", ["create", "drop", "alter"])
+async def test_diff_modes_render_typed_delta_and_retained_definitions(operation: str) -> None:
+    result = _single_table_comparison(operation)
+    app = PgsdApp(dependencies=_dependencies(_profile(), result))
+
+    async with app.run_test(size=(140, 44)) as pilot:
+        diff = await _open_diff(app, pilot)
+        _assert_diff_summary(diff, operation, result)
+        await pilot.click("#mode-side")
+        await pilot.pause()
+        _assert_side_mode(diff, operation)
+        await pilot.click("#mode-inline")
+        await pilot.pause()
+        _assert_inline_mode(diff, operation)
+        await pilot.click("#mode-tree")
+        await pilot.pause()
+        _assert_tree_mode(diff)
+
+
+@pytest.mark.unit
+async def test_diff_navigation_uses_assessment_order() -> None:
+    result = _comparison()
+    expected_ids = tuple(
+        delta_id for delta_id, _ in migration_generator.assess_deltas(result.deltas)
+    )
+    app = PgsdApp(dependencies=_dependencies(_profile(), result))
+
+    async with app.run_test(size=(140, 44)) as pilot:
+        diff = await _open_diff(app, pilot, expected_ids[0])
+        assert [
+            _plain(widget).strip()
+            for widget in diff.query(".jump-chip")
+            if isinstance(widget, Static)
+        ] == list(expected_ids)
+
+        await pilot.click("#nav-next")
+        await pilot.pause()
+        assert diff.delta_id == expected_ids[1]
+        await pilot.click("#nav-previous")
+        await pilot.pause()
+        assert diff.delta_id == expected_ids[0]
+        await pilot.click("#nav-previous")
+        await pilot.pause()
+        assert diff.delta_id == expected_ids[0]
+        await pilot.click(f"#jump-{len(expected_ids) - 1}")
+        await pilot.pause()
+        assert diff.delta_id == expected_ids[-1]
+        await pilot.click("#nav-next")
+        await pilot.pause()
+        assert diff.delta_id == expected_ids[-1]
+
+
+@pytest.mark.unit
+async def test_diff_inline_pairs_old_and_new_typed_delta_fields() -> None:
+    result = _comparison()
+    delta_id = next(
+        delta_id
+        for delta_id, assessment in migration_generator.assess_deltas(result.deltas)
+        if isinstance(assessment.delta, ReplaceEnumLabels)
+    )
+    app = PgsdApp(dependencies=_dependencies(_profile(), result))
+
+    async with app.run_test(size=(140, 44)) as pilot:
+        diff = await _open_diff(app, pilot, delta_id)
+        await pilot.click("#mode-inline")
+        await pilot.pause()
+        assert "labels: ['old', 'pending'] → ['new', 'pending']" in _diff_text(diff)
+
+
+@pytest.mark.unit
+async def test_diff_finds_nested_object_by_target_ref() -> None:
+    result = _column_comparison()
+    app = PgsdApp(dependencies=_dependencies(_profile(), result))
+
+    async with app.run_test(size=(140, 44)) as pilot:
+        diff = await _open_diff(app, pilot)
+        side = _diff_text(diff)
+        assert "SOURCE · source_db · definitions" in side
+        assert "TARGET · target_db · definitions" in side
+        assert "data_type: 'integer'" in side
+        assert "data_type: 'bigint'" in side
+
+        await pilot.click("#mode-inline")
+        await pilot.pause()
+        assert "data_type: 'integer' → 'bigint'" in _diff_text(diff)
+
+        await pilot.click("#mode-tree")
+        await pilot.pause()
+        tree = _diff_text(diff)
+        assert "data_type: 'integer'" in tree
+        assert "data_type: 'bigint'" in tree
+
+
+@pytest.mark.unit
+async def test_diff_missing_comparison_and_unknown_delta_are_explicit() -> None:
+    app = PgsdApp()
+    async with app.run_test(size=(140, 44)) as pilot:
+        await pilot.pause()
+        diff = app.query_one("#diff", DiffView)
+        assert "No comparison available" in _diff_text(diff)
+
+    result = _single_table_comparison("create")
+    app = PgsdApp(dependencies=_dependencies(_profile(), result))
+    async with app.run_test(size=(140, 44)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        app.action_test_both()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        diff = app.query_one("#diff", DiffView)
+        diff.delta_id = "d9999"
+        await pilot.pause()
+        assert "Unknown delta ID: d9999" in _diff_text(diff)
+
+
+@pytest.mark.unit
+async def test_diff_markup_like_names_are_rendered_literally() -> None:
+    result = _single_table_comparison("create", schema_name="a[b]", table_name="things[b]_added")
+    app = PgsdApp(dependencies=_dependencies(_profile(), result))
+
+    async with app.run_test(size=(140, 44)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        app.action_test_both()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        await pilot.click("#change-d0001")
+        await pilot.pause()
+        text = _diff_text(app.query_one("#diff", DiffView))
+        assert "a[b]" in text
+        assert "things[b]_added" in text
+
+
+@pytest.mark.unit
+async def test_diff_exposes_no_accept_skip_or_ai_actions() -> None:
+    result = _single_table_comparison("create")
+    app = PgsdApp(dependencies=_dependencies(_profile(), result))
+
+    async with app.run_test(size=(140, 44)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        app.action_test_both()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        await pilot.click("#change-d0001")
+        await pilot.pause()
+
+        diff = app.query_one("#diff", DiffView)
+        text = _diff_text(diff).lower()
+        assert "accept" not in text
+        assert "skip" not in text
+        assert "ai suggest" not in text
+
+        await pilot.press("space", "i", "space", "a", "space", "s")
+        await pilot.pause()
+        assert isinstance(app.screen, MainScreen)
+        assert app._active_view == "diff"
+        assert "accepted" not in app.query_one(Cmdbar).hint
+        assert "skipped" not in app.query_one(Cmdbar).hint

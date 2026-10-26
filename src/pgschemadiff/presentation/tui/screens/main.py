@@ -255,6 +255,7 @@ class MainScreen(Screen[None]):
         self.query_one(HeaderBar).update_profile(session.selected_profile)
         self.query_one(Statusbar).update_comparison(session.last_comparison)
         self.query_one("#overview", OverviewView).update_comparison(session.last_comparison)
+        self.query_one("#diff", DiffView).update_from_session(session)
         self.update_tree(session.last_comparison)
 
     def update_tree(self, comparison: SchemaComparisonResult | None) -> None:

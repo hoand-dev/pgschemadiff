@@ -460,26 +460,18 @@ class PgsdApp(App[None]):
         except Exception:
             return
 
-    def _resolve_space_chord(self, key: str) -> None:
+    def _resolve_space_chord(self, _key: str) -> None:
         if self._active_view != "diff":
             self._set_hint("(space leader — open Diff first)")
             return
-        diff = self.query_one("#diff", DiffView)
-        if key == "i":
-            self.push_screen(AiModal(ai_for(diff.object_key)))
-        elif key == "a":
-            self._set_hint(f"␣a — accepted {diff.object_key}")
-        elif key == "s":
-            self._set_hint(f"␣s — skipped {diff.object_key}")
-        else:
-            self._set_hint("(chord cancelled)")
+        self._set_hint("(chord cancelled)")
 
     # ------------------------------------------------------------------ navigation messages
 
     def on_diff_requested(self, message: DiffRequested) -> None:
-        self.query_one("#diff", DiffView).object_key = message.object_key
+        self.query_one("#diff", DiffView).delta_id = message.delta_id
         self.switch_view("diff")
-        self._set_hint(f"diff → {message.object_key}")
+        self._set_hint(f"diff → {message.delta_id}")
         message.stop()
 
     def on_ai_requested(self, message: AiRequested) -> None:

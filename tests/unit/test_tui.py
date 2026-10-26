@@ -198,10 +198,10 @@ async def test_diff_requested_switches_and_selects_object() -> None:
     app = PgsdApp()
     async with app.run_test(size=(140, 44)) as pilot:
         await pilot.pause()
-        app.screen.post_message(DiffRequested("public.users"))
+        app.screen.post_message(DiffRequested("d0001"))
         await pilot.pause()
         assert app._active_view == "diff"
-        assert app.query_one("#diff", DiffView).object_key == "public.users"
+        assert app.query_one("#diff", DiffView).delta_id == "d0001"
 
 
 @pytest.mark.unit

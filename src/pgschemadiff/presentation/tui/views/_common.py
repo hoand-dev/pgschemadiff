@@ -21,11 +21,11 @@ from textual.widgets import Static
 
 
 class DiffRequested(Message):
-    """Open the Diff view for ``object_key`` (a key into ``_mock.DIFFS``)."""
+    """Open the Diff view for an assessed delta ID."""
 
-    def __init__(self, object_key: str) -> None:
+    def __init__(self, delta_id: str) -> None:
         super().__init__()
-        self.object_key = object_key
+        self.delta_id = delta_id
 
 
 class AiRequested(Message):
@@ -195,7 +195,12 @@ _STATUS_COLOUR = {"add": "$success", "mod": "$warning", "del": "$error", "confli
 
 def chip(text: str, colour: str = "$text-muted") -> str:
     """A small inline 'chip' rendered with a boosted background."""
-    return f"[{colour} on $boost] {escape(text)} [/]"
+    return f"[{colour} on $boost] {escape_text(text)} [/]"
+
+
+def escape_text(text: str) -> str:
+    """Escape every opening bracket for Textual/Rich markup contexts."""
+    return text.replace("[", r"\[")
 
 
 def op_chip(op: str) -> str:
@@ -239,7 +244,7 @@ class SectionHeader(Static):
     """
 
     def __init__(self, title: str, crumb: str = "") -> None:
-        markup = f"[$primary bold]{escape(title)}[/]"
+        markup = f"[$primary bold]{escape_text(title)}[/]"
         if crumb:
             markup += f"   [$text-muted]{crumb}[/]"
         super().__init__(markup)
