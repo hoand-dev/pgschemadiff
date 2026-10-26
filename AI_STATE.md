@@ -36,11 +36,10 @@ Goal: inspect two Postgres DBs, show schema diff, generate safe migration SQL.
 ---
 
 ## Execution Queue
-1. TD-RISK-02 (owner-change risk alignment).
-2. Phase 4 TUI wiring (P4-TUI-05..07); views still run on mock data.
+1. Phase 4 TUI wiring (P4-TUI-02..08) per upcoming spec `docs/specs/2026-10-26-p4-tui-wiring-design.md`; views still run on mock data. TD-RISK-02 done (CI `c6b0d1b`).
 
 ## Next Actions
-- TD-RISK-02, then Phase 4 TUI wiring.
+- Review the Phase 4 TUI wiring spec.
 
 ## Ready To Merge
 - None.
