@@ -21,6 +21,17 @@
 - `ui-design.md` — Textual TUI implementation contract.
 - `migration.md` — legacy package migration guide; archive move pending.
 
+## User guide (`docs/guide/`)
+
+- `guide/README.md` — current user-guide index and workflow overview.
+- `guide/getting-started.md` — install, compare, generate, dry-run, and apply.
+- `guide/cli.md` — CLI options, output streams, rename files, and exit codes.
+- `guide/tui.md` — profile configuration, screens, commands, and apply flow.
+- `guide/bundles.md` — bundle files, checksums, transactions, and resume behavior.
+- `guide/risk-and-safety.md` — risk levels, approval gates, and review workflow.
+- `guide/limitations.md` — supported objects and known limits.
+- `guide/cookbook/README.md` — executable safe-migration recipes.
+
 ## Architecture decisions (`docs/adr/`)
 
 - `0000-template.md` — ADR template.
@@ -43,6 +54,7 @@
 - `2026-10-22-p3-risk-01-risk-classifier-design.md` — P3-RISK-01 risk classifier design.
 - `2026-10-23-p3-sql-01-emitter-dispatcher-design.md` — P3-SQL-01 SQL emitter dispatcher design.
 - `2026-10-23-p3-sql-02-06-ddl-emitters-design.md` — P3-SQL-02..06 concrete DDL emitters design (approved with review decisions).
+- `2026-10-26-p5-docs-01-user-guide-design.md` — P5-DOCS-01 user guide and safe-migration cookbook design.
 
 ## Implementation plans (`docs/plans/`)
 
@@ -51,6 +63,7 @@
 - `2026-10-22-p3-risk-01-implementation-plan.md` — P3-RISK-01 implementation plan.
 - `2026-10-23-p3-sql-01-emitter-dispatcher-implementation-plan.md` — P3-SQL-01 implementation plan.
 - `2026-10-22-pgschemadiff-status-roadmap.md` — Vietnamese status analysis and roadmap plan (partly superseded by current state files).
+- `2026-10-26-p5-docs-01-implementation-plan.md` — P5-DOCS-01 implementation plan.
 
 ## UI design reference (`docs/ui-design/`)
 

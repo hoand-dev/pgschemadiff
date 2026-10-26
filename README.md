@@ -26,6 +26,8 @@ pipx install pgschemadiff
 
 > `pgsd inspect`, `pgsd diff`, `pgsd generate` and `pgsd apply` cover schemas, extensions, tables, columns, indexes, constraints, sequences, enum/composite/domain types, functions, procedures, views, materialized views, triggers and RLS policies. The TUI runs the same pipeline against your profiles.
 
+See the [user guide](docs/guide/README.md) for CLI options, risk gates, bundles, TUI behavior, and migration limitations.
+
 ```bash
 # launch the TUI
 pgsd                  # or: pgsd tui
