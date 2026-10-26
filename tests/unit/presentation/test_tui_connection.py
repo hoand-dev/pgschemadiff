@@ -11,6 +11,7 @@ from rich.text import Text
 from textual.widgets import DataTable, Static
 
 from pgschemadiff.application.diff.compare_schemas import SchemaComparisonResult
+from pgschemadiff.domain.delta import DeltaSet
 from pgschemadiff.domain.models import ConnectionInfo, Profile
 from pgschemadiff.presentation.composition import TuiDependencies
 from pgschemadiff.presentation.tui import PgsdApp
@@ -24,7 +25,6 @@ if TYPE_CHECKING:
 
     from pgschemadiff.application.migration.ports import BundleReader, MigrationWriter
     from pgschemadiff.domain.database import Database
-    from pgschemadiff.domain.delta import DeltaSet
     from pgschemadiff.infrastructure.config.yaml_loader import ProfileLoader
     from pgschemadiff.presentation.composition import (
         CompareCallable,
@@ -63,6 +63,8 @@ class FakeProfileLoader:
 class FakeSnapshot:
     def __init__(self, table_count: int) -> None:
         self._table_count = table_count
+        self.schemas = ()
+        self.extensions = ()
 
     def all_tables(self) -> tuple[object, ...]:
         return tuple(object() for _ in range(self._table_count))
@@ -100,7 +102,7 @@ def comparison(source_tables: int = 3, target_tables: int = 4) -> SchemaComparis
     return SchemaComparisonResult(
         source=cast("Database", FakeSnapshot(source_tables)),
         target=cast("Database", FakeSnapshot(target_tables)),
-        deltas=cast("DeltaSet", object()),
+        deltas=DeltaSet(),
     )
 
 

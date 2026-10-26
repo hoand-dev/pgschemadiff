@@ -2,17 +2,26 @@
 
 from __future__ import annotations
 
+from importlib import metadata
 from typing import TYPE_CHECKING
 
+from rich.markup import escape
 from textual.containers import Horizontal
 from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Label
 
-from pgschemadiff.presentation.tui._mock import SOURCE, TARGET
-
 if TYPE_CHECKING:
     from textual.app import ComposeResult
+
+    from pgschemadiff.domain.models import Profile
+
+
+def _package_version() -> str:
+    try:
+        return metadata.version("pgschemadiff")
+    except metadata.PackageNotFoundError:
+        return "dev"
 
 
 class HeaderBar(Widget):
@@ -39,13 +48,27 @@ class HeaderBar(Widget):
 
     def compose(self) -> ComposeResult:
         with Horizontal():
-            yield Label("◈ pgschemadiff v0.0.0", classes="brand")
-            yield Label(self.mode.upper(), id="mode-badge", classes="mode")
             yield Label(
-                f"src → [b]{SOURCE.label}[/b] tgt → [b]{TARGET.label}[/b]",
-                classes="pill",
+                f"◈ pgschemadiff v{escape(_package_version())}",
+                id="brand",
+                classes="brand",
             )
-            yield Label("  branch [green]main[/green]  :cmd", classes="right")
+            yield Label(self.mode.upper(), id="mode-badge", classes="mode")
+            yield Label("src → —  tgt → —", id="connection-pills", classes="pill")
+            yield Label("  :cmd", classes="right")
+
+    def update_profile(self, profile: Profile | None) -> None:
+        """Render only selected profile name and database labels."""
+        if profile is None:
+            label = "src → —  tgt → —"
+        else:
+            profile_name = escape(profile.name)
+            source = escape(profile.source.database)
+            target = escape(profile.target.database)
+            label = (
+                f"src → [b]{profile_name} / {source}[/b]  tgt → [b]{profile_name} / {target}[/b]"
+            )
+        self.query_one("#connection-pills", Label).update(label)
 
     def watch_mode(self, mode: str) -> None:
         try:

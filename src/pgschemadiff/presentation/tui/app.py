@@ -7,7 +7,7 @@ and screen composition described in ``docs/ui-design.md``.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from psycopg import Error as PsycopgError
 from textual.app import App
@@ -244,12 +244,15 @@ class PgsdApp(App[None]):
     def on_profiles_loaded(self, _message: ProfilesLoaded) -> None:
         status = "Could not load profiles." if self._profile_load_error else None
         self._refresh_connection(status=status)
+        cast(MainScreen, self.screen_stack[0]).update_from_session(self.session)
 
     def on_comparison_completed(self, _message: ComparisonCompleted) -> None:
         self._refresh_connection(status="Comparison complete.")
+        cast(MainScreen, self.screen_stack[0]).update_from_session(self.session)
 
     def on_comparison_failed(self, message: ComparisonFailed) -> None:
         self._report_comparison_error(message.message)
+        cast(MainScreen, self.screen_stack[0]).update_from_session(self.session)
 
     def on_profile_selected(self, message: ProfileSelected) -> None:
         if not 0 <= message.index < len(self.session.profiles):
@@ -262,6 +265,7 @@ class PgsdApp(App[None]):
             self._comparison_worker = None
         self.session.select_profile(profile)
         self._refresh_connection()
+        cast(MainScreen, self.screen_stack[0]).update_from_session(self.session)
 
     def on_test_both_requested(self, _message: TestBothRequested) -> None:
         self._start_test_both()
