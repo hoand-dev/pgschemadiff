@@ -55,17 +55,15 @@ def inspect_cmd(conn_url: str, schemas: list[str] | None) -> None:
             inspector = PgCatalogInspector(pool, schemas=schemas or None)
             return await inspect_schema(inspector)
 
+    # Driver and inspection messages can carry host, user or catalog details;
+    # print fixed messages only, matching ``pgsd diff``.
     try:
         json_output = asyncio.run(_run())
-    except InspectionError as exc:
-        typer.echo(f"Error: {exc}", err=True)
-        raise typer.Exit(code=1) from exc
-    except (psycopg.Error, psycopg_pool.PoolTimeout) as exc:
-        # Pool.__aenter__ raises these when the DSN is unreachable or auth fails.
-        # Wrap as InspectionError so callers see a consistent error type.
-        inspection_exc = InspectionError(f"Connection failed: {exc}")
-        inspection_exc.__cause__ = exc
-        typer.echo(f"Error: {inspection_exc}", err=True)
-        raise typer.Exit(code=1) from inspection_exc
+    except (psycopg.Error, psycopg_pool.PoolTimeout):
+        typer.echo("Error: Database connection failed.", err=True)
+        raise typer.Exit(code=1) from None
+    except InspectionError:
+        typer.echo("Error: Schema inspection failed.", err=True)
+        raise typer.Exit(code=1) from None
 
     typer.echo(json_output, file=sys.stdout)

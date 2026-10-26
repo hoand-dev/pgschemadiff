@@ -486,7 +486,10 @@ async def test_cli_connection_operational_error_exits_one() -> None:
     pytest-asyncio-managed test loop (see ``test_cli_connection_pool_timeout_exits_one``
     for the full explanation).
     """
-    op_error_exc = psycopg.OperationalError("connection refused")
+    op_error_exc = psycopg.OperationalError(
+        'connection to server at "secret-host" failed: password authentication failed '
+        'for user "secret_user"'
+    )
     stderr_capture = io.StringIO()
 
     def run_in_thread() -> typer.Exit:
@@ -508,4 +511,6 @@ async def test_cli_connection_operational_error_exits_one() -> None:
 
     assert exit_exc.exit_code == 1
     err_output = stderr_capture.getvalue()
-    assert "Error" in err_output, f"No 'Error' in stderr: {err_output!r}"
+    assert err_output == "Error: Database connection failed.\n"
+    assert exit_exc.__cause__ is None
+    assert "secret" not in err_output
