@@ -1,162 +1,281 @@
-"""Migration view (``gm``) — generated SQL, exec plan, lock estimates."""
+"""Risk-gated migration generation, preview, and bundle saving."""
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
-from rich.markup import escape
-from textual.containers import Horizontal, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.content import Content
+from textual.message import Message
 from textual.reactive import reactive
 from textual.widget import Widget
-from textual.widgets import Static
+from textual.widgets import Button, DataTable, Input, Select, Static
 
-from pgschemadiff.presentation.tui._mock import (
-    LOCK_ESTIMATES,
-    MIGRATION_LINES,
-    MIGRATION_STATS,
-    MIGRATION_TOGGLES,
-    ROLLBACK_LINES,
-    MigLine,
-)
+from pgschemadiff.application.sql_emit.risk import RiskLevel
 from pgschemadiff.presentation.tui.views._common import (
-    AiRequested,
     ApplyRequested,
     Panel,
     SectionHeader,
-    sql_markup,
+    markup,
+    sql_content,
 )
 
 if TYPE_CHECKING:
-    from textual import events
+    from pathlib import Path
+
     from textual.app import ComposeResult
 
-# class -> (sig glyph, sig colour, line css)
-_LINE_STYLE = {
-    "add": ("+", "$success", "diff-add"),
-    "del": ("-", "$error", "diff-del"),
-    "mod": ("~", "$warning", "diff-mod"),
-    "warn": ("!", "$warning", ""),
-    "err": ("!", "$error", ""),
-    "conflict": ("!", "$error", "conflict"),
-    "kw": (" ", "$text-muted", ""),
-    "com": (" ", "$text-muted", ""),
-    "": (" ", "$text-muted", ""),
-}
+    from pgschemadiff.application.diff.compare_schemas import SchemaComparisonResult
+    from pgschemadiff.application.migration.model import MigrationPlan
+    from pgschemadiff.application.migration.render import RenderedBundle
+    from pgschemadiff.presentation.tui.session import TuiSession
 
 
-def _mig_widget(line: MigLine) -> Static:
-    glyph, colour, cls = _LINE_STYLE.get(line.cls, _LINE_STYLE[""])
-    num = f"[$text-muted dim]{line.ln:>3}[/]"
-    body = sql_markup(line.text) if line.text else ""
-    css = f"diff-line {cls}".strip()
-    return Static(f"{num} [{colour}]{glyph}[/] {body}", classes=css)
+class GenerateMigrationRequested(Message):
+    """Request generation at the selected maximum risk level."""
+
+    def __init__(self, max_risk: RiskLevel) -> None:
+        super().__init__()
+        self.max_risk = max_risk
+
+
+class SaveBundleRequested(Message):
+    """Request saving the current plan below an existing directory."""
+
+    def __init__(self, output_dir: str) -> None:
+        super().__init__()
+        self.output_dir = output_dir
+
+
+class MigrationGenerated(Message):
+    """Carry a rendered plan back to the app for session storage."""
+
+    def __init__(
+        self,
+        comparison: SchemaComparisonResult,
+        plan: MigrationPlan,
+        bundle: RenderedBundle,
+    ) -> None:
+        super().__init__()
+        self.comparison = comparison
+        self.plan = plan
+        self.bundle = bundle
+
+
+class MigrationGenerationFailed(Message):
+    """Carry a safe risk-gate detail or fixed generation failure message."""
+
+    def __init__(self, comparison: SchemaComparisonResult, message: str) -> None:
+        super().__init__()
+        self.comparison = comparison
+        self.message = message
+
+
+class MigrationBundleWritten(Message):
+    """Carry the path returned by the injected migration writer."""
+
+    def __init__(self, plan: MigrationPlan, path: Path) -> None:
+        super().__init__()
+        self.plan = plan
+        self.path = path
+
+
+class MigrationBundleWriteFailed(Message):
+    """Signal that bundle saving failed without exposing filesystem details."""
+
+    def __init__(self, plan: MigrationPlan) -> None:
+        super().__init__()
+        self.plan = plan
 
 
 class MigrationView(Widget):
-    """The topo-sorted migration script plus its execution plan."""
+    """Render the generated bundle and its plan-owned execution units."""
 
     show_rollback: reactive[bool] = reactive(False, recompose=True)
+    comparison_available: reactive[bool] = reactive(False, recompose=True)
+    plan: reactive[MigrationPlan | None] = reactive(None, recompose=True)
+    rendered_bundle: reactive[RenderedBundle | None] = reactive(None, recompose=True)
+    written_bundle_path: reactive[Path | None] = reactive(None, recompose=True)
+    status: reactive[str] = reactive("", recompose=True)
+    busy: reactive[bool] = reactive(False, recompose=True)
+    max_risk: reactive[str] = reactive(RiskLevel.DANGEROUS.value)
+    output_dir: reactive[str] = reactive("./migrations")
 
     DEFAULT_CSS = """
     MigrationView { height: 1fr; }
     MigrationView > VerticalScroll { height: 1fr; padding: 1 2; }
-    MigrationView .toolbar { height: 1; margin-bottom: 1; }
-    MigrationView .action { padding: 0 1; margin-left: 1; background: $boost; color: $text; }
-    MigrationView .action.primary { background: $primary; color: $background; text-style: bold; }
-    MigrationView .action:hover { background: $surface-lighten-1; }
-    MigrationView .cols { height: auto; }
+    MigrationView .toolbar { height: auto; margin-bottom: 1; }
+    MigrationView .toolbar > * { margin-right: 1; }
+    MigrationView #mig-risk { width: 16; }
+    MigrationView #mig-output-dir { width: 24; }
+    MigrationView .metadata, MigrationView .status, MigrationView .written-path { height: auto; }
+    MigrationView .columns { height: 1fr; }
     MigrationView .script-col { width: 2fr; margin-right: 1; }
     MigrationView .side-col { width: 1fr; }
-    MigrationView .tabs { height: 1; }
-    MigrationView .tab {
-        width: 12;
-        content-align: center middle;
-        background: $boost;
-        color: $text-muted;
-        margin-right: 1;
-    }
-    MigrationView .tab.active { background: $primary; color: $background; text-style: bold; }
-    MigrationView .script { height: 24; background: $panel; }
-    MigrationView .diff-line { padding: 0 1; height: 1; }
-    MigrationView .diff-add { background: $success 10%; }
-    MigrationView .diff-del { background: $error 10%; }
-    MigrationView .diff-mod { background: $warning 10%; }
-    MigrationView .conflict { color: $text-muted; text-style: italic; }
-    MigrationView .footer { color: $text-muted; padding: 0 1; }
+    MigrationView .tabs { height: auto; }
+    MigrationView .script { height: 1fr; min-height: 12; background: $panel; }
+    MigrationView .sql-line { height: auto; }
+    MigrationView .status.error { color: $error; }
+    MigrationView .status.success { color: $success; }
     """
 
+    def update_from_session(self, session: TuiSession) -> None:
+        """Refresh the view from the session's comparison and migration state."""
+        self.comparison_available = session.last_comparison is not None
+        self.plan = session.migration_plan
+        self.rendered_bundle = session.rendered_bundle
+        self.written_bundle_path = session.written_bundle_path
+
     def compose(self) -> ComposeResult:
-        crumb = "generated · 97 lines · 25 changes · 1 conflict skipped"
-        yield SectionHeader("Migration script", crumb)
+        yield SectionHeader("Migration script")
         with VerticalScroll():
             with Horizontal(classes="toolbar"):
-                yield Static("save .sql", classes="action", id="mig-save")
-                yield Static("⌘a AI review", classes="action", id="mig-ai")
-                yield Static("dry-run", classes="action", id="mig-dry")
-                yield Static("ga apply →", classes="action primary", id="mig-apply")
-            with Horizontal(classes="cols"):
-                yield from self._script_panel()
-                with VerticalScroll(classes="side-col"):
-                    yield from self._side_panels()
-
-    def _script_panel(self) -> ComposeResult:
-        name = "rollback.sql" if self.show_rollback else "migration_20260523_142208.sql"
-        with Panel(name, classes="script-col"):
-            with Horizontal(classes="tabs"):
-                fcls = "tab" if self.show_rollback else "tab active"
-                rcls = "tab active" if self.show_rollback else "tab"
-                yield Static("forward", classes=fcls, id="mig-fwd")
-                yield Static("rollback", classes=rcls, id="mig-rbk")
-            with VerticalScroll(classes="script"):
-                if self.show_rollback:
-                    for i, text in enumerate(ROLLBACK_LINES, start=1):
-                        yield Static(
-                            f"[$text-muted dim]{i:>3}[/]   {sql_markup(text)}",
-                            classes="diff-line",
+                yield Select(
+                    tuple(
+                        (risk.name, risk.value)
+                        for risk in (
+                            RiskLevel.SAFE,
+                            RiskLevel.WARNING,
+                            RiskLevel.DANGEROUS,
+                            RiskLevel.DESTRUCTIVE,
                         )
-                else:
-                    for line in MIGRATION_LINES:
-                        yield _mig_widget(line)
-            yield Static(
-                "[$text-muted]line 1/97 · col 1 · sql · utf-8 · unix · 4 spaces[/]"
-                "   [$text-muted dim]sha256:b71f…ce4a[/]",
-                classes="footer",
-            )
-
-    def _side_panels(self) -> ComposeResult:
-        with Panel("Execution plan"):
-            for label, on, hint in MIGRATION_TOGGLES:
-                sw = "[$success]●[/]" if on else "[$text-muted]○[/]"
-                yield Static(f"{sw} [$text]{label}[/]  [$text-muted dim]{escape(hint)}[/]")
-            yield Static(
-                "\n[$warning]⚠[/] public.users — ALTER COLUMN TYPE locks table (~14m est)."
-            )
-            yield Static("[$error]✗[/] public.legacy_invites — DROP destroys 4,217 rows.")
-        with Panel("Lock estimate", subtitle="pg_locks · row counts"):
-            yield Static(f"[$text-muted bold]{'step':<22}{'lock':<16}{'rows':<8}est[/]")
-            for le in LOCK_ESTIMATES:
-                colour = {"warn": "$warning", "err": "$error", "ok": "$success"}.get(
-                    le.sev, "$text"
+                    ),
+                    value=self.max_risk,
+                    allow_blank=False,
+                    id="mig-risk",
                 )
-                yield Static(f"[{colour}]{escape(le.step):<22}{le.lock:<16}{le.rows:<8}{le.est}[/]")
-        with Panel("Stats"):
-            for label, value, sev in MIGRATION_STATS:
-                colour = {"warn": "$warning", "err": "$error"}.get(sev, "$text")
-                yield Static(f"[$text-muted]{label:<16}[/] [{colour} bold]{value}[/]")
+                yield Button(
+                    "Generate",
+                    id="mig-generate",
+                    variant="primary",
+                    disabled=not self.comparison_available or self.busy,
+                )
+                yield Input(
+                    self.output_dir,
+                    placeholder="Existing parent directory",
+                    id="mig-output-dir",
+                )
+                yield Button(
+                    "Save bundle",
+                    id="mig-save",
+                    disabled=self.plan is None or self.busy,
+                )
+                yield Button(
+                    "Apply →",
+                    id="mig-apply",
+                    disabled=self.written_bundle_path is None or self.busy,
+                )
 
-    # ----------------------------------------------------------------- events
+            yield Static(
+                markup("$metadata", metadata=self._metadata()),
+                classes="metadata",
+                id="mig-metadata",
+            )
+            status_content = markup("$status", status=self.status) if self.status else " "
+            yield Static(status_content, id="mig-status", classes="status")
+            if self.written_bundle_path is None:
+                yield Static("Bundle not saved.", classes="written-path", id="mig-written-path")
+            else:
+                yield Static(
+                    markup("Written bundle: $path", path=self.written_bundle_path),
+                    classes="written-path",
+                    id="mig-written-path",
+                )
 
-    def on_click(self, event: events.Click) -> None:
-        wid = getattr(event.widget, "id", None) or ""
-        if wid == "mig-fwd":
-            self.show_rollback = False
-        elif wid == "mig-rbk":
-            self.show_rollback = True
-        elif wid == "mig-apply":
+            with Horizontal(classes="columns"):
+                with Vertical(classes="script-col"), Panel("Migration bundle"):
+                    with Horizontal(classes="tabs"):
+                        yield Button("up.sql", id="mig-fwd")
+                        yield Button("Rollback notes — not executable", id="mig-rbk")
+                    with VerticalScroll(classes="script"):
+                        yield from self._script_content()
+                with VerticalScroll(classes="side-col"):
+                    with Panel("Execution plan"):
+                        yield from self._execution_plan()
+                    yield Static("N/A — no lock/row-count estimator.", classes="metadata")
+
+    def _metadata(self) -> str:
+        plan = self.plan
+        bundle = self.rendered_bundle
+        if plan is None or bundle is None:
+            return "Generate a plan to preview migration SQL."
+        files = dict(bundle.files)
+        up_sql = files["up.sql"]
+        manifest = json.loads(files["manifest.json"])
+        checksum = manifest["checksums"]["up_sql_sha256"]
+        line_count = len(up_sql.decode("utf-8").splitlines())
+        return (
+            f"{plan.created_at.isoformat()} · {len(plan.delta_set)} deltas · "
+            f"{line_count} lines · {len(up_sql)} bytes · sha256:{checksum}"
+        )
+
+    def _script_content(self) -> ComposeResult:
+        bundle = self.rendered_bundle
+        if bundle is None:
+            yield Static("Generate a plan to preview SQL.", id="mig-no-plan")
+            return
+        files = dict(bundle.files)
+        name = "down.sql" if self.show_rollback else "up.sql"
+        sql = files[name].decode("utf-8")
+        widget_id = "mig-down-sql" if self.show_rollback else "mig-up-sql"
+        yield Static(_numbered_sql(sql), id=widget_id)
+
+    def _execution_plan(self) -> ComposeResult:
+        plan = self.plan
+        if plan is None:
+            yield Static("Generate a plan to inspect execution units.")
+            return
+        table: DataTable[str] = DataTable(id="mig-units")
+        table.add_columns("Unit", "Mode", "Statements", "Delta IDs", "Risk / reason")
+        assessments = {record.delta_id: record.assessment for record in plan.assessments}
+        for unit in plan.units:
+            reasons = "; ".join(
+                dict.fromkeys(assessments[delta_id].reason for delta_id in unit.delta_ids)
+            )
+            table.add_row(
+                str(unit.index),
+                "transactional" if unit.transaction_unit.transactional else "non-transactional",
+                str(len(unit.transaction_unit.statements)),
+                ", ".join(unit.delta_ids),
+                f"{unit.max_risk.value} — {reasons}",
+            )
+        yield table
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        button_id = event.button.id
+        if button_id == "mig-generate":
+            try:
+                max_risk = RiskLevel(self.max_risk)
+            except ValueError:
+                return
+            self.post_message(GenerateMigrationRequested(max_risk))
+        elif button_id == "mig-save":
+            self.post_message(SaveBundleRequested(self.query_one("#mig-output-dir", Input).value))
+        elif button_id == "mig-apply":
             self.post_message(ApplyRequested())
-        elif wid == "mig-ai":
-            self.post_message(AiRequested())
-        elif wid == "mig-dry":
-            self.notify("dry-run queued — see Apply view", severity="information")
-        elif wid == "mig-save":
-            self.notify("saved migration_20260523_142208.sql", severity="information")
+        elif button_id == "mig-fwd":
+            self.show_rollback = False
+        elif button_id == "mig-rbk":
+            self.show_rollback = True
+        else:
+            return
+        event.stop()
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "mig-risk" and isinstance(event.value, str):
+            self.max_risk = event.value
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "mig-output-dir":
+            self.output_dir = event.value
+
+
+def _numbered_sql(sql: str) -> Content:
+    content = Content()
+    for line_number, line in enumerate(sql.splitlines(), start=1):
+        if line_number > 1:
+            content = content.append("\n")
+        content = content.append(markup("[$text-muted dim]$line[/] ", line=f"{line_number:>4}"))
+        content = content.append(sql_content(line))
+    return content

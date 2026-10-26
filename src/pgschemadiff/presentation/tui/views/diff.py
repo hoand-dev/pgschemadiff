@@ -20,6 +20,7 @@ from pgschemadiff.presentation.tui.views._common import (
     markup,
     op_chip,
     risk_chip,
+    sql_content,
 )
 
 if TYPE_CHECKING:
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
     from textual.app import ComposeResult
 
     from pgschemadiff.application.diff.compare_schemas import SchemaComparisonResult
+    from pgschemadiff.application.migration.model import MigrationPlan
     from pgschemadiff.application.sql_emit.risk import RiskAssessment
     from pgschemadiff.domain.delta.base import DeltaBase
     from pgschemadiff.domain.identity import ObjectRef
@@ -171,6 +173,7 @@ class DiffView(Widget):
     """Inspect one assessed delta against the retained source and target snapshots."""
 
     comparison: reactive[SchemaComparisonResult | None] = reactive(None, recompose=True)
+    migration_plan: reactive[MigrationPlan | None] = reactive(None, recompose=True)
     delta_id: reactive[str] = reactive("", recompose=True)
     mode: reactive[str] = reactive("side", recompose=True)
     profile_name: reactive[str] = reactive("", recompose=True)
@@ -210,6 +213,7 @@ class DiffView(Widget):
     def update_from_session(self, session: TuiSession) -> None:
         """Refresh the view from the current session comparison and profile."""
         self.comparison = session.last_comparison
+        self.migration_plan = session.migration_plan
         self.profile_name = (
             session.selected_profile.name if session.selected_profile is not None else ""
         )
@@ -218,6 +222,30 @@ class DiffView(Widget):
         if self.comparison is None:
             return ()
         return assess_deltas(self.comparison.deltas)
+
+    def _migration_statements(self) -> tuple[str, ...]:
+        plan = self.migration_plan
+        if plan is None:
+            return ()
+        record = next((item for item in plan.assessments if item.delta_id == self.delta_id), None)
+        if record is None:
+            return ()
+        return tuple(
+            statement.sql
+            for unit in plan.units
+            for statement in unit.transaction_unit.statements
+            if statement.delta is record.assessment.delta
+        )
+
+    def _forward_sql(self) -> ComposeResult:
+        with Panel("Forward SQL"):
+            statements = self._migration_statements()
+            if statements:
+                for statement in statements:
+                    for line in statement.splitlines():
+                        yield Static(sql_content(line), classes="diff-line")
+            else:
+                yield Static("Generate a plan to preview SQL")
 
     def compose(self) -> ComposeResult:
         comparison = self.comparison
@@ -286,8 +314,7 @@ class DiffView(Widget):
                 yield from self._tree(delta, source_object, target_object)
             else:
                 yield from self._side(comparison, source_object, target_object)
-            with Panel("Forward SQL"):
-                yield Static("Generate a plan to preview SQL")
+            yield from self._forward_sql()
             with Panel("Rollback SQL"):
                 yield Static("Rollback SQL is not generated")
 

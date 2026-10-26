@@ -7,6 +7,7 @@ and screen composition described in ``docs/ui-design.md``.
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from psycopg import Error as PsycopgError
@@ -16,6 +17,9 @@ from textual.message import Message
 from textual.widgets import ContentSwitcher, Input
 from textual.worker import Worker
 
+from pgschemadiff.application.migration.generate import generate_migration
+from pgschemadiff.application.migration.render import render_bundle
+from pgschemadiff.application.sql_emit.risk import RiskLevel
 from pgschemadiff.presentation.tui._mock import ai_for
 from pgschemadiff.presentation.tui.screens import AiModal, HelpScreen, MainScreen
 from pgschemadiff.presentation.tui.session import TuiSession
@@ -24,11 +28,19 @@ from pgschemadiff.presentation.tui.views.connection import (
     ProfileSelected,
     TestBothRequested,
 )
-from pgschemadiff.presentation.tui.views import DiffView
+from pgschemadiff.presentation.tui.views import DiffView, MigrationView
 from pgschemadiff.presentation.tui.views._common import (
     AiRequested,
     ApplyRequested,
     DiffRequested,
+)
+from pgschemadiff.presentation.tui.views.migration import (
+    GenerateMigrationRequested,
+    MigrationBundleWriteFailed,
+    MigrationBundleWritten,
+    MigrationGenerated,
+    MigrationGenerationFailed,
+    SaveBundleRequested,
 )
 from pgschemadiff.presentation.tui.widgets import (
     Cmdbar,
@@ -37,14 +49,14 @@ from pgschemadiff.presentation.tui.widgets import (
     TabActivated,
     ViewTabs,
 )
-from pgschemadiff.shared.errors import DiffError, InspectionError
+from pgschemadiff.shared.errors import DiffError, InspectionError, RiskGateError
 from pgschemadiff.shared.logging import get_logger
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from textual.events import Key
 
+    from pgschemadiff.application.diff.compare_schemas import SchemaComparisonResult
+    from pgschemadiff.application.migration.model import MigrationPlan
     from pgschemadiff.domain.models import Profile
     from pgschemadiff.presentation.composition import TuiDependencies
 
@@ -131,6 +143,7 @@ class PgsdApp(App[None]):
         self.session = TuiSession()
         self._profile_load_error = False
         self._comparison_worker: Worker[None] | None = None
+        self._migration_generation_worker: Worker[None] | None = None
         self._mode = "normal"
         self._chord: str | None = None
         self._active_view = "overview"
@@ -200,6 +213,7 @@ class PgsdApp(App[None]):
             self._report_comparison_error("unsupported profile mode")
             return
 
+        self._invalidate_migration()
         self._refresh_connection(status="Testing connections…")
         self._comparison_worker = self.run_worker(
             self._compare_profile(profile),
@@ -249,10 +263,12 @@ class PgsdApp(App[None]):
     def on_comparison_completed(self, _message: ComparisonCompleted) -> None:
         self._refresh_connection(status="Comparison complete.")
         cast(MainScreen, self.screen_stack[0]).update_from_session(self.session)
+        self._refresh_migration_view()
 
     def on_comparison_failed(self, message: ComparisonFailed) -> None:
         self._report_comparison_error(message.message)
         cast(MainScreen, self.screen_stack[0]).update_from_session(self.session)
+        self._refresh_migration_view()
 
     def on_profile_selected(self, message: ProfileSelected) -> None:
         if not 0 <= message.index < len(self.session.profiles):
@@ -263,15 +279,145 @@ class PgsdApp(App[None]):
         if self._comparison_worker is not None:
             self._comparison_worker.cancel()
             self._comparison_worker = None
+        self._cancel_migration_generation()
         self.session.select_profile(profile)
         self._refresh_connection()
         cast(MainScreen, self.screen_stack[0]).update_from_session(self.session)
+        self._refresh_migration_view(status="", busy=False)
 
     def on_test_both_requested(self, _message: TestBothRequested) -> None:
         self._start_test_both()
 
     def action_test_both(self) -> None:
         self._start_test_both()
+
+    def _cancel_migration_generation(self) -> None:
+        if self._migration_generation_worker is not None:
+            self._migration_generation_worker.cancel()
+            self._migration_generation_worker = None
+
+    def _invalidate_migration(self) -> None:
+        self._cancel_migration_generation()
+        self.session.clear_migration()
+        self._refresh_migration_view(status="", busy=False)
+
+    def _refresh_migration_view(
+        self,
+        *,
+        status: str | None = None,
+        busy: bool | None = None,
+    ) -> None:
+        view = self.query_one("#migration", MigrationView)
+        view.update_from_session(self.session)
+        if status is not None:
+            view.status = status
+        if busy is not None:
+            view.busy = busy
+
+    def on_generate_migration_requested(self, message: GenerateMigrationRequested) -> None:
+        if not isinstance(message.max_risk, RiskLevel) or message.max_risk is RiskLevel.BLOCKED:
+            self._refresh_migration_view(status="Could not generate migration bundle.", busy=False)
+            message.stop()
+            return
+        comparison = self.session.last_comparison
+        if comparison is None:
+            self._refresh_migration_view(
+                status="Compare schemas before generating a migration.",
+                busy=False,
+            )
+            message.stop()
+            return
+
+        self._invalidate_migration()
+        self._refresh_migration_view(status="Generating migration…", busy=True)
+        self._migration_generation_worker = self.run_worker(
+            self._generate_migration(comparison, message.max_risk),
+            name="migration-generate",
+            group="migration-generate",
+            exclusive=True,
+        )
+        message.stop()
+
+    async def _generate_migration(
+        self,
+        comparison: SchemaComparisonResult,
+        max_risk: RiskLevel,
+    ) -> None:
+        try:
+            plan = await asyncio.to_thread(
+                generate_migration,
+                comparison.deltas,
+                max_risk=max_risk,
+            )
+            bundle = await asyncio.to_thread(render_bundle, plan)
+        except RiskGateError as error:
+            self.post_message(MigrationGenerationFailed(comparison, str(error)))
+        except Exception:
+            self.post_message(
+                MigrationGenerationFailed(comparison, "Could not generate migration bundle.")
+            )
+        else:
+            self.post_message(MigrationGenerated(comparison, plan, bundle))
+
+    def on_migration_generated(self, message: MigrationGenerated) -> None:
+        if self.session.last_comparison is not message.comparison:
+            return
+        self.session.migration_plan = message.plan
+        self.session.rendered_bundle = message.bundle
+        self.session.written_bundle_path = None
+        self._refresh_migration_view(status="Migration generated.", busy=False)
+        message.stop()
+
+    def on_migration_generation_failed(self, message: MigrationGenerationFailed) -> None:
+        if self.session.last_comparison is not message.comparison:
+            return
+        self._refresh_migration_view(status=message.message, busy=False)
+        message.stop()
+
+    def on_save_bundle_requested(self, message: SaveBundleRequested) -> None:
+        plan = self.session.migration_plan
+        output_dir = message.output_dir.strip()
+        if plan is None or not output_dir or self.dependencies is None:
+            self._refresh_migration_view(status="Could not save migration bundle.", busy=False)
+            message.stop()
+            return
+        self._refresh_migration_view(status="Saving migration bundle…", busy=True)
+        self.run_worker(
+            self._write_migration_bundle(plan, Path(output_dir).expanduser()),
+            name="migration-save",
+            group="migration-save",
+            exclusive=True,
+        )
+        message.stop()
+
+    async def _write_migration_bundle(self, plan: MigrationPlan, output_dir: Path) -> None:
+        dependencies = self.dependencies
+        if dependencies is None:
+            self.post_message(MigrationBundleWriteFailed(plan))
+            return
+        try:
+            path = await asyncio.to_thread(
+                dependencies.migration_writer.write,
+                plan,
+                output_dir,
+            )
+        except Exception:
+            self.post_message(MigrationBundleWriteFailed(plan))
+        else:
+            self.post_message(MigrationBundleWritten(plan, path))
+
+    def on_migration_bundle_written(self, message: MigrationBundleWritten) -> None:
+        if self.session.migration_plan is not message.plan:
+            return
+        self.session.written_bundle_path = message.path
+        self._refresh_migration_view(status="Migration bundle saved.", busy=False)
+        message.stop()
+
+    def on_migration_bundle_write_failed(self, message: MigrationBundleWriteFailed) -> None:
+        if self.session.migration_plan is not message.plan:
+            return
+        self._refresh_migration_view(status="Could not save migration bundle.", busy=False)
+        message.stop()
 
     # ------------------------------------------------------------------ helpers
 

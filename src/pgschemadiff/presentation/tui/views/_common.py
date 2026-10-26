@@ -10,9 +10,8 @@ from __future__ import annotations
 
 import re
 
-from rich.markup import escape
 from textual.containers import Vertical
-from textual.content import Content
+from textual.content import Content, Span
 from textual.message import Message
 from textual.widgets import Static
 
@@ -144,32 +143,60 @@ _TYPES = frozenset(
 
 # One pass: comment | string | word | number.  Order matters (comment first).
 _TOKEN = re.compile(r"(--.*|'[^']*'|[A-Za-z_][A-Za-z0-9_]*|\d+)")
+_MARKUP_BRACKET = re.compile(r"(\\*)\[")
 
 
-def _style_token(match: re.Match[str]) -> str:
-    """Wrap a single (already markup-escaped) token in a colour tag."""
+def _style_token(match: re.Match[str]) -> str | None:
+    """Return a Textual style for one SQL token, if it should be highlighted."""
     tok = match.group(0)
     if tok.startswith("--"):
-        return f"[$text-muted italic]{tok}[/]"
+        return "$text-muted italic"
     if tok.startswith("'"):
-        return f"[$success]{tok}[/]"
+        return "$success"
     low = tok.lower()
     if low in _KEYWORDS:
-        return f"[$primary]{tok}[/]"
+        return "$primary"
     if low in _TYPES:
-        return f"[$secondary]{tok}[/]"
+        return "$secondary"
     if tok.isdigit():
-        return f"[$warning]{tok}[/]"
-    return tok
+        return "$warning"
+    return None
+
+
+def sql_content(line: str) -> Content:
+    """Return highlighted SQL as literal text with styled spans.
+
+    The SQL itself is never parsed as markup, preserving backslashes and square
+    brackets exactly as emitted.
+    """
+    spans = [
+        Span(match.start(), match.end(), style)
+        for match in _TOKEN.finditer(line)
+        if (style := _style_token(match)) is not None
+    ]
+    return Content(line, spans)
 
 
 def sql_markup(line: str) -> str:
-    """Return console markup for one line of SQL.
+    """Return highlighted, escaped Rich markup for existing string callers."""
+    parts: list[str] = []
+    position = 0
+    for match in _TOKEN.finditer(line):
+        parts.append(_escape_markup_text(line[position : match.start()]))
+        token = _escape_markup_text(match.group(0))
+        style = _style_token(match)
+        parts.append(f"[{style}]{token}[/]" if style is not None else token)
+        position = match.end()
+    parts.append(_escape_markup_text(line[position:]))
+    return "".join(parts)
 
-    The whole line is markup-escaped first, so any ``[`` / ``]`` in the SQL
-    (e.g. ``-- [c01]`` migration comments) can never be mistaken for a tag.
-    """
-    return _TOKEN.sub(_style_token, escape(line))
+
+def _escape_markup_text(text: str) -> str:
+    """Escape brackets without changing literal backslashes before them."""
+    return _MARKUP_BRACKET.sub(
+        lambda match: "\\" * (len(match.group(1)) + 1) + "[",
+        text,
+    )
 
 
 # --------------------------------------------------------------------------- #
