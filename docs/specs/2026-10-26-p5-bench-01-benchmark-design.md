@@ -45,16 +45,18 @@ only. Any optimization is a separate, reviewer-approved follow-up.
 | `functions` | 80 | `LANGUAGE sql` functions |
 | `sequences` | 80 | standalone sequences (not owned) |
 
-The change set (target is the "current" database, source is "desired"; the
-migration makes target look like source) is about 10% of objects and is spread
-across kinds so every pipeline stage does real work:
+The change set follows the tool's convention: source is the "current"
+database, target is "desired", and the migration makes source look like
+target. It covers about 10% of objects and is spread across kinds so every
+pipeline stage does real work. (Corrected 2026-10-26: the first draft had the
+direction reversed; the workload code was unaffected.)
 
 | Change | Count | Expected delta |
 |---|---|---|
-| tables only in source | 40 | `CreateTable` (+ its index/constraints) |
-| tables only in target | 40 | `DropTable` (DESTRUCTIVE) |
-| added column | 200 | `AddColumn` |
-| widened column `integer → bigint` | 100 | `AlterColumnType` |
+| tables only in source | 40 | `DropTable` (DESTRUCTIVE) |
+| tables only in target | 40 | `CreateTable` (+ its index/constraints) |
+| extra column in source | 200 | `DropColumn` (DESTRUCTIVE) |
+| column `bigint` in source, `integer` in target | 100 | `AlterColumnType` |
 | secondary index changed (different column) | 100 | index replace/drop+create |
 | view body changed | 20 | `ReplaceView` |
 | function body changed | 20 | `ReplaceFunction` |
