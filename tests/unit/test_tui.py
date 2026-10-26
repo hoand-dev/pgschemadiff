@@ -1772,7 +1772,9 @@ async def test_new_comparison_and_profile_change_invalidate_migration_state(tmp_
         assert app.query_one("#mig-apply", Button).disabled
         await app.workers.wait_for_complete()
         await pilot.pause()
-        assert app.session.last_comparison is next_comparison
+        stored = app.session.last_comparison
+        assert stored is not None
+        assert stored.deltas is next_comparison.deltas
         comparison_state = (
             cast("MigrationPlan | None", app.session.migration_plan),
             cast("RenderedBundle | None", app.session.rendered_bundle),
@@ -1932,7 +1934,9 @@ async def test_history_load_does_not_cancel_running_comparison(tmp_path: Path) -
         await app.workers.wait_for_complete()
         await pilot.pause()
 
-        assert app.session.last_comparison is comparison
+        stored = app.session.last_comparison
+        assert stored is not None
+        assert stored.deltas is comparison.deltas
         assert reader.calls == 1
 
 

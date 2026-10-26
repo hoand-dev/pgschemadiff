@@ -18,6 +18,7 @@ from textual.binding import Binding
 from textual.message import Message
 from textual.widgets import Button, ContentSwitcher, DataTable, Input
 
+from pgschemadiff.application.diff.compare_schemas import SchemaComparisonResult
 from pgschemadiff.application.migration.apply import (
     ApplyEvent,
     ApplyResult,
@@ -84,7 +85,6 @@ if TYPE_CHECKING:
     from textual.events import Key
     from textual.worker import Worker
 
-    from pgschemadiff.application.diff.compare_schemas import SchemaComparisonResult
     from pgschemadiff.application.migration.history import MigrationHistoryRun
     from pgschemadiff.application.migration.model import MigrationPlan
     from pgschemadiff.application.migration.ports import BundleReader
@@ -448,9 +448,13 @@ class PgsdApp(App[None]):
         if dependencies is None:
             return
         try:
-            result = await dependencies.compare(
-                profile.source.dsn(),
+            # A profile promotes its source schema onto its target database:
+            # apply, dry run and history all run against the target, so the
+            # target is the comparison's "current" side and the deltas must
+            # move the target toward the source.
+            current = await dependencies.compare(
                 profile.target.dsn(),
+                profile.source.dsn(),
                 profile.schemas or None,
             )
         except Exception as exc:
@@ -459,7 +463,13 @@ class PgsdApp(App[None]):
             return
         if self.session.selected_profile != profile:
             return
-        self.session.last_comparison = result
+        # Views label snapshots by profile role, so store them that way; the
+        # deltas still describe target -> source.
+        self.session.last_comparison = SchemaComparisonResult(
+            source=current.target,
+            target=current.source,
+            deltas=current.deltas,
+        )
         self.post_message(ComparisonCompleted())
 
     @staticmethod

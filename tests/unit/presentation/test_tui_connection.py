@@ -236,13 +236,14 @@ async def test_test_both_stores_comparison_and_renders_snapshot_table_counts(
     tmp_path: Path,
 ) -> None:
     selected = profile("selected", schemas=[])
+    # compare(current, desired): current is the profile target (2 tables).
     result = comparison(2, 5)
     calls: list[tuple[str, str, list[str] | None]] = []
 
     async def compare(
-        source: str, target: str, schemas: list[str] | None
+        current: str, desired: str, schemas: list[str] | None
     ) -> SchemaComparisonResult:
-        calls.append((source, target, schemas))
+        calls.append((current, desired, schemas))
         return result
 
     deps, _ = dependencies([selected], path=tmp_path / "profiles.yaml", compare=compare)
@@ -252,12 +253,17 @@ async def test_test_both_stores_comparison_and_renders_snapshot_table_counts(
         await wait_for_workers(app, pilot)
         await run_test_both(app, pilot)
 
-        assert app.session.last_comparison is result
-        assert "2" in plain(app, "#connection-source")
-        assert "5" in plain(app, "#connection-target")
+        stored = app.session.last_comparison
+        assert stored is not None
+        assert stored.source is result.target
+        assert stored.target is result.source
+        assert stored.deltas is result.deltas
+        assert "5" in plain(app, "#connection-source")
+        assert "2" in plain(app, "#connection-target")
         assert plain(app, "#connection-status") == "Comparison complete."
 
-    assert calls == [(selected.source.dsn(), selected.target.dsn(), None)]
+    # The database that apply, dry run and history use must be the current side.
+    assert calls == [(selected.target.dsn(), selected.source.dsn(), None)]
 
 
 @pytest.mark.unit

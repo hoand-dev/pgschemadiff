@@ -135,11 +135,18 @@ def _dependencies(
     profile_loader.config_path = Path("profiles.yaml")
 
     async def compare(
-        _source: str,
-        _target: str,
+        _current: str,
+        _desired: str,
         _schemas: list[str] | None,
     ) -> SchemaComparisonResult:
-        return comparison
+        # The app compares current=profile target with desired=profile source
+        # and stores snapshots by profile role; return the fixture in compare
+        # orientation so the session holds it unchanged.
+        return SchemaComparisonResult(
+            source=comparison.target,
+            target=comparison.source,
+            deltas=comparison.deltas,
+        )
 
     return TuiDependencies(
         profile_loader=cast("ProfileLoader", profile_loader),
