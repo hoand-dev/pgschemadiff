@@ -59,7 +59,10 @@ SELECT
            AND NOT trigger_attribute.attisdropped
         ORDER BY trigger_attribute.attnum
     ) AS columns,
-    pg_catalog.pg_get_expr(trigger_catalog.tgqual, trigger_catalog.tgrelid, true) AS when_expr,
+    -- pg_get_expr cannot deparse WHEN clauses that use both OLD and NEW ("variables of
+    -- more than one relation"). The WHEN text is compared through the definition, and
+    -- WHEN column references are already in columns via pg_depend.
+    NULL::text AS when_expr,
     trigger_catalog.tgconstraint <> 0 AS is_constraint,
     trigger_catalog.tgdeferrable AS deferrable,
     trigger_catalog.tginitdeferred AS initially_deferred,

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from collections import defaultdict
 from itertools import pairwise
 from typing import TYPE_CHECKING
@@ -1065,16 +1064,5 @@ def _trigger_uses_new_column(
 ) -> bool:
     if trigger.table_ref.qname not in parent_names:
         return False
-    if name in trigger.columns:
-        return True
-    if trigger.when_expr is None:
-        return False
-
-    quoted_name = '"' + name.replace('"', '""') + '"'
-    identifiers = [re.escape(quoted_name)]
-    if re.fullmatch(r"[a-z_][a-z0-9_$]*", name):
-        identifiers.append(re.escape(name))
-    column_ref = "|".join(identifiers)
-    pattern = rf"(?i:\b(?:NEW|OLD))\s*\.\s*(?:{column_ref})(?![\w$])"
-    # ponytail: string literals can look like column refs; add SQL parsing if false edges matter.
-    return re.search(pattern, trigger.when_expr) is not None
+    # Columns referenced by UPDATE OF and WHEN both come from pg_depend.
+    return name in trigger.columns

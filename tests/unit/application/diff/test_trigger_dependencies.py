@@ -215,7 +215,8 @@ def test_constraint_trigger_drop_precedes_referenced_table_drop() -> None:
     ("old_columns", "old_when", "new_columns", "new_when"),
     [
         (("value",), None, ("sku",), None),
-        ((), "NEW.value > 0", (), "NEW.sku > 0"),
+        # The inspector reports WHEN column references in columns (from pg_depend).
+        (("value",), "NEW.value > 0", ("sku",), "NEW.sku > 0"),
     ],
     ids=("update-of", "when-expression"),
 )
