@@ -104,3 +104,19 @@ jobs:
             --cov-branch \
             --cov-report=xml \
             --cov-report=term-missing
+
+  benchmark:
+    name: Benchmarks (PostgreSQL 18)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+      - name: Sync deps
+        run: uv sync --extra dev
+      - name: pytest (benchmark)
+        run: uv run pytest tests/benchmark -m benchmark -v -s --benchmark-columns=min,mean,max
