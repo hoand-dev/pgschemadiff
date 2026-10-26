@@ -32,6 +32,8 @@ from pgschemadiff.shared.logging import get_logger
 if TYPE_CHECKING:
     from textual.events import Key
 
+    from pgschemadiff.presentation.composition import TuiDependencies
+
 _VIEW_CHORDS: dict[str, str] = {
     "c": "connection",
     "o": "overview",
@@ -67,8 +69,9 @@ class PgsdApp(App[None]):
     Screen { background: $background; }
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, dependencies: TuiDependencies | None = None) -> None:
         super().__init__()
+        self.dependencies = dependencies
         self._mode = "normal"
         self._chord: str | None = None
         self._active_view = "overview"

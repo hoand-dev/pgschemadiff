@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+from unittest.mock import Mock
+
 import pytest
 from textual.widgets import ContentSwitcher, Input
 from typer.testing import CliRunner
 
 from pgschemadiff.presentation.cli.main import app as cli_app
+from pgschemadiff.presentation.composition import TuiDependencies
 from pgschemadiff.presentation.tui import PgsdApp
 from pgschemadiff.presentation.tui._mock import AI_SUGGESTIONS, DIFFS
 from pgschemadiff.presentation.tui.app import _VIEW_CHORDS
@@ -23,6 +27,11 @@ from pgschemadiff.presentation.tui.views._common import (
 from pgschemadiff.presentation.tui.views.history import HistoryView
 from pgschemadiff.presentation.tui.widgets import Cmdbar
 
+if TYPE_CHECKING:
+    from pgschemadiff.application.migration.ports import BundleReader, MigrationWriter
+    from pgschemadiff.infrastructure.config.yaml_loader import ProfileLoader
+    from pgschemadiff.presentation.composition import ExecutorFactory, InspectorScope
+
 
 @pytest.mark.unit
 def test_tui_app_constructs() -> None:
@@ -37,6 +46,33 @@ async def test_tui_mounts_main_screen() -> None:
         await pilot.pause()
         assert isinstance(app.screen, MainScreen)
         assert app.theme == "catppuccin-mocha"
+
+
+@pytest.mark.unit
+async def test_tui_accepts_fake_dependencies_without_database_io() -> None:
+    profile_loader = Mock()
+    inspector_scope = Mock()
+    migration_writer = Mock()
+    bundle_reader = Mock()
+    executor_factory = Mock()
+    dependencies = TuiDependencies(
+        profile_loader=cast("ProfileLoader", profile_loader),
+        inspector_scope=cast("InspectorScope", inspector_scope),
+        migration_writer=cast("MigrationWriter", migration_writer),
+        bundle_reader=cast("BundleReader", bundle_reader),
+        executor_factory=cast("ExecutorFactory", executor_factory),
+    )
+    app = PgsdApp(dependencies=dependencies)
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        assert app.dependencies is dependencies
+
+    profile_loader.assert_not_called()
+    inspector_scope.assert_not_called()
+    migration_writer.assert_not_called()
+    bundle_reader.assert_not_called()
+    executor_factory.assert_not_called()
 
 
 @pytest.mark.unit
@@ -109,6 +145,25 @@ def test_cli_tui_subcommand_registered() -> None:
     result = runner.invoke(cli_app, ["tui", "--help"])
     assert result.exit_code == 0
     assert "tui" in result.stdout.lower() or "interactive" in result.stdout.lower()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("args", [[], ["tui"]])
+def test_cli_entrypoints_launch_composed_tui(
+    monkeypatch: pytest.MonkeyPatch, args: list[str]
+) -> None:
+    launched: list[PgsdApp] = []
+
+    def fake_run(app: PgsdApp) -> None:
+        launched.append(app)
+
+    monkeypatch.setattr(PgsdApp, "run", fake_run)
+
+    result = CliRunner().invoke(cli_app, args)
+
+    assert result.exit_code == 0
+    assert len(launched) == 1
+    assert isinstance(launched[0].dependencies, TuiDependencies)
 
 
 # --------------------------------------------------------------------------- #
