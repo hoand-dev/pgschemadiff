@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from rich.markup import escape
 from textual.binding import Binding
@@ -13,9 +13,21 @@ from textual.widgets import Static
 from pgschemadiff.presentation.tui.views._common import sql_markup
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from textual.app import ComposeResult
 
-    from pgschemadiff.presentation.tui._mock import AiSuggestion
+
+class AiSuggestion(Protocol):
+    """Legacy display shape retained without depending on demo fixtures."""
+
+    target: str
+    severity: str
+    change: str
+    title: str
+    body: Sequence[str]
+    patch: str
+    accept_label: str
 
 
 class AiModal(ModalScreen[None]):

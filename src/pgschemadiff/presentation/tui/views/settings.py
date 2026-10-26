@@ -1,76 +1,97 @@
-"""Settings view (``gs``) — preference groups + live config.toml preview."""
+"""Show current TUI settings and a redacted selected-profile summary."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from rich.markup import escape
-from textual.containers import Horizontal, VerticalScroll
+from textual.containers import VerticalScroll
 from textual.widget import Widget
 from textual.widgets import Static
 
-from pgschemadiff.presentation.tui._mock import (
-    CONFIG_TOML,
-    SETTINGS_GROUPS,
-    SettingField,
-    SettingGroup,
-)
 from pgschemadiff.presentation.tui.views._common import Panel, SectionHeader
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from textual.app import ComposeResult
 
+    from pgschemadiff.presentation.tui.session import TuiSession
 
-def _field_markup(f: SettingField) -> str:
-    if f.toggle:
-        sw = "[$success]● on[/]" if f.on else "[$text-muted]○ off[/]"
-        value = sw
-    else:
-        value = f"[$text]{escape(f.value)}[/]"
-    line = f"[$text-muted]{f.label:<24}[/] {value}"
-    if f.help:
-        line += f"   [$text-muted dim]{escape(f.help)}[/]"
-    return line
+
+from pgschemadiff.presentation.tui.views._common import markup
 
 
 class SettingsView(Widget):
-    """Grouped preferences with a read-only config.toml preview."""
+    """Render real runtime state; values in this view are read-only."""
 
     DEFAULT_CSS = """
     SettingsView { height: 1fr; }
     SettingsView > VerticalScroll { height: 1fr; padding: 1 2; }
-    SettingsView .grid { height: auto; }
-    SettingsView .grid .col { width: 1fr; }
-    SettingsView .grid .col.left { margin-right: 1; }
-    SettingsView .theme-row { padding: 0 1; }
-    SettingsView .config { background: $panel; }
+    SettingsView Static { height: auto; }
     """
 
     def compose(self) -> ComposeResult:
-        yield SectionHeader("Settings", "~/.config/pgschemadiff/config.toml")
+        yield SectionHeader("Settings", "runtime values · profile credentials omitted")
         with VerticalScroll():
-            yield Static(self._theme_picker(), classes="theme-row")
-            groups = list(SETTINGS_GROUPS)
-            with Horizontal(classes="grid"):
-                with VerticalScroll(classes="col left"):
-                    for g in groups[0::2]:
-                        yield from self._group_panel(g)
-                with VerticalScroll(classes="col"):
-                    for g in groups[1::2]:
-                        yield from self._group_panel(g)
-            with Panel("config.toml", subtitle="preview · read-only"):
-                yield Static(escape(CONFIG_TOML), classes="config")
+            with Panel("Appearance"):
+                yield Static("", id="settings-theme")
+            with Panel("Runtime"):
+                yield Static("", id="settings-diff-mode")
+            with Panel("Apply defaults"):
+                yield Static("Lock timeout default: 5000 ms")
+                yield Static("Statement timeout default: 0 ms (unlimited)")
+            with Panel("Profile"):
+                yield Static("", id="settings-profile-path")
+                yield Static("", id="settings-profile-summary")
 
-    @staticmethod
-    def _group_panel(group: SettingGroup) -> ComposeResult:
-        with Panel(group.title, subtitle=group.badge):
-            for f in group.fields:
-                yield Static(_field_markup(f))
+    def update_from_session(
+        self,
+        session: TuiSession,
+        *,
+        theme: str,
+        diff_mode: str,
+        profile_path: Path | None,
+    ) -> None:
+        """Refresh display values without serializing profile credentials."""
+        self.query_one("#settings-theme", Static).update(
+            markup("Theme: $theme · gT toggles", theme=theme)
+        )
+        self.query_one("#settings-diff-mode", Static).update(
+            markup("Diff mode (runtime): $mode", mode=diff_mode)
+        )
+        self.query_one("#settings-profile-path", Static).update(
+            markup("Profile path: $path", path=profile_path or "not configured")
+        )
 
-    def _theme_picker(self) -> str:
-        current = "latte" if self.app.theme == "catppuccin-latte" else "mocha"
-        mocha_on = "$primary bold" if current == "mocha" else "$text-muted"
-        latte_on = "$primary bold" if current == "latte" else "$text-muted"
-        mocha = f"[{mocha_on}]◐ Catppuccin Mocha[/]"
-        latte = f"[{latte_on}]◑ Catppuccin Latte[/]"
-        return f"[$text-muted]theme:[/]  {mocha}    {latte}    [$text-muted dim](gT toggle)[/]"
+        profile = session.selected_profile
+        if profile is None:
+            self.query_one("#settings-profile-summary", Static).update("No profile selected.")
+            return
+
+        schemas = ", ".join(profile.schemas) if profile.schemas else "all"
+        ignore_state = (
+            f"unsupported ({len(profile.ignore_patterns)} configured)"
+            if profile.ignore_patterns
+            else "none (0)"
+        )
+        summary = markup(
+            "Name: $name\n"
+            "Source: $source_host:$source_port · database $source_database · user $source_user\n"
+            "Target: $target_host:$target_port · database $target_database · user $target_user\n"
+            "Schemas: $schemas\n"
+            "Mode: $mode\n"
+            "Ignore patterns: $ignore_state",
+            name=profile.name,
+            source_host=profile.source.host,
+            source_port=profile.source.port,
+            source_database=profile.source.database,
+            source_user=profile.source.user,
+            target_host=profile.target.host,
+            target_port=profile.target.port,
+            target_database=profile.target.database,
+            target_user=profile.target.user,
+            schemas=schemas,
+            mode=profile.mode,
+            ignore_state=ignore_state,
+        )
+        self.query_one("#settings-profile-summary", Static).update(summary)

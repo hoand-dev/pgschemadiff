@@ -24,7 +24,7 @@ from pgschemadiff.application.migration.apply import (
     apply_migration,
 )
 from pgschemadiff.application.migration.bundle import ValidatedBundle, load_bundle
-from pgschemadiff.application.migration.generate import generate_migration
+from pgschemadiff.application.migration.generate import assess_deltas, generate_migration
 from pgschemadiff.application.migration.history import (
     MigrationHistoryUnavailableError,
     list_migration_history,
@@ -32,20 +32,25 @@ from pgschemadiff.application.migration.history import (
 from pgschemadiff.application.migration.render import render_bundle
 from pgschemadiff.application.sql_emit.risk import RiskLevel
 from pgschemadiff.presentation.cli.commands.apply import _check_connectivity, _parse_timeout
-from pgschemadiff.presentation.tui._mock import ai_for
 from pgschemadiff.presentation.tui.screens import (
-    AiModal,
     ConfirmApplyModal,
     HelpScreen,
     MainScreen,
 )
 from pgschemadiff.presentation.tui.session import TuiSession
-from pgschemadiff.presentation.tui.views import ApplyView, DiffView, MigrationView
+from pgschemadiff.presentation.tui.views import (
+    ApplyView,
+    DiffView,
+    MigrationView,
+    SettingsView,
+)
+from pgschemadiff.presentation.tui.views.apply import ApplyOperationRequested
 from pgschemadiff.presentation.tui.views.connection import (
     ConnectionView,
     ProfileSelected,
     TestBothRequested,
 )
+from pgschemadiff.presentation.tui.views.diff import _qualified_name
 from pgschemadiff.presentation.tui.views.history import (
     HistoryRefreshRequested,
     HistoryRunSelected,
@@ -79,18 +84,16 @@ if TYPE_CHECKING:
     from textual.worker import Worker
 
     from pgschemadiff.application.diff.compare_schemas import SchemaComparisonResult
-    from pgschemadiff.application.migration.model import MigrationPlan
     from pgschemadiff.application.migration.history import MigrationHistoryRun
+    from pgschemadiff.application.migration.model import MigrationPlan
     from pgschemadiff.application.migration.ports import BundleReader
     from pgschemadiff.domain.models import Profile
     from pgschemadiff.presentation.composition import TuiDependencies
     from pgschemadiff.presentation.tui.views._common import (
-        AiRequested,
         ApplyRequested,
         DiffRequested,
     )
     from pgschemadiff.presentation.tui.views.apply import (
-        ApplyOperationRequested,
         CancelApplyRequested,
     )
 
@@ -105,10 +108,19 @@ _VIEW_CHORDS: dict[str, str] = {
 }
 
 _THEMES: tuple[str, str] = ("catppuccin-mocha", "catppuccin-latte")
+_PALETTE_VIEW_COMMANDS: dict[str, str] = {
+    "o": "overview",
+    "overview": "overview",
+    "m": "migration",
+    "migration": "migration",
+    "h": "history",
+    "history": "history",
+    "s": "settings",
+    "settings": "settings",
+}
 _LOGGED_COMMANDS: dict[str, str] = {
     "q": "quit",
     "quit": "quit",
-    "zz": "quit",
     "?": "help",
     "help": "help",
     "set": "set",
@@ -124,7 +136,6 @@ _LOGGED_COMMANDS: dict[str, str] = {
     "history": "history",
     "s": "settings",
     "settings": "settings",
-    "config": "settings",
     "c": "connection",
     "conn": "connection",
     "connection": "connection",
@@ -246,6 +257,7 @@ class PgsdApp(App[None]):
         self._history_worker: Worker[None] | None = None
         self._history_io_lock = asyncio.Lock()
         self._pending_apply_request: tuple[Profile, ValidatedBundle, int, int] | None = None
+        self._palette_dry_run_pending = False
         self._mode = "normal"
         self._chord: str | None = None
         self._active_view = "overview"
@@ -298,6 +310,14 @@ class PgsdApp(App[None]):
             self.session,
             profiles_path=self._profile_path(),
             status=status,
+        )
+
+    def _refresh_settings_view(self) -> None:
+        self.query_one("#settings", SettingsView).update_from_session(
+            self.session,
+            theme=self.theme,
+            diff_mode=self.query_one("#diff", DiffView).mode,
+            profile_path=self._profile_path(),
         )
 
     def _refresh_history_view(self) -> None:
@@ -459,6 +479,7 @@ class PgsdApp(App[None]):
         status = "Could not load profiles." if self._profile_load_error else None
         self._refresh_connection(status=status)
         cast("MainScreen", self.screen_stack[0]).update_from_session(self.session)
+        self._refresh_settings_view()
 
     def on_comparison_completed(self, _message: ComparisonCompleted) -> None:
         self._refresh_connection(status="Comparison complete.")
@@ -486,6 +507,7 @@ class PgsdApp(App[None]):
         self._cancel_migration_generation()
         self.session.select_profile(profile)
         self._refresh_connection()
+        self._refresh_settings_view()
         self._refresh_history_view()
         cast("MainScreen", self.screen_stack[0]).update_from_session(self.session)
         self._refresh_migration_view(status="", busy=False)
@@ -644,6 +666,7 @@ class PgsdApp(App[None]):
             self._bundle_load_worker.cancel()
         self._bundle_load_worker = None
         self._bundle_load_path = None
+        self._palette_dry_run_pending = False
 
     def _ensure_apply_bundle_loaded(self) -> None:
         path = self.session.written_bundle_path
@@ -701,6 +724,9 @@ class PgsdApp(App[None]):
         self.session.apply_operation = None
         self.session.apply_status = "Bundle validated."
         self._refresh_apply_controls()
+        if self._palette_dry_run_pending:
+            self._palette_dry_run_pending = False
+            self._request_palette_dry_run()
         message.stop()
 
     def on_apply_bundle_load_failed(self, message: ApplyBundleLoadFailed) -> None:
@@ -714,8 +740,23 @@ class PgsdApp(App[None]):
         self.session.validated_bundle_path = None
         self.session.apply_operation = None
         self.session.apply_status = "Could not load migration bundle."
+        self._palette_dry_run_pending = False
         self._refresh_apply_controls()
         message.stop()
+
+    def _request_palette_dry_run(self) -> None:
+        if self.session.apply_operation == "loading":
+            self._palette_dry_run_pending = True
+            return
+        if self.session.apply_operation in {"dry-run", "apply"}:
+            return
+        self.post_message(
+            ApplyOperationRequested(
+                dry_run=True,
+                lock_timeout=self.query_one("#apply-lock-timeout", Input).value.strip(),
+                statement_timeout=self.query_one("#apply-statement-timeout", Input).value.strip(),
+            )
+        )
 
     def _refresh_apply_controls(self) -> None:
         apply_view = self.query_one("#apply", ApplyView)
@@ -878,18 +919,20 @@ class PgsdApp(App[None]):
                 def forward_event(event: ApplyEvent) -> None:
                     self.post_message(ApplyEventReceived(event))
 
-                async with self._history_io_lock:
-                    async with dependencies.executor_factory(
+                async with (
+                    self._history_io_lock,
+                    dependencies.executor_factory(
                         profile.target.dsn(),
                         lock_timeout_ms=lock_timeout_ms,
                         statement_timeout_ms=statement_timeout_ms,
-                    ) as executor:
-                        result = await apply_migration(
-                            bundle,
-                            executor,
-                            approve_destructive=approve_destructive,
-                            on_event=forward_event,
-                        )
+                    ) as executor,
+                ):
+                    result = await apply_migration(
+                        bundle,
+                        executor,
+                        approve_destructive=approve_destructive,
+                        on_event=forward_event,
+                    )
                 self.post_message(ApplyOperationFinished(result=result))
                 return
         except asyncio.CancelledError:
@@ -978,11 +1021,14 @@ class PgsdApp(App[None]):
             self._ensure_apply_bundle_loaded()
         elif view_id == "history":
             self._start_history_load()
+        elif view_id == "settings":
+            self._refresh_settings_view()
 
     def toggle_theme(self) -> None:
         current = self.theme
         next_theme = _THEMES[1] if current == _THEMES[0] else _THEMES[0]
         self.theme = next_theme
+        self._refresh_settings_view()
         self._set_hint(f"theme → {next_theme}")
 
     # ------------------------------------------------------------------ actions (Textual Binding)
@@ -1086,58 +1132,127 @@ class PgsdApp(App[None]):
     # ------------------------------------------------------------------ command parser
 
     def _dispatch_command(self, cmd: str) -> None:
-        c = cmd.lower()
-        first = c.split(maxsplit=1)[0]
-        self._pgsd_logger.info("tui_command", command=_LOGGED_COMMANDS.get(first, "unknown"))
-        if c in {"q", "quit", "zz"}:
+        command = cmd.strip().removeprefix(":").strip()
+        if not command:
+            return
+        parts = command.split(maxsplit=1)
+        verb = parts[0].lower()
+        arguments = parts[1].strip() if len(parts) > 1 else ""
+        self._pgsd_logger.info("tui_command", command=_LOGGED_COMMANDS.get(verb, "unknown"))
+
+        if verb in {"q", "quit"} and not arguments:
             self.exit()
             return
-        if c in {"?", "help"}:
+        if verb in {"?", "help"} and not arguments:
             self.push_screen(HelpScreen())
             return
-        if c.startswith(("set bg=", "set theme=")):
-            theme = c.split("=", 1)[1].strip()
-            mapping = {"mocha": "catppuccin-mocha", "latte": "catppuccin-latte"}
-            if theme in mapping:
-                self.theme = mapping[theme]
-                self._set_hint(f"theme → {self.theme}")
-            else:
-                self._set_hint("E474: unknown theme")
+
+        if self._dispatch_theme_command(verb, arguments):
             return
-        view_aliases = {
-            "o": "overview",
-            "overview": "overview",
-            "d": "diff",
-            "diff": "diff",
-            "m": "migration",
-            "migration": "migration",
-            "a": "apply",
-            "apply": "apply",
-            "h": "history",
-            "history": "history",
-            "s": "settings",
-            "settings": "settings",
-            "config": "settings",
-            "c": "connection",
-            "conn": "connection",
-            "connection": "connection",
-        }
-        if first in view_aliases:
-            self.switch_view(view_aliases[first])
-            self._set_hint(f":{first} — executed")
+        if self._dispatch_diff_command(verb, arguments):
             return
-        if c.startswith("apply"):
-            self.switch_view("apply")
-            self._set_hint(":apply — executed")
+        if self._dispatch_view_command(verb, arguments):
             return
-        if first == "rollback":
-            parts = cmd.strip().split(maxsplit=1)
-            if len(parts) > 1 and parts[1].strip():
-                self.session.selected_history_bundle_id = parts[1].strip()
-            self.switch_view("history")
-            self._set_hint("Rollback is not available; down.sql is notes only.")
+        if self._dispatch_apply_command(verb, arguments):
             return
-        self._set_hint("E492: not an editor command")
+        if self._dispatch_connection_command(verb, arguments):
+            return
+        if self._dispatch_rollback_command(verb, arguments):
+            return
+
+        self._set_hint("not an editor command")
+
+    def _dispatch_theme_command(self, verb: str, arguments: str) -> bool:
+        themes = {"bg=mocha": "catppuccin-mocha", "bg=latte": "catppuccin-latte"}
+        theme = themes.get(arguments.lower()) if verb == "set" else None
+        if theme is None:
+            return False
+        self.theme = theme
+        self._refresh_settings_view()
+        self._set_hint(f"theme → {theme}")
+        return True
+
+    def _dispatch_diff_command(self, verb: str, arguments: str) -> bool:
+        if verb not in {"d", "diff"}:
+            return False
+        if not arguments:
+            self.switch_view("diff")
+            self._set_hint("Diff opened.")
+            return True
+
+        comparison = self.session.last_comparison
+        matching_delta_ids = (
+            [
+                candidate_id
+                for candidate_id, assessment in assess_deltas(comparison.deltas)
+                if _qualified_name(assessment.delta.target) == arguments
+            ]
+            if comparison is not None
+            else []
+        )
+        if not matching_delta_ids:
+            self._set_hint("not found")
+            return True
+        if len(matching_delta_ids) > 1:
+            self._set_hint("multiple objects match; select from Overview")
+            return True
+        delta_id = matching_delta_ids[0]
+        diff_view = self.query_one("#diff", DiffView)
+        diff_view.update_from_session(self.session)
+        diff_view.delta_id = delta_id
+        self.switch_view("diff")
+        self._set_hint("Diff selected.")
+        return True
+
+    def _dispatch_view_command(self, verb: str, arguments: str) -> bool:
+        view_id = _PALETTE_VIEW_COMMANDS.get(verb)
+        if view_id is None or arguments:
+            return False
+        self.switch_view(view_id)
+        self._set_hint(f"{view_id.title()} opened.")
+        return True
+
+    def _dispatch_apply_command(self, verb: str, arguments: str) -> bool:
+        if verb not in {"a", "apply"} or arguments not in {"", "--dry-run"}:
+            return False
+        self.switch_view("apply")
+        self._set_hint("Apply opened.")
+        if arguments == "--dry-run":
+            self._request_palette_dry_run()
+        return True
+
+    def _dispatch_connection_command(self, verb: str, arguments: str) -> bool:
+        if verb in {"c", "conn", "connection"} and not arguments:
+            self.switch_view("connection")
+            self._set_hint("Connection opened.")
+            return True
+        if verb != "conn" or not arguments.lower().startswith("switch "):
+            return False
+
+        profile_name = arguments.split(maxsplit=1)[1]
+        profile_indices = [
+            index
+            for index, profile in enumerate(self.session.profiles)
+            if profile.name == profile_name
+        ]
+        if not profile_indices:
+            self._set_hint("profile not found")
+            return True
+        if len(profile_indices) > 1:
+            self._set_hint("ambiguous profile name")
+            return True
+        self.post_message(ProfileSelected(profile_indices[0]))
+        self.switch_view("connection")
+        self._set_hint("Profile selected.")
+        return True
+
+    def _dispatch_rollback_command(self, verb: str, arguments: str) -> bool:
+        if verb != "rollback" or not arguments or len(arguments.split()) != 1:
+            return False
+        self.session.selected_history_bundle_id = arguments
+        self.switch_view("history")
+        self._set_hint("Rollback is not available; down.sql is notes only.")
+        return True
 
     # ------------------------------------------------------------------ space chord + search
 
@@ -1159,10 +1274,6 @@ class PgsdApp(App[None]):
         self.query_one("#diff", DiffView).delta_id = message.delta_id
         self.switch_view("diff")
         self._set_hint(f"diff → {message.delta_id}")
-        message.stop()
-
-    def on_ai_requested(self, message: AiRequested) -> None:
-        self.push_screen(AiModal(ai_for(message.target)))
         message.stop()
 
     def on_apply_requested(self, message: ApplyRequested) -> None:

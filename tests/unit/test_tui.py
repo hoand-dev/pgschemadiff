@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
+import re
 import threading
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -21,7 +22,7 @@ from typer.testing import CliRunner
 import pgschemadiff.presentation.tui.app as tui_app_module
 from pgschemadiff.application.diff.compare_schemas import SchemaComparisonResult
 from pgschemadiff.application.migration.apply import apply_migration
-from pgschemadiff.application.migration.generate import generate_migration
+from pgschemadiff.application.migration.generate import assess_deltas, generate_migration
 from pgschemadiff.application.migration.history import (
     MigrationHistoryRun,
     MigrationHistoryUnavailableError,
@@ -40,9 +41,8 @@ from pgschemadiff.infrastructure.postgres.history import PostgresMigrationHistor
 from pgschemadiff.presentation.cli.main import app as cli_app
 from pgschemadiff.presentation.composition import TuiDependencies, create_tui_dependencies
 from pgschemadiff.presentation.tui import PgsdApp
-from pgschemadiff.presentation.tui._mock import AI_SUGGESTIONS, DIFFS
+from pgschemadiff.presentation.tui._mock import DIFFS
 from pgschemadiff.presentation.tui.app import _VIEW_CHORDS
-from pgschemadiff.presentation.tui.screens.ai import AiModal
 from pgschemadiff.presentation.tui.screens.help import HelpScreen
 from pgschemadiff.presentation.tui.screens.main import MainScreen
 from pgschemadiff.presentation.tui.views import DiffView, MigrationView
@@ -60,6 +60,8 @@ from pgschemadiff.presentation.tui.widgets import Cmdbar
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
     from pathlib import Path
+
+    from textual.pilot import Pilot
 
     from pgschemadiff.application.migration.apply import ApplyEvent, ApplyResult
     from pgschemadiff.application.migration.bundle import BundleUnit, ValidatedBundle
@@ -79,6 +81,30 @@ if TYPE_CHECKING:
         ExecutorFactory,
         InspectorScope,
     )
+
+
+_EXPECTED_PALETTE_COMMANDS = (
+    ":o/:overview",
+    ":d/:diff [qualified-name]",
+    ":m/:migration",
+    ":a/:apply [--dry-run]",
+    ":h/:history",
+    ":c/:conn/:connection",
+    ":conn switch <profile>",
+    ":rollback <id>",
+    ":set bg=mocha|latte",
+    ":s/:settings",
+    ":help/?",
+    ":q/:quit",
+)
+
+
+async def _submit_palette(app: PgsdApp, pilot: Pilot[None], command: str) -> None:
+    await pilot.press("colon")
+    await pilot.pause()
+    app.query_one("#cmd-input", Input).value = command.removeprefix(":")
+    await pilot.press("enter")
+    await pilot.pause()
 
 
 class _FakeProfileLoader:
@@ -115,6 +141,19 @@ class _FakeBundleReader:
         if self.error is not None:
             raise self.error
         return self.files
+
+
+class _BlockingBundleReader(_FakeBundleReader):
+    def __init__(self, files: tuple[bytes, bytes]) -> None:
+        super().__init__(files)
+        self.started = threading.Event()
+        self.release = threading.Event()
+
+    def read(self, bundle_dir: Path) -> tuple[bytes, bytes]:
+        self.started.set()
+        if not self.release.wait(timeout=5):
+            raise TimeoutError
+        return super().read(bundle_dir)
 
 
 class _FakeMigrationExecutor:
@@ -501,13 +540,215 @@ async def test_tui_command_palette_opens_and_dispatches() -> None:
 
 
 @pytest.mark.unit
-async def test_tui_unknown_command_shows_vim_style_error() -> None:
+@pytest.mark.parametrize(
+    ("command", "view_id"),
+    [
+        (":o", "overview"),
+        (":overview", "overview"),
+        (":d", "diff"),
+        (":diff", "diff"),
+        (":m", "migration"),
+        (":migration", "migration"),
+        (":a", "apply"),
+        (":apply", "apply"),
+        (":h", "history"),
+        (":history", "history"),
+        (":c", "connection"),
+        (":conn", "connection"),
+        (":connection", "connection"),
+        (":s", "settings"),
+        (":settings", "settings"),
+    ],
+)
+async def test_palette_view_commands_route_through_pilot(command: str, view_id: str) -> None:
+    app = PgsdApp()
+    async with app.run_test(size=(140, 44)) as pilot:
+        await pilot.pause()
+        await _submit_palette(app, pilot, command)
+
+        assert app._active_view == view_id
+        assert app.query_one("#content", ContentSwitcher).current == view_id
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("command", "theme"),
+    [
+        (":set bg=latte", "catppuccin-latte"),
+        (":set bg=mocha", "catppuccin-mocha"),
+    ],
+)
+async def test_palette_sets_only_supported_background_themes(command: str, theme: str) -> None:
+    app = PgsdApp()
+    async with app.run_test(size=(140, 44)) as pilot:
+        await pilot.pause()
+        await _submit_palette(app, pilot, command)
+
+        assert app.theme == theme
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("command", [":help", ":?"])
+async def test_palette_help_aliases_open_help(command: str) -> None:
+    app = PgsdApp()
+    async with app.run_test(size=(140, 44)) as pilot:
+        await pilot.pause()
+        await _submit_palette(app, pilot, command)
+
+        assert isinstance(app.screen, HelpScreen)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("command", [":q", ":quit"])
+async def test_palette_quit_aliases_exit(command: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    app = PgsdApp()
+    exits: list[bool] = []
+    monkeypatch.setattr(app, "exit", lambda: exits.append(True))
+    async with app.run_test(size=(140, 44)) as pilot:
+        await pilot.pause()
+        await _submit_palette(app, pilot, command)
+
+    assert exits == [True]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "command",
+    [
+        ":unknown password-sentinel",
+        ":config password-sentinel",
+        ":zz password-sentinel",
+        ":set theme=latte password-sentinel",
+        ":apply --yes password-sentinel",
+        ":overview password-sentinel",
+        ":connection switch password-sentinel",
+        ":rollback",
+        ":help password-sentinel",
+    ],
+)
+async def test_unknown_palette_command_is_redacted(command: str) -> None:
     app = PgsdApp()
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        app._dispatch_command("bogusverb")
+        await _submit_palette(app, pilot, command)
+
+        assert app.query_one(Cmdbar).hint == "not an editor command"
+        assert "password-sentinel" not in app.query_one(Cmdbar).hint
+
+
+@pytest.mark.unit
+async def test_palette_diff_selects_matching_qualified_name_or_reports_not_found() -> None:
+    app = PgsdApp()
+    async with app.run_test(size=(140, 44)) as pilot:
         await pilot.pause()
-        assert "E492" in app.query_one(Cmdbar).hint
+        delta = _create_schema_delta()
+        app.session.last_comparison = _comparison(delta)
+        cast("MainScreen", app.screen).update_from_session(app.session)
+
+        await _submit_palette(app, pilot, f":d {delta.target.qname.fqn}")
+
+        assert app._active_view == "diff"
+        assert app.query_one("#diff", DiffView).delta_id == "d0001"
+        await _submit_palette(app, pilot, ":diff missing-name-sentinel")
+        assert app.query_one(Cmdbar).hint == "not found"
+        assert "missing-name-sentinel" not in app.query_one(Cmdbar).hint
+
+
+@pytest.mark.unit
+async def test_palette_named_diff_rejects_ambiguous_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = PgsdApp()
+    delta = _create_schema_delta()
+    comparison = _comparison(delta)
+    app.session.last_comparison = comparison
+    assessment = assess_deltas(comparison.deltas)[0][1]
+    monkeypatch.setattr(
+        tui_app_module,
+        "assess_deltas",
+        Mock(return_value=(("d0001", assessment), ("d0002", assessment))),
+    )
+
+    async with app.run_test(size=(140, 44)) as pilot:
+        await pilot.pause()
+        await _submit_palette(app, pilot, f":diff {delta.target.qname.fqn}")
+
+        assert app._active_view == "overview"
+        assert app.query_one(Cmdbar).hint == "multiple objects match; select from Overview"
+
+
+@pytest.mark.unit
+async def test_palette_named_diff_without_comparison_reports_not_found() -> None:
+    app = PgsdApp()
+    async with app.run_test(size=(140, 44)) as pilot:
+        await pilot.pause()
+        await _submit_palette(app, pilot, ":diff public.users")
+
+        assert app.query_one(Cmdbar).hint == "not found"
+
+
+@pytest.mark.unit
+async def test_palette_connection_switch_selects_profile_by_name() -> None:
+    app = PgsdApp()
+    first, second = _profile("first"), _profile("second")
+    app.session.set_profiles([first, second])
+    async with app.run_test(size=(140, 44)) as pilot:
+        await pilot.pause()
+        await _submit_palette(app, pilot, ":conn switch second")
+
+        assert app.session.selected_profile == second
+        assert app._active_view == "connection"
+
+        await _submit_palette(app, pilot, ":conn switch missing-profile-sentinel")
+        assert app.query_one(Cmdbar).hint == "profile not found"
+        assert "missing-profile-sentinel" not in app.query_one(Cmdbar).hint
+
+
+@pytest.mark.unit
+async def test_palette_connection_switch_rejects_ambiguous_profile_name() -> None:
+    first = _profile("shared")
+    second = Profile(name=first.name, source=first.target, target=first.source)
+    app = PgsdApp()
+    app.session.set_profiles([first, second])
+
+    async with app.run_test(size=(140, 44)) as pilot:
+        await pilot.pause()
+        await _submit_palette(app, pilot, ":conn switch shared")
+
+        assert app.session.selected_profile == first
+        assert app._active_view == "overview"
+        assert app.query_one(Cmdbar).hint == "ambiguous profile name"
+
+
+@pytest.mark.unit
+async def test_palette_rollback_selects_run_and_says_unavailable() -> None:
+    app = PgsdApp()
+    app.session.select_profile(_profile("pilot"))
+    app.session.history_runs = _history_runs()
+    async with app.run_test(size=(140, 44)) as pilot:
+        await pilot.pause()
+        await _submit_palette(app, pilot, ":rollback bundle-new")
+
+        assert app._active_view == "history"
+        assert app.session.selected_history_bundle_id == "bundle-new"
+        assert app.query_one(Cmdbar).hint == "Rollback is not available; down.sql is notes only."
+
+
+@pytest.mark.unit
+async def test_palette_lists_exact_supported_commands_in_help_and_cmdbar() -> None:
+    app = PgsdApp()
+    async with app.run_test(size=(140, 44)) as pilot:
+        await pilot.pause()
+        await _submit_palette(app, pilot, ":help")
+
+        help_text = "\n".join(_plain(widget) for widget in app.screen.query(Static))
+        assert Cmdbar.HINTS == _EXPECTED_PALETTE_COMMANDS
+        for command in _EXPECTED_PALETTE_COMMANDS:
+            assert help_text.count(command) == 1
+        banned = ("AI", "accept", "skip", "pause", "continue", "executable rollback")
+        assert not any(
+            re.search(rf"\b{re.escape(word)}\b", help_text, re.IGNORECASE) for word in banned
+        )
 
 
 @pytest.mark.unit
@@ -609,14 +850,100 @@ async def test_diff_mode_toggle_recomposes() -> None:
 
 
 @pytest.mark.unit
-async def test_ai_requested_opens_modal() -> None:
+async def test_settings_shows_live_values_and_redacts_profile_secrets(tmp_path: Path) -> None:
+    secret = "settings-password-sentinel"
+    profile = Profile(
+        name="production",
+        source=ConnectionInfo(
+            host="source.example",
+            port=5433,
+            database="source_db",
+            user="source_user",
+            password=secret,
+        ),
+        target=ConnectionInfo(
+            host="target.example",
+            port=6432,
+            database="target_db",
+            user="target_user",
+            password=secret,
+        ),
+        schemas=["sales", "audit"],
+        mode="schema-only",
+        ignore_patterns=["private.*", "scratch.*"],
+    )
+    dependencies = _migration_dependencies(
+        tmp_path,
+        _RecordingMigrationWriter(),
+        profiles=[profile],
+    )
+    app = PgsdApp(dependencies=dependencies)
+
+    async with app.run_test(size=(150, 50)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        app.query_one("#diff", DiffView).mode = "tree"
+        app.switch_view("settings")
+        await pilot.pause()
+
+        text = "\n".join(_plain(widget) for widget in app.query_one("#settings").query(Static))
+        assert "catppuccin-mocha" in text
+        assert "tree" in text
+        assert "5000 ms" in text
+        assert "0 ms (unlimited)" in text
+        assert str(tmp_path / "profiles.yaml") in text
+        for value in (
+            "production",
+            "source.example",
+            "5433",
+            "source_db",
+            "source_user",
+            "target.example",
+            "6432",
+            "target_db",
+            "target_user",
+            "sales",
+            "audit",
+            "schema-only",
+            "2",
+            "unsupported",
+        ):
+            assert value in text
+        assert secret not in text
+        assert "postgresql://" not in text
+        assert "private.*" not in text
+        assert "scratch.*" not in text
+        assert "config.toml" not in text
+
+        app.toggle_theme()
+        await pilot.pause()
+        text = "\n".join(_plain(widget) for widget in app.query_one("#settings").query(Static))
+        assert "catppuccin-latte" in text
+
+        app.session.select_profile(_profile("clean"))
+        app.switch_view("settings")
+        text = "\n".join(_plain(widget) for widget in app.query_one("#settings").query(Static))
+        assert "Ignore patterns: none (0)" in text
+
+
+@pytest.mark.unit
+async def test_settings_without_profile_shows_unconfigured_state() -> None:
     app = PgsdApp()
     async with app.run_test(size=(140, 44)) as pilot:
         await pilot.pause()
-        app.screen.post_message(AiRequested(AI_SUGGESTIONS[1].target))
+        app.switch_view("settings")
+        text = "\n".join(_plain(widget) for widget in app.query_one("#settings").query(Static))
+
+        assert "Profile path: not configured" in text
+        assert "No profile selected." in text
+
+
+@pytest.mark.unit
+async def test_ai_requested_does_not_open_modal() -> None:
+    app = PgsdApp()
+    async with app.run_test(size=(140, 44)) as pilot:
         await pilot.pause()
-        assert isinstance(app.screen, AiModal)
-        await pilot.press("escape")
+        app.screen.post_message(AiRequested("public.users"))
         await pilot.pause()
         assert isinstance(app.screen, MainScreen)
 
@@ -673,6 +1000,57 @@ async def test_apply_loads_saved_bundle_off_ui_loop_and_shows_safe_summary(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("command", [":a --dry-run", ":apply --dry-run"])
+async def test_palette_apply_dry_run_starts_connectivity_check_without_executor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    command: str,
+) -> None:
+    profile = _profile("pilot")
+    reader = _BlockingBundleReader(_bundle_files(_create_schema_delta()))
+    executor_factory = _RecordingExecutorFactory(_FakeMigrationExecutor())
+    app = PgsdApp(
+        dependencies=_migration_dependencies(
+            tmp_path,
+            _RecordingMigrationWriter(),
+            profiles=[profile],
+            bundle_reader=reader,
+            executor_factory=executor_factory,
+        )
+    )
+    connected: list[str] = []
+
+    async def check_connectivity(conninfo: str) -> None:
+        connected.append(conninfo)
+
+    monkeypatch.setattr(tui_app_module, "_check_connectivity", check_connectivity)
+
+    async with app.run_test(size=(150, 50)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        app.session.written_bundle_path = tmp_path / "saved-bundle"
+        app.switch_view("apply")
+        await pilot.pause()
+        assert reader.started.wait(timeout=5)
+
+        await _submit_palette(app, pilot, command)
+        reader.release.set()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        assert connected == [profile.target.dsn()]
+        assert executor_factory.calls == []
+        assert app.session.apply_status == (
+            "Dry-run connectivity check passed; no migration SQL or history was touched."
+        )
+
+        app.session.apply_operation = "dry-run"
+        await _submit_palette(app, pilot, ":a --dry-run")
+        assert connected == [profile.target.dsn()]
+        assert app.session.apply_operation == "dry-run"
+
+
+@pytest.mark.unit
 async def test_apply_always_opens_confirmation_and_cancel_does_not_open_executor(
     tmp_path: Path,
 ) -> None:
@@ -695,6 +1073,10 @@ async def test_apply_always_opens_confirmation_and_cancel_does_not_open_executor
         app.switch_view("apply")
         await app.workers.wait_for_complete()
         await pilot.pause()
+        await _submit_palette(app, pilot, ":apply")
+        assert isinstance(app.screen, MainScreen)
+        assert executor_factory.calls == []
+
         await pilot.click("#apply-start")
         await pilot.pause()
 
