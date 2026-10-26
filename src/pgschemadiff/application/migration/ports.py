@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from pgschemadiff.application.migration.bundle import BundleUnit, ValidatedBundle
+    from pgschemadiff.application.migration.history import MigrationHistoryRun
     from pgschemadiff.application.migration.model import MigrationPlan
 
 RunStatus = Literal["running", "applied", "failed", "cancelled"]
@@ -117,4 +118,13 @@ class MigrationExecutor(Protocol):
         failure: RunFailure | None,
     ) -> None:
         """Persist final run status and safe failure metadata."""
+        ...
+
+
+@runtime_checkable
+class MigrationHistoryReader(Protocol):
+    """Read persisted migration history without changing target state."""
+
+    async def list_history(self, *, limit: int = 50) -> tuple[MigrationHistoryRun, ...]:
+        """Return at most ``limit`` runs, newest first, with ordered units."""
         ...
