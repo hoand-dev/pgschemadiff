@@ -39,7 +39,7 @@ Goal: inspect two Postgres DBs, show schema diff, generate safe migration SQL.
 1. Phase 5 production readiness (P5-CLI-01, P5-PKG-01, P5-BENCH-01, P5-REPORT-01, P5-I18N-01).
 
 ## Next Actions
-- P5-BENCH-01 done (CI `de0c099`: 12,440 objects end to end in 3.68 s). Next: P5-CLI-01, then P5-PKG-01 (PyPI publish needs human approval).
+- P5-BENCH-01 done (CI `de0c099`: 12,440 objects end to end in 3.68 s). P5-CLI-01 done (CI `e4f3b6f`). Next: P5-PKG-01 (build + release workflow; the publish itself needs human approval).
 
 ## Ready To Merge
 - None.

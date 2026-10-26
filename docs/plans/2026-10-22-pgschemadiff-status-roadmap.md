@@ -268,7 +268,7 @@ Frozen domain models, phân tầng rõ, import-linter, mypy strict, lossless del
 | Checklist / task | Estimate, dependency | Input → Output; files/tác động; điều kiện hoàn thành |
 |---|---|---|
 | [ ] **P0-CI-03 Coverage gate** | S · <2 giờ; sau baseline | Coverage → threshold 85% line/80% branch; `pyproject.toml`/workflow; không bật gate trước khi biết headroom. |
-| [ ] **P5-CLI-01 Full CLI UX** | M · ~0,5 ngày; M3 | Risk/progress/options → UX hoàn chỉnh; `presentation/cli`; test `--max-risk`, output ổn định, lỗi hữu ích. |
+| [x] **P5-CLI-01 Full CLI UX** | M · ~0,5 ngày; M3 | Risk/progress/options → UX hoàn chỉnh; `presentation/cli`; test `--max-risk`, output ổn định, lỗi hữu ích. |
 | [ ] **P5-REPORT-01 HTML report** | L · 1–2 ngày; M3 | DeltaSet/manifest → report; escape output, offline render, nội dung khớp CLI. |
 | [ ] **P5-I18N-01 EN/VI** | M · ~0,5 ngày | Message keys → catalog EN/VI; test fallback và không hard-code message ngoài scope. |
 | [ ] **P5-PKG-01 Build/release** | M · ~0,5 ngày; M3 | Source → wheel/sdist/release workflow; `uv build`, test catalog resources và `pgsd` entry point. |

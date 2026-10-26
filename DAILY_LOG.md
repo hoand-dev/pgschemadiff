@@ -458,4 +458,5 @@ NEEDS_HUMAN (open): 3 — P1-TEST-02 (PR #3 human-closed; do not recreate); bran
 
 ## RUN 2026-10-26-3 — Phase 5
 - P5-BENCH-01: spec + plan by Claude, implemented by opencode, reviewed. CI `de0c099`: PG18 end to end 3.68 s at 12,440 objects / 680 deltas (inspect 2.8 s); in-memory 0.79 s. `order_deltas` (Pydantic hashing, run twice) is the profiled hotspot; not optimized.
-- Next: P5-CLI-01.
+- P5-CLI-01 (CI `e4f3b6f`): progress and color on stderr TTY only, `diff --format summary` and `--max-risk` gate, `generate` rejects `--max-risk blocked` and missing `--out` before connecting, `--renames` errors exit 2, exit codes 0-3 documented; TUI no longer imports private CLI helpers. Review fix: skip `assess_deltas` for plain JSON diff.
+- Next: P5-PKG-01.

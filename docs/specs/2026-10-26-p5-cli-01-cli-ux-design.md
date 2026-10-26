@@ -1,6 +1,6 @@
 # P5-CLI-01 — Full CLI UX design
 
-**Status:** Approved by reviewer; implementation pending.
+**Status:** Approved by reviewer; implementation complete (CI `e4f3b6f`).
 **Date:** 2026-10-26
 **Task:** `docs/TASKS.md` P5-CLI-01 "Full CLI UX (progress, color, `--max-risk`)" ·
 roadmap row "Risk/progress/options → UX hoàn chỉnh; test `--max-risk`, output ổn định, lỗi hữu ích"

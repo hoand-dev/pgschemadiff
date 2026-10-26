@@ -144,7 +144,7 @@
 
 | Status | ID | Title | Owner | Pri | Deps | Cx |
 |---|---|---|---|---|---|---|
-| [ ] | P5-CLI-01 | Full CLI UX (progress, color, `--max-risk`) | backend-engineer | P1 | P3-CLI-01 | M |
+| [x] | P5-CLI-01 | Full CLI UX (progress, color, `--max-risk`) | backend-engineer | P1 | P3-CLI-01 | M |
 | [ ] | P5-REPORT-01 | HTML diff report | backend-engineer | P2 | P3-OUT-01 | L |
 | [ ] | P5-I18N-01 | EN + VI message catalog | backend-engineer | P3 | — | M |
 | [ ] | P5-PKG-01 | `uv build` + PyPI publish workflow | devops-engineer | P1 | M3 reached | M |
