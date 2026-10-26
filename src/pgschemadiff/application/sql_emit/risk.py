@@ -281,13 +281,18 @@ def classify_risk(  # noqa: PLR0912, PLR0915
                 RiskLevel.DANGEROUS,
                 "Changes partition metadata, which can move or validate data.",
             )
+        elif delta.new_owner is not None:
+            level, reason = (
+                RiskLevel.DANGEROUS,
+                "Changes table owner, which can change effective access.",
+            )
         elif delta.new_tablespace is not None:
             level, reason = (
                 RiskLevel.WARNING,
                 "Changes tablespace, which can move data or require stronger locks.",
             )
         else:
-            level, reason = RiskLevel.SAFE, "Changes table owner or comment metadata only."
+            level, reason = RiskLevel.SAFE, "Changes table comment metadata only."
     elif isinstance(delta, CreateView):
         level, reason = (
             RiskLevel.SAFE,

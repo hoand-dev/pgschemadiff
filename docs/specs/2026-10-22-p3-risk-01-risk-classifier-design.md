@@ -71,7 +71,7 @@ specific condition that selected the level.
 | `CreateTable` | `SAFE`, except `WARNING` when `table.partition_of` is set | Empty ordinary table is additive; creating a partition child affects its parent. |
 | `DropTable` | `DESTRUCTIVE` | Removes table and its data. |
 | `RenameTable`, `RenameColumn` | `WARNING` | Requires a lock and can affect dependent application behavior. |
-| `AlterTableAttrs` | `SAFE` for owner/comment only; `WARNING` for tablespace; `DANGEROUS` for partition metadata | Use highest severity among changed fields. Tablespace and partition changes can move/validate data or hold stronger locks. |
+| `AlterTableAttrs` | `SAFE` for comment only; `WARNING` for tablespace; `DANGEROUS` for owner (TD-RISK-02), partition metadata, persistence and row security | Use highest severity among changed fields. Tablespace and partition changes can move/validate data or hold stronger locks. |
 | `AddColumn` | `SAFE` only when nullable, with no default, identity, or generated expression; otherwise `WARNING` | Defaults, `NOT NULL`, identity, or stored generation can rewrite or validate existing rows. |
 | `DropColumn` | `DESTRUCTIVE` | Removes column data. |
 | `AlterColumnType` | `DANGEROUS` | Type conversion may rewrite the table and hold a long lock. |

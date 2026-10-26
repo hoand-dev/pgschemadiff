@@ -339,8 +339,13 @@ RISK_CASES = (
     ),
     pytest.param(
         AlterTableAttrs(target=_TABLE_REF, new_owner="app_owner"),
-        RiskLevel.SAFE,
+        RiskLevel.DANGEROUS,
         id="table-owner",
+    ),
+    pytest.param(
+        AlterTableAttrs(target=_TABLE_REF, new_owner="app_owner", new_tablespace="fast_storage"),
+        RiskLevel.DANGEROUS,
+        id="table-owner-and-tablespace",
     ),
     pytest.param(
         AlterTableAttrs(target=_TABLE_REF, new_comment="customer accounts"),
