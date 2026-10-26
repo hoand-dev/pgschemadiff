@@ -39,12 +39,13 @@ Goal: inspect two Postgres DBs, show schema diff, generate safe migration SQL.
 1. Phase 5 production readiness (P5-CLI-01, P5-PKG-01, P5-BENCH-01, P5-REPORT-01, P5-I18N-01).
 
 ## Next Actions
-- P5-BENCH-01 done (CI `de0c099`: 12,440 objects end to end in 3.68 s). P5-CLI-01 done (CI `e4f3b6f`). Next: P5-PKG-01 (build + release workflow; the publish itself needs human approval).
+- P5-BENCH-01 done (CI `de0c099`: 12,440 objects end to end in 3.68 s). P5-CLI-01 done (CI `e4f3b6f`). P5-PKG-01 done (CI `bcb6b5d`; 0.1.0 builds, release.yml not yet triggered). Next: P5-DOCS-01, then P5-REPORT-01, P5-I18N-01.
 
 ## Ready To Merge
 - None.
 
 ## Needs Human
+- [ ] release-0.1.0 | First PyPI release: add pending trusted publishers on PyPI/TestPyPI, create GitHub environments `pypi`/`testpypi` with reviewers (see `docs/RELEASING.md`); then approve TestPyPI dry run and tag `v0.1.0`. | options: do setup / postpone release | since: 2026-10-26
 - [ ] P1-TEST-02 | Inspector integration tests: PR #3 was closed by human; do not recreate without direction. | options: authorize a new attempt / leave M1 caveat open | since: 2026-06-22
 - [ ] repo-branch-protection | GitHub branch protection not confirmed (linear history / merge-commit policy). | options: confirm settings / leave unconfirmed | since: 2026-06-20 (non-blocking)
 - [ ] repo-file-acl | Tracked files are owned by another SID; the working account has `RX,W` only, so delete/rename fail (`git mv`, `git checkout`, `uv sync` on `.venv`). Blocks archiving `PROGRESS.md`, `REVIEW.md`, `docs/migration.md` into `docs/archive/`. | options: fix ownership/ACL / keep files in place | since: 2026-10-23-1

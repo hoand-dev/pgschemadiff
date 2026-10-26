@@ -1,6 +1,6 @@
 # P5-PKG-01 — Build and release workflow design
 
-**Status:** Approved by reviewer; implementation pending. Publishing itself needs explicit human approval.
+**Status:** Implementation complete (CI `bcb6b5d`). First publish pending the human setup in `docs/RELEASING.md`.
 **Date:** 2026-10-26
 **Task:** `docs/TASKS.md` P5-PKG-01 "`uv build` + PyPI publish workflow" ·
 roadmap row "Source → wheel/sdist/release workflow; `uv build`, test catalog resources và `pgsd` entry point"
