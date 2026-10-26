@@ -6,7 +6,7 @@
 | Phase 1 | Domain & Infrastructure (MVP-A) | M1: `pgsd inspect` dumps a JSON snapshot of a real PG18 database for tables/columns/indexes/FKs/constraints/schemas/extensions | Feature shipped; M1 caveat: P1-TEST-02 needs-human and 1000-object benchmark unmeasured |
 | Phase 2 | Diff engine | M2: `pgsd diff` outputs a typed `DeltaSet` JSON; hypothesis idempotent-diff property passes | Done; M2 reached at unit level; Docker integration not run locally |
 | Phase 3a | Migration generator (MVP-A) | M3: round-trip integration test green for MVP-A scope; `pgsd generate` + `pgsd apply` end-to-end | ✅ M3 reached 2026-10-26: PG18 round-trip corpus 48 passed, 0 xfail (CI `0c9536b`) |
-| Phase 3b | MVP-B object types | M4: views, matviews, functions, procedures, sequences, enums, triggers, RLS policies, composite/domain types all covered with round-trip tests | In progress (spec `docs/specs/2026-10-26-p3b-mvp-b-object-types-design.md`): enums, composite types, domain types, sequences done; next functions |
+| Phase 3b | MVP-B object types | M4: views, matviews, functions, procedures, sequences, enums, triggers, RLS policies, composite/domain types all covered with round-trip tests | ✅ M4 reached 2026-10-26: all ten object types round-trip on PG18 (CI `c8bb1c9`: 136 integration passed) |
 | Phase 4 | TUI | M5: Textual TUI ships with the screens specified in `docs/ui-design.md` | Shell and seven views implemented on mock data; real-use-case wiring remains |
 | Phase 5 | Production readiness | M6: HTML report, i18n, benchmark suite (10k objects < 10s), PyPI release, safe-migration cookbook | _not started_ |
 
@@ -47,10 +47,10 @@
 
 ### M4 (Phase 3b)
 
-- [ ] Catalog query + domain model + comparator + emitter + round-trip test for:
+- [x] Catalog query + domain model + comparator + emitter + round-trip test for:
   views, matviews, functions, procedures, sequences, enums, triggers,
   RLS policies, composite types, domain types
-- [ ] Enum ADD VALUE positioning (BEFORE/AFTER) correctly emitted
+- [x] Enum ADD VALUE positioning (BEFORE/AFTER) correctly emitted
 
 ### M5 (Phase 4)
 

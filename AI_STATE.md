@@ -1,5 +1,5 @@
 # AI_STATE.md
-_Last updated: 2026-10-24_
+_Last updated: 2026-10-26_
 
 RUN_ID: 2026-10-23-1
 STATE: ACTIVE
@@ -15,11 +15,12 @@ Goal: inspect two Postgres DBs, show schema diff, generate safe migration SQL.
 ---
 
 ## Current Project Phase
-**Phase 3a — Migration Generator — in progress.**
+**Phase 3b — MVP-B object types — done (M4 reached 2026-10-26).**
 - Phase 0 done except open P0-CI-03 coverage gate.
 - Phase 1 domain/infrastructure done; `pgsd inspect` shipped. M1 caveat: P1-TEST-02 needs-human; 1000-object benchmark not measured; P1-INFRA-07 deferred.
 - Phase 2 complete: `pgsd diff`, comparators, rename/ignore rules, dependencies, topo-sort, and tests done. M2 reached at unit level; Docker integration not run locally.
 - P3-RISK-01, P3-SQL-01..06, P3-TX-01, P3-OUT-01, P3-APPLY-01, P3-CLI-01 done; `pgsd generate` and `pgsd apply` shipped; TD-RISK-01, P3-TEST-01 and P3-TEST-02 done. **M3 reached 2026-10-26** (CI `aeef321`). TD-INSPECT-01, TD-INSPECT-02, TD-EMIT-01 done; CI `0c9536b`: PG18 corpus 48 passed, 0 xfail.
+- Phase 3b: P3-MVPB-01..10 done (views, matviews, functions, procedures, sequences, enums, triggers, RLS policies, composite and domain types). **M4 reached 2026-10-26** (CI `c8bb1c9`: 136 PG18 integration passed).
 - Phase 4 TUI shell and seven views run on mock data; not wired to real use cases.
 
 ---
@@ -35,12 +36,11 @@ Goal: inspect two Postgres DBs, show schema diff, generate safe migration SQL.
 ---
 
 ## Execution Queue
-1. **Phase 3b (M4)** per `docs/specs/2026-10-26-p3b-mvp-b-object-types-design.md`: P3-MVPB-06 enums, -09 composite, -10 domain, -05 sequences done (CI `260dffb`: 84 PG18 integration passed). Next: -03 functions, -04 procedures, -01 views, -02 matviews, -07 triggers, -08 policies.
-2. Phase 4 TUI wiring (P4-TUI-05..07) after M4; views still run on mock data.
-3. TD-RISK-02 (owner-change risk alignment).
+1. TD-RISK-02 (owner-change risk alignment).
+2. Phase 4 TUI wiring (P4-TUI-05..07); views still run on mock data.
 
 ## Next Actions
-- P3-MVPB-03 functions slice.
+- TD-RISK-02, then Phase 4 TUI wiring.
 
 ## Ready To Merge
 - None.

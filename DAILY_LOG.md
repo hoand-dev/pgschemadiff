@@ -440,3 +440,7 @@ NEEDS_HUMAN (open): 3 — P1-TEST-02 (PR #3 human-closed; do not recreate); bran
 - Long-standing inspector bugs found and fixed: `LIKE 'pg_%'` skipped schemas such as `pga_app`; `tables.sql` never selected owner/tablespace/comment; catalog SQL must not use bind placeholders; reserved `collation` alias.
 - Process: every new or changed catalog query is checked with EXPLAIN on the local PG 18.4 via MCP before push (Docker is unavailable locally).
 - CI `260dffb`: 84 PG18 integration tests passed. Next: P3-MVPB-03 functions.
+- Then: P3-MVPB-03 functions (applier sets `check_function_bodies = off`), -04 procedures, -01 views (strip `pg_get_viewdef` trailing `;`), -02 matviews, -07 triggers (WHEN columns via `pg_depend`; `pg_get_expr` cannot deparse OLD+NEW WHEN), -08 RLS policies and table RLS flags.
+- **M4 reached** on CI `c8bb1c9`: 136 PG18 integration passed.
+- Known limits: policy expressions referencing other relations and composite attribute type changes are not dependency-ordered; views depending on altered/dropped columns are not rebuilt.
+- Next: TD-RISK-02, then Phase 4 TUI wiring.
