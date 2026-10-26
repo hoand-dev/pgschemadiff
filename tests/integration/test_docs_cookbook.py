@@ -74,8 +74,10 @@ def test_cookbook_recipe_matches_cli_and_applies(
     assert generate_result.exit_code == 0, generate_result.output
     bundle_path = Path(generate_result.stdout.strip())
     up_sql = (bundle_path / "up.sql").read_text(encoding="utf-8")
+    # Excerpt statements may land in different units, so check line by line.
     for excerpt in blocks.get("sql up", []):
-        assert excerpt.strip() in up_sql, f"{recipe_path}: missing SQL excerpt {excerpt!r}"
+        for line in filter(None, (line.strip() for line in excerpt.splitlines())):
+            assert line in up_sql, f"{recipe_path}: missing SQL excerpt line {line!r}"
 
     apply_result = runner.invoke(
         app,
@@ -83,6 +85,7 @@ def test_cookbook_recipe_matches_cli_and_applies(
     )
     assert apply_result.exit_code == 0, apply_result.output
 
-    final_result = runner.invoke(app, diff_args)
+    # Renamed objects no longer exist under their old names, so no --renames.
+    final_result = runner.invoke(app, diff_args[:5])
     assert final_result.exit_code == 0, final_result.output
     assert _normalize_output(final_result.stdout) == "No schema changes."

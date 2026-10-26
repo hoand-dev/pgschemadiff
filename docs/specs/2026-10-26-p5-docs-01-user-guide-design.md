@@ -90,8 +90,9 @@ roles; no role names.
   blocks; run `pgsd diff … --format summary` through Typer's `CliRunner`;
   assert stdout equals the `text summary` block (trailing whitespace
   normalised); run `generate` (`--max-risk destructive`) into `tmp_path` and
-  assert each `sql up` excerpt is a substring of `up.sql`; apply the bundle
-  with destructive approval; assert a second `diff` reports no changes.
+  assert each non-empty line of every `sql up` excerpt is a substring of
+  `up.sql` (statements can land in different units); apply the bundle
+  with destructive approval; assert a second `diff` (without `--renames`) reports no changes.
 - The recipe parser lives in the test package (e.g. `tests/docs_cookbook.py`),
   shared by both tests. No production code.
 
