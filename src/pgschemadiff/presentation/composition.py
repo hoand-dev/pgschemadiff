@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from pgschemadiff.application.diff.compare_schemas import compare_schemas_with_snapshots
+from pgschemadiff.application.diff.compare_schemas import (
+    SchemaComparisonResult,
+    compare_schemas_with_snapshots,
+)
 from pgschemadiff.infrastructure.config.yaml_loader import ProfileLoader
 from pgschemadiff.infrastructure.fs.bundle_reader import FilesystemBundleReader
 from pgschemadiff.infrastructure.fs.migration_writer import FilesystemMigrationWriter
@@ -20,7 +24,6 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from contextlib import AbstractAsyncContextManager
 
-    from pgschemadiff.application.diff.compare_schemas import SchemaComparisonResult
     from pgschemadiff.application.diff.renames import RenameAnnotations
     from pgschemadiff.application.migration.ports import (
         BundleReader,
@@ -29,6 +32,7 @@ if TYPE_CHECKING:
     )
 
 _POOL_OPEN_TIMEOUT = 5.0
+CompareCallable = Callable[[str, str, list[str] | None], Awaitable[SchemaComparisonResult]]
 
 
 class InspectorScope(Protocol):
@@ -64,6 +68,7 @@ class TuiDependencies:
     migration_writer: MigrationWriter
     bundle_reader: BundleReader
     executor_factory: ExecutorFactory
+    compare: CompareCallable = field(default_factory=lambda: compare_conninfo)
 
 
 def resolve_profile_path(config_path: Path | None = None) -> Path:

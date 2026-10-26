@@ -6,14 +6,24 @@ and screen composition described in ``docs/ui-design.md``.
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
+from psycopg import Error as PsycopgError
 from textual.app import App
 from textual.binding import Binding
+from textual.message import Message
 from textual.widgets import ContentSwitcher, Input
+from textual.worker import Worker
 
 from pgschemadiff.presentation.tui._mock import ai_for
 from pgschemadiff.presentation.tui.screens import AiModal, HelpScreen, MainScreen
+from pgschemadiff.presentation.tui.session import TuiSession
+from pgschemadiff.presentation.tui.views.connection import (
+    ConnectionView,
+    ProfileSelected,
+    TestBothRequested,
+)
 from pgschemadiff.presentation.tui.views import DiffView
 from pgschemadiff.presentation.tui.views._common import (
     AiRequested,
@@ -27,11 +37,15 @@ from pgschemadiff.presentation.tui.widgets import (
     TabActivated,
     ViewTabs,
 )
+from pgschemadiff.shared.errors import DiffError, InspectionError
 from pgschemadiff.shared.logging import get_logger
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from textual.events import Key
 
+    from pgschemadiff.domain.models import Profile
     from pgschemadiff.presentation.composition import TuiDependencies
 
 _VIEW_CHORDS: dict[str, str] = {
@@ -45,6 +59,47 @@ _VIEW_CHORDS: dict[str, str] = {
 }
 
 _THEMES: tuple[str, str] = ("catppuccin-mocha", "catppuccin-latte")
+_LOGGED_COMMANDS: dict[str, str] = {
+    "q": "quit",
+    "quit": "quit",
+    "zz": "quit",
+    "?": "help",
+    "help": "help",
+    "set": "set",
+    "o": "overview",
+    "overview": "overview",
+    "d": "diff",
+    "diff": "diff",
+    "m": "migration",
+    "migration": "migration",
+    "a": "apply",
+    "apply": "apply",
+    "h": "history",
+    "history": "history",
+    "s": "settings",
+    "settings": "settings",
+    "config": "settings",
+    "c": "connection",
+    "conn": "connection",
+    "connection": "connection",
+    "rollback": "rollback",
+}
+
+
+class ProfilesLoaded(Message):
+    """Signal that profile state is ready for view refresh."""
+
+
+class ComparisonCompleted(Message):
+    """Signal that a successful comparison is stored in the session."""
+
+
+class ComparisonFailed(Message):
+    """Carry only a fixed, redacted comparison error message."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__()
+        self.message = message
 
 
 class PgsdApp(App[None]):
@@ -63,6 +118,7 @@ class PgsdApp(App[None]):
         Binding("question_mark", "open_help", "help"),
         Binding("colon", "enter_command", "command"),
         Binding("ctrl+b", "toggle_sidebar", "toggle sidebar"),
+        Binding("ctrl+t", "test_both", "test both", show=False),
     ]
 
     CSS = """
@@ -72,6 +128,9 @@ class PgsdApp(App[None]):
     def __init__(self, *, dependencies: TuiDependencies | None = None) -> None:
         super().__init__()
         self.dependencies = dependencies
+        self.session = TuiSession()
+        self._profile_load_error = False
+        self._comparison_worker: Worker[None] | None = None
         self._mode = "normal"
         self._chord: str | None = None
         self._active_view = "overview"
@@ -86,6 +145,129 @@ class PgsdApp(App[None]):
 
     def on_mount(self) -> None:
         self.theme = _THEMES[0]
+        self.call_after_refresh(self._initialize_connection)
+
+    def _initialize_connection(self) -> None:
+        if self.dependencies is None:
+            self._refresh_connection(status="No profile loader configured.")
+            return
+        self._refresh_connection(status="Loading profiles…")
+        self.run_worker(
+            self._load_profiles(),
+            name="profile-load",
+            group="profile-load",
+            exclusive=True,
+        )
+
+    async def _load_profiles(self) -> None:
+        dependencies = self.dependencies
+        if dependencies is None:
+            return
+        try:
+            profiles = await asyncio.to_thread(dependencies.profile_loader.load)
+        except Exception:
+            self.session.set_profiles([])
+            self._profile_load_error = True
+        else:
+            self.session.set_profiles(profiles)
+            self._profile_load_error = False
+        self.post_message(ProfilesLoaded())
+
+    def _profile_path(self) -> Path | None:
+        if self.dependencies is None:
+            return None
+        return self.dependencies.profile_loader.config_path
+
+    def _refresh_connection(self, *, status: str | None = None) -> None:
+        self.query_one("#connection", ConnectionView).update_session(
+            self.session,
+            profiles_path=self._profile_path(),
+            status=status,
+        )
+
+    def _start_test_both(self) -> None:
+        profile = self.session.selected_profile
+        if self.dependencies is None:
+            self._refresh_connection(status="No profile loader configured.")
+            return
+        if profile is None:
+            self._refresh_connection(status="No profile selected.")
+            return
+        if profile.ignore_patterns:
+            self._report_comparison_error("unsupported profile filters")
+            return
+        if profile.mode != "schema-only":
+            self._report_comparison_error("unsupported profile mode")
+            return
+
+        self._refresh_connection(status="Testing connections…")
+        self._comparison_worker = self.run_worker(
+            self._compare_profile(profile),
+            name="compare-profile",
+            group="database-read",
+            exclusive=True,
+        )
+
+    async def _compare_profile(self, profile: Profile) -> None:
+        dependencies = self.dependencies
+        if dependencies is None:
+            return
+        try:
+            result = await dependencies.compare(
+                profile.source.dsn(),
+                profile.target.dsn(),
+                profile.schemas or None,
+            )
+        except Exception as exc:
+            if self.session.selected_profile == profile:
+                self.post_message(ComparisonFailed(self._comparison_error_message(exc)))
+            return
+        if self.session.selected_profile != profile:
+            return
+        self.session.last_comparison = result
+        self.post_message(ComparisonCompleted())
+
+    @staticmethod
+    def _comparison_error_message(exc: Exception) -> str:
+        if isinstance(exc, (PsycopgError, ConnectionError, TimeoutError)):
+            return "Could not connect to one or both databases."
+        if isinstance(exc, InspectionError):
+            return "Could not inspect database schemas."
+        if isinstance(exc, DiffError):
+            return "Could not compare database schemas."
+        return "Comparison failed."
+
+    def _report_comparison_error(self, message: str) -> None:
+        self._refresh_connection(status=message)
+        self.notify(message, severity="error")
+
+    def on_profiles_loaded(self, _message: ProfilesLoaded) -> None:
+        status = "Could not load profiles." if self._profile_load_error else None
+        self._refresh_connection(status=status)
+
+    def on_comparison_completed(self, _message: ComparisonCompleted) -> None:
+        self._refresh_connection(status="Comparison complete.")
+
+    def on_comparison_failed(self, message: ComparisonFailed) -> None:
+        self._report_comparison_error(message.message)
+
+    def on_profile_selected(self, message: ProfileSelected) -> None:
+        if not 0 <= message.index < len(self.session.profiles):
+            return
+        profile = self.session.profiles[message.index]
+        if profile == self.session.selected_profile:
+            return
+        if self._comparison_worker is not None:
+            self._comparison_worker.cancel()
+            self._comparison_worker = None
+        self.session.select_profile(profile)
+        self._refresh_connection()
+
+    def on_test_both_requested(self, _message: TestBothRequested) -> None:
+        self._start_test_both()
+
+    def action_test_both(self) -> None:
+        self._start_test_both()
 
     # ------------------------------------------------------------------ helpers
 
@@ -217,7 +399,8 @@ class PgsdApp(App[None]):
 
     def _dispatch_command(self, cmd: str) -> None:
         c = cmd.lower()
-        self._pgsd_logger.info("tui_command", command=c)
+        first = c.split(maxsplit=1)[0]
+        self._pgsd_logger.info("tui_command", command=_LOGGED_COMMANDS.get(first, "unknown"))
         if c in {"q", "quit", "zz"}:
             self.exit()
             return
@@ -231,7 +414,7 @@ class PgsdApp(App[None]):
                 self.theme = mapping[theme]
                 self._set_hint(f"theme → {self.theme}")
             else:
-                self._set_hint(f"E474: unknown theme: {theme}")
+                self._set_hint("E474: unknown theme")
             return
         view_aliases = {
             "o": "overview",
@@ -251,10 +434,9 @@ class PgsdApp(App[None]):
             "conn": "connection",
             "connection": "connection",
         }
-        first = c.split()[0]
         if first in view_aliases:
             self.switch_view(view_aliases[first])
-            self._set_hint(f":{c} — executed")
+            self._set_hint(f":{first} — executed")
             return
         if c.startswith("apply"):
             self.switch_view("apply")
@@ -264,7 +446,7 @@ class PgsdApp(App[None]):
             self.switch_view("history")
             self._set_hint("rollback queued — see history")
             return
-        self._set_hint(f"E492: not an editor command: {cmd}")
+        self._set_hint("E492: not an editor command")
 
     # ------------------------------------------------------------------ space chord + search
 

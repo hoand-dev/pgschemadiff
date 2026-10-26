@@ -5,6 +5,8 @@ Pure domain — không phụ thuộc Textual, psycopg, hay bất kỳ infrastruc
 
 from __future__ import annotations
 
+from urllib.parse import quote
+
 from pydantic import BaseModel, Field
 
 
@@ -25,8 +27,13 @@ class ConnectionInfo(BaseModel):
 
     def dsn(self) -> str:
         """DSN đầy đủ để truyền cho psycopg."""
-        pwd = f":{self.password}" if self.password else ""
-        return f"postgresql://{self.user}{pwd}@{self.host}:{self.port}/{self.database}"
+        user = quote(self.user, safe="")
+        password = f":{quote(self.password, safe='')}" if self.password else ""
+        host = self.host
+        if ":" in host and not (host.startswith("[") and host.endswith("]")):
+            host = f"[{host}]"
+        database = quote(self.database, safe="")
+        return f"postgresql://{user}{password}@{host}:{self.port}/{database}"
 
 
 class Profile(BaseModel):

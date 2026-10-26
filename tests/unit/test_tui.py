@@ -51,6 +51,7 @@ async def test_tui_mounts_main_screen() -> None:
 @pytest.mark.unit
 async def test_tui_accepts_fake_dependencies_without_database_io() -> None:
     profile_loader = Mock()
+    profile_loader.load.return_value = []
     inspector_scope = Mock()
     migration_writer = Mock()
     bundle_reader = Mock()
@@ -68,7 +69,7 @@ async def test_tui_accepts_fake_dependencies_without_database_io() -> None:
         await pilot.pause()
         assert app.dependencies is dependencies
 
-    profile_loader.assert_not_called()
+    profile_loader.load.assert_called_once_with()
     inspector_scope.assert_not_called()
     migration_writer.assert_not_called()
     bundle_reader.assert_not_called()
