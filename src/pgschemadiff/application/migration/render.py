@@ -118,7 +118,8 @@ def _render_down(plan: MigrationPlan) -> bytes:
     return ("\n".join(lines) + "\n").encode("utf-8")
 
 
-def _target_label(delta: DeltaBase) -> str:
+def target_label(delta: DeltaBase) -> str:
+    """Return the manifest-style label for a migration target."""
     if delta.target.parent is None:
         return delta.target.qname.fqn
     return f"{delta.target.parent.qname.fqn}.{delta.target.qname.name}"
@@ -145,7 +146,7 @@ def _render_manifest(
             {
                 "delta_id": record.delta_id,
                 "kind": record.assessment.delta.model_dump()["kind"],
-                "target": _target_label(record.assessment.delta),
+                "target": target_label(record.assessment.delta),
                 "level": record.assessment.level.value,
                 "reason": record.assessment.reason,
                 "reversible": record.reversible,

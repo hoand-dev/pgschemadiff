@@ -2,29 +2,33 @@ from __future__ import annotations
 
 import asyncio
 import json
+from inspect import signature
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import psycopg
+import pytest
 from typer.testing import CliRunner
 
 import pgschemadiff.presentation.cli.commands.diff as diff_command
 from pgschemadiff.application.diff.renames import RenameAnnotations
+from pgschemadiff.application.migration.generate import assess_deltas
+from pgschemadiff.application.migration.render import target_label
+from pgschemadiff.application.sql_emit.risk import RiskAssessment, RiskLevel
 from pgschemadiff.domain.database import Database
 from pgschemadiff.domain.delta.base import DeltaSet
-from pgschemadiff.domain.delta.schema import CreateExtension
+from pgschemadiff.domain.delta.schema import CreateExtension, CreateSchema, DropSchema
 from pgschemadiff.domain.extension import Extension
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
+from pgschemadiff.domain.schema import Schema
 from pgschemadiff.presentation import composition
 from pgschemadiff.presentation.cli.main import app
 from pgschemadiff.shared.errors import DiffError
 
 if TYPE_CHECKING:
-    from collections.abc import Coroutine
+    from collections.abc import Callable, Coroutine
     from pathlib import Path
     from typing import Any
-
-    import pytest
 
 
 def _run_async(coroutine: Coroutine[Any, Any, object]) -> object:
@@ -41,6 +45,27 @@ def test_diff_command_is_registered() -> None:
 
     assert result.exit_code == 0
     assert "diff" in result.output
+
+
+def test_root_help_lists_stable_exit_codes() -> None:
+    result = CliRunner().invoke(
+        app,
+        ["--help"],
+        env={
+            "NO_COLOR": "1",
+            "TERM": "dumb",
+            "COLUMNS": "120",
+            "FORCE_COLOR": None,
+            "GITHUB_ACTIONS": None,
+        },
+    )
+
+    assert result.exit_code == 0
+    assert "Exit codes" in result.output
+    assert "0  Success" in result.output
+    assert "1  Runtime failure" in result.output
+    assert "2  Usage or policy" in result.output
+    assert "3  Apply failed or cancelled" in result.output
 
 
 def test_diff_help_exposes_two_urls_and_optional_flags() -> None:
@@ -61,6 +86,8 @@ def test_diff_help_exposes_two_urls_and_optional_flags() -> None:
     assert "TARGET_URL" in result.output
     assert "--schema" in result.output
     assert "--renames" in result.output
+    assert "--format" in result.output
+    assert "--max-risk" in result.output
 
 
 class FakePool:
@@ -110,6 +137,40 @@ def _patch_infrastructure(
     return pools, inspectors
 
 
+def _create_schema(name: str) -> CreateSchema:
+    ref = ObjectRef(
+        kind=ObjectKind.SCHEMA,
+        qname=QualifiedName(namespace="public", name=name),
+    )
+    return CreateSchema(target=ref, pg_schema=Schema(ref=ref))
+
+
+def _drop_schema(name: str) -> DropSchema:
+    ref = ObjectRef(
+        kind=ObjectKind.SCHEMA,
+        qname=QualifiedName(namespace="public", name=name),
+    )
+    return DropSchema(target=ref, pg_schema=Schema(ref=ref))
+
+
+def _patch_delta_set(monkeypatch: pytest.MonkeyPatch, delta_set: DeltaSet) -> None:
+    source_url = "postgresql://source/db"
+    target_url = "postgresql://target/db"
+    _patch_infrastructure(
+        monkeypatch,
+        {source_url: Database(name="source"), target_url: Database(name="target")},
+    )
+
+    async def compare_schemas(
+        _source: FakeInspector,
+        _target: FakeInspector,
+        **_kwargs: object,
+    ) -> SimpleNamespace:
+        return SimpleNamespace(deltas=delta_set)
+
+    monkeypatch.setattr(composition, "compare_schemas_with_snapshots", compare_schemas)
+
+
 def test_compare_urls_uses_composition_helper_with_connection_inputs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -121,7 +182,7 @@ def test_compare_urls_uses_composition_helper_with_connection_inputs(
     )
     deltas = DeltaSet()
     renames = RenameAnnotations()
-    calls: list[tuple[str, str, list[str] | None, object | None]] = []
+    calls: list[tuple[str, str, list[str] | None, object | None, object | None]] = []
 
     async def fake_compare_conninfo(
         source_conninfo: str,
@@ -129,8 +190,9 @@ def test_compare_urls_uses_composition_helper_with_connection_inputs(
         schemas: list[str] | None,
         *,
         renames: object | None = None,
+        on_phase: Callable[[str], None] | None = None,
     ) -> SimpleNamespace:
-        calls.append((source_conninfo, target_conninfo, schemas, renames))
+        calls.append((source_conninfo, target_conninfo, schemas, renames, on_phase))
         return SimpleNamespace(deltas=deltas)
 
     monkeypatch.setattr(composition, "compare_conninfo", fake_compare_conninfo, raising=False)
@@ -138,7 +200,42 @@ def test_compare_urls_uses_composition_helper_with_connection_inputs(
     result = _run_async(diff_command.compare_urls(source_url, target_url, ["app"], renames=renames))
 
     assert result is deltas
-    assert calls == [(source_url, target_url, ["app"], renames)]
+    assert calls == [(source_url, target_url, ["app"], renames, None)]
+
+
+def test_compare_urls_forwards_progress_callback(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert "on_phase" in signature(diff_command.compare_urls).parameters
+
+    def callback(_phase: str) -> None:
+        return None
+
+    forwarded: list[object] = []
+
+    async def fake_compare_conninfo(
+        _source: str,
+        _target: str,
+        _schemas: list[str] | None,
+        *,
+        renames: object | None = None,
+        on_phase: object | None = None,
+    ) -> SimpleNamespace:
+        _ = renames
+        forwarded.append(on_phase)
+        return SimpleNamespace(deltas=DeltaSet())
+
+    monkeypatch.setattr(composition, "compare_conninfo", fake_compare_conninfo)
+
+    result = _run_async(
+        diff_command.compare_urls(
+            "source",
+            "target",
+            None,
+            on_phase=callback,
+        )
+    )
+
+    assert isinstance(result, DeltaSet)
+    assert forwarded == [callback]
 
 
 def test_diff_passes_positional_urls_and_repeated_schemas_to_both_inspectors(
@@ -233,9 +330,186 @@ def test_diff_prints_parseable_typed_delta_json(monkeypatch: pytest.MonkeyPatch)
     result = CliRunner().invoke(app, ["diff", source_url, target_url])
 
     assert result.exit_code == 0
-    assert result.stdout.strip()
+    assert result.stdout == DeltaSet().model_dump_json(indent=2) + "\n"
     serialized = json.loads(result.stdout)
     assert DeltaSet.model_validate(serialized) == DeltaSet()
+
+
+def test_diff_summary_uses_generator_order_labels_reasons_and_totals(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    delta_set = DeltaSet.from_iterable(
+        (
+            _drop_schema("legacy"),
+            _create_schema("[red]x[/]\\"),
+        )
+    )
+    _patch_delta_set(monkeypatch, delta_set)
+
+    result = CliRunner().invoke(
+        app,
+        ["diff", "postgresql://source/db", "postgresql://target/db", "--format", "summary"],
+    )
+
+    assessments = assess_deltas(delta_set)
+    lines = result.stdout.splitlines()
+    assert result.exit_code == 0
+    assert "[red]x[/]\\" in result.stdout
+    for index, (delta_id, assessment) in enumerate(assessments):
+        line = lines[index]
+        assert line.startswith(f"{delta_id}  {assessment.level.value}")
+        assert assessment.delta.model_dump()["kind"] in line
+        assert target_label(assessment.delta) in line
+        assert assessment.reason in line
+    assert lines[-1] == "2 changes: safe=1 warning=0 dangerous=0 destructive=1 blocked=0"
+
+
+def test_diff_summary_empty_diff_omits_totals(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_delta_set(monkeypatch, DeltaSet())
+
+    result = CliRunner().invoke(
+        app,
+        ["diff", "postgresql://source/db", "postgresql://target/db", "--format", "summary"],
+    )
+
+    assert result.exit_code == 0
+    assert result.stdout == "No schema changes.\n"
+
+
+def test_diff_max_risk_passes_when_changes_are_within_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    delta_set = DeltaSet.from_iterable((_create_schema("new"),))
+    _patch_delta_set(monkeypatch, delta_set)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "diff",
+            "postgresql://source/db",
+            "postgresql://target/db",
+            "--max-risk",
+            "safe",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    assert result.stdout == delta_set.model_dump_json(indent=2) + "\n"
+
+
+@pytest.mark.parametrize("output_format", ["json", "summary"])
+def test_diff_max_risk_failure_prints_chosen_format_then_exits_two(
+    monkeypatch: pytest.MonkeyPatch,
+    output_format: str,
+) -> None:
+    _patch_delta_set(monkeypatch, DeltaSet.from_iterable((_drop_schema("legacy"),)))
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "diff",
+            "postgresql://source/db",
+            "postgresql://target/db",
+            "--format",
+            output_format,
+            "--max-risk",
+            "safe",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert result.stdout
+    assert result.stderr == "Risk gate failed: 1 change(s) exceed max-risk=safe.\n"
+
+
+def test_diff_max_risk_blocked_never_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    delta = _create_schema("blocked")
+    _patch_delta_set(monkeypatch, DeltaSet.from_iterable((delta,)))
+    monkeypatch.setattr(
+        diff_command,
+        "assess_deltas",
+        lambda _deltas: (("d0001", RiskAssessment(delta, RiskLevel.BLOCKED, "blocked by test")),),
+        raising=False,
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "diff",
+            "postgresql://source/db",
+            "postgresql://target/db",
+            "--format",
+            "summary",
+            "--max-risk",
+            "blocked",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "blocked by test" in result.stdout
+    assert "1 changes: safe=0 warning=0 dangerous=0 destructive=0 blocked=1" in result.stdout
+    assert result.stderr == ""
+
+
+def test_diff_invalid_renames_exits_two_before_connecting(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    rename_path = tmp_path / "invalid.yaml"
+    monkeypatch.setattr(
+        diff_command,
+        "load_renames",
+        lambda _path: (_ for _ in ()).throw(DiffError("invalid YAML at line 2")),
+    )
+
+    def unexpected_pool(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("invalid renames must fail before connecting")
+
+    monkeypatch.setattr(composition, "Pool", unexpected_pool)
+    result = CliRunner().invoke(
+        app,
+        [
+            "diff",
+            "postgresql://source/db",
+            "postgresql://target/db",
+            "--renames",
+            str(rename_path),
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert result.stderr == "Error: Invalid renames file: invalid YAML at line 2\n"
+
+
+def test_diff_reports_progress_phases(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_infrastructure(
+        monkeypatch,
+        {
+            "postgresql://source/db": Database(name="source"),
+            "postgresql://target/db": Database(name="target"),
+        },
+    )
+    output = getattr(diff_command, "output", None)
+    assert output is not None
+    progress_calls: list[tuple[int, int, str]] = []
+    monkeypatch.setattr(
+        output,
+        "progress",
+        lambda step, total, label: progress_calls.append((step, total, label)),
+    )
+
+    result = CliRunner().invoke(
+        app,
+        ["diff", "postgresql://source/db", "postgresql://target/db"],
+    )
+
+    assert result.exit_code == 0
+    assert progress_calls == [
+        (1, 3, "Inspecting source"),
+        (2, 3, "Inspecting target"),
+        (3, 3, "Comparing"),
+    ]
 
 
 def test_diff_compares_database_wide_extensions_under_schema_filter(

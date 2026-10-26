@@ -19,7 +19,7 @@ from pgschemadiff.presentation.cli.main import app
 from pgschemadiff.shared.errors import DiffError, InspectionError
 
 if TYPE_CHECKING:
-    from collections.abc import Coroutine
+    from collections.abc import Callable, Coroutine
     from pathlib import Path
     from typing import Any
 
@@ -249,6 +249,7 @@ def test_generate_writes_bundle_with_cli_options_and_prints_path_only(
     assert "deltas=1" in result.stderr
     assert "max-risk=safe" in result.stderr
     assert "units=1" in result.stderr
+    assert "safe=1 warning=0 dangerous=0 destructive=0" in result.stderr
     assert generation_calls == [(RiskLevel.WARNING, "nightly")]
     assert len(writer.calls) == 1
     assert writer.calls[0][1] == tmp_path
@@ -510,21 +511,166 @@ def test_unexpected_generation_failure_exits_one_without_detail(
     assert "generation-private-detail" not in result.output
 
 
-def test_missing_output_directory_exits_one(
+def test_missing_output_directory_exits_two_before_connecting(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    _patch_compare(monkeypatch, DeltaSet.from_iterable((_create_schema("app"),)))
     missing_dir = tmp_path / "missing"
+
+    def unexpected_pool(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("invalid --out must fail before connecting")
+
+    monkeypatch.setattr(composition, "Pool", unexpected_pool)
 
     result = CliRunner().invoke(
         app,
         ["generate", "postgresql://source/db", "postgresql://target/db", "--out", str(missing_dir)],
     )
 
-    assert result.exit_code == 1
-    assert "Migration bundle writing failed." in result.stderr
+    assert result.exit_code == 2
+    assert result.stderr == "Error: --out must be an existing directory.\n"
     assert not missing_dir.exists()
+
+
+def test_non_directory_output_path_exits_two_before_connecting(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_file = tmp_path / "not-a-directory"
+    output_file.write_text("", encoding="utf-8")
+
+    def unexpected_pool(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("invalid --out must fail before connecting")
+
+    monkeypatch.setattr(composition, "Pool", unexpected_pool)
+    result = CliRunner().invoke(
+        app,
+        [
+            "generate",
+            "postgresql://source/db",
+            "postgresql://target/db",
+            "--out",
+            str(output_file),
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert result.stderr == "Error: --out must be an existing directory.\n"
+
+
+def test_blocked_max_risk_exits_two_before_connecting(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def unexpected_pool(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("blocked max-risk must fail before connecting")
+
+    monkeypatch.setattr(composition, "Pool", unexpected_pool)
+    result = CliRunner().invoke(
+        app,
+        [
+            "generate",
+            "postgresql://source/db",
+            "postgresql://target/db",
+            "--out",
+            str(tmp_path),
+            "--max-risk",
+            "blocked",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert result.stderr == (
+        "Error: --max-risk blocked is not allowed; BLOCKED changes are never generated.\n"
+    )
+
+
+def test_invalid_renames_exits_two_before_connecting(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        generate_command,
+        "load_renames",
+        lambda _path: (_ for _ in ()).throw(DiffError("invalid YAML at line 2")),
+    )
+
+    def unexpected_pool(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("invalid renames must fail before connecting")
+
+    monkeypatch.setattr(composition, "Pool", unexpected_pool)
+    result = CliRunner().invoke(
+        app,
+        [
+            "generate",
+            "postgresql://source/db",
+            "postgresql://target/db",
+            "--out",
+            str(tmp_path),
+            "--renames",
+            str(tmp_path / "invalid.yaml"),
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert result.stderr == "Error: Invalid renames file: invalid YAML at line 2\n"
+
+
+def test_generate_reports_progress_phases(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output = getattr(generate_command, "output", None)
+    assert output is not None
+    progress_calls: list[tuple[int, int, str]] = []
+    monkeypatch.setattr(
+        output,
+        "progress",
+        lambda step, total, label: progress_calls.append((step, total, label)),
+    )
+
+    async def compare_conninfo(
+        _source: str,
+        _target: str,
+        _schemas: list[str] | None,
+        *,
+        renames: object | None = None,
+        on_phase: Callable[[str], None] | None = None,
+    ) -> SimpleNamespace:
+        _ = renames
+        if on_phase is not None:
+            for phase in ("inspect-source", "inspect-target", "compare"):
+                on_phase(phase)
+        return SimpleNamespace(deltas=DeltaSet.from_iterable((_create_schema("app"),)))
+
+    monkeypatch.setattr(composition, "compare_conninfo", compare_conninfo)
+
+    class FakeWriter:
+        def write(self, _plan: MigrationPlan, _output_dir: Path) -> Path:
+            return tmp_path / "bundle"
+
+    monkeypatch.setattr(generate_command, "FilesystemMigrationWriter", FakeWriter)
+    result = CliRunner().invoke(
+        app,
+        [
+            "generate",
+            "postgresql://source/db",
+            "postgresql://target/db",
+            "--out",
+            str(tmp_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert result.stdout == f"{tmp_path / 'bundle'}\n"
+    assert "safe=1 warning=0 dangerous=0 destructive=0" in result.stderr
+    assert progress_calls == [
+        (1, 5, "Inspecting source"),
+        (2, 5, "Inspecting target"),
+        (3, 5, "Comparing"),
+        (4, 5, "Generating migration"),
+        (5, 5, "Writing bundle"),
+    ]
 
 
 def test_invalid_max_risk_is_typer_usage_error() -> None:

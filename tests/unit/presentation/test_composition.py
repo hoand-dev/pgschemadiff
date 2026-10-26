@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from inspect import signature
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -178,6 +179,62 @@ async def test_compare_conninfo_uses_inspector_scope_and_returns_comparison(
     assert result is sentinel
     assert scope_calls == [("source", "target", ["app"])]
     assert comparison_calls == [(source_inspector, target_inspector, renames)]
+
+
+@pytest.mark.asyncio
+async def test_compare_conninfo_reports_inspection_phases_in_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert "on_phase" in signature(composition.compare_conninfo).parameters
+    events: list[str] = []
+    phases: list[str] = []
+
+    class FakeInspector:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        async def inspect(self) -> object:
+            events.append(f"{self.name}-inspect")
+            return object()
+
+    source_inspector = FakeInspector("source")
+    target_inspector = FakeInspector("target")
+
+    @asynccontextmanager
+    async def fake_open_inspectors(
+        _source_conninfo: str,
+        _target_conninfo: str,
+        *,
+        schemas: list[str] | None = None,
+    ) -> AsyncIterator[tuple[FakeInspector, FakeInspector]]:
+        _ = schemas
+        yield source_inspector, target_inspector
+
+    async def fake_compare(
+        source: FakeInspector,
+        target: FakeInspector,
+        *,
+        renames: object | None = None,
+    ) -> object:
+        _ = renames
+        await source.inspect()
+        await target.inspect()
+        events.append("comparison")
+        return sentinel
+
+    sentinel = object()
+    monkeypatch.setattr(composition, "open_inspectors", fake_open_inspectors)
+    monkeypatch.setattr(composition, "compare_schemas_with_snapshots", fake_compare)
+
+    result = await composition.compare_conninfo(
+        "source",
+        "target",
+        on_phase=phases.append,
+    )
+
+    assert result is sentinel
+    assert phases == ["inspect-source", "inspect-target", "compare"]
+    assert events == ["source-inspect", "target-inspect", "comparison"]
 
 
 def test_executor_factory_wraps_open_executor_without_opening_it(

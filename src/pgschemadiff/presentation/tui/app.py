@@ -31,7 +31,8 @@ from pgschemadiff.application.migration.history import (
 )
 from pgschemadiff.application.migration.render import render_bundle
 from pgschemadiff.application.sql_emit.risk import RiskLevel
-from pgschemadiff.presentation.cli.commands.apply import _check_connectivity, _parse_timeout
+from pgschemadiff.presentation.composition import check_connectivity as _check_connectivity
+from pgschemadiff.presentation.timeouts import parse_timeout
 from pgschemadiff.presentation.tui.screens import (
     ConfirmApplyModal,
     HelpScreen,
@@ -794,8 +795,8 @@ class PgsdApp(App[None]):
             return
 
         try:
-            lock_timeout_ms = _parse_timeout(message.lock_timeout, "--lock-timeout")
-            statement_timeout_ms = _parse_timeout(
+            lock_timeout_ms = parse_timeout(message.lock_timeout, "--lock-timeout")
+            statement_timeout_ms = parse_timeout(
                 message.statement_timeout,
                 "--statement-timeout",
             )

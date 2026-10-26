@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import re
 import sys
 from typing import TYPE_CHECKING, NoReturn
 
 import psycopg
 import psycopg_pool
 import typer
+from rich.text import Text
 
 from pgschemadiff.application.migration.apply import (
     ApplyEvent,
@@ -25,47 +25,21 @@ from pgschemadiff.application.migration.bundle import ValidatedBundle, load_bund
 from pgschemadiff.application.sql_emit.risk import RiskLevel
 from pgschemadiff.infrastructure.fs.bundle_reader import FilesystemBundleReader
 from pgschemadiff.infrastructure.postgres.applier import open_executor
+from pgschemadiff.presentation.cli import output
+from pgschemadiff.presentation.composition import check_connectivity
+from pgschemadiff.presentation.timeouts import parse_timeout
 from pgschemadiff.shared.errors import ApplyMigrationError, MigrationError, RiskGateError
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-_TIMEOUT_PATTERN = re.compile(r"(?:0|[0-9]+(?:ms|s|min))\Z")
-_MAX_TIMEOUT_MS = 86_400_000  # Matches the executor's accepted range.
-
-
-def _parse_timeout(value: str, option: str) -> int:
-    """Convert a non-negative CLI timeout to milliseconds."""
-    if _TIMEOUT_PATTERN.fullmatch(value) is None:
-        raise ValueError(f"Error: Invalid value for {option}.")
-    if value == "0":
-        return 0
-
-    for suffix, multiplier in (("min", 60_000), ("ms", 1), ("s", 1_000)):
-        if value.endswith(suffix):
-            milliseconds = int(value[: -len(suffix)]) * multiplier
-            if milliseconds > _MAX_TIMEOUT_MS:
-                raise ValueError(f"Error: {option} must not exceed 24 hours.")
-            return milliseconds
-    raise ValueError(f"Error: Invalid value for {option}.")
-
 
 def _exit(message: str, code: int) -> NoReturn:
-    typer.echo(message, err=True)
-    raise typer.Exit(code=code)
+    output.error(message, code)
 
 
 def _requires_destructive_approval(bundle: ValidatedBundle) -> bool:
     return any(unit.max_risk in {RiskLevel.DESTRUCTIVE, RiskLevel.BLOCKED} for unit in bundle.units)
-
-
-async def _check_connectivity(db_url: str) -> None:
-    """Check target connectivity without acquiring a migration lock."""
-    connection = await psycopg.AsyncConnection.connect(db_url)
-    try:
-        await connection.execute("SELECT 1")
-    finally:
-        await connection.close()
 
 
 async def _apply(
@@ -146,7 +120,11 @@ def _print_event(event: ApplyEvent) -> None:
         )
     else:
         return
-    typer.echo(line, err=True)
+    if isinstance(event, UnitFailed):
+        console = output.stderr_console()
+        console.print(Text(line, style="red") if console.is_terminal else line)
+    else:
+        typer.echo(line, err=True)
 
 
 def _print_apply_failure(error: ApplyMigrationError, bundle: ValidatedBundle) -> None:
@@ -194,7 +172,7 @@ def _dry_run(bundle: ValidatedBundle, db_url: str, *, destructive: bool) -> None
             err=True,
         )
     try:
-        asyncio.run(_check_connectivity(db_url))
+        asyncio.run(check_connectivity(db_url))
     except (psycopg.Error, psycopg_pool.PoolTimeout):
         _exit("Error: Database connection failed.", 1)
     except (KeyboardInterrupt, asyncio.CancelledError):
@@ -251,8 +229,8 @@ def _apply_cmd(
 ) -> None:
     """Apply a validated migration bundle to PostgreSQL with risk confirmation."""
     try:
-        lock_timeout_ms = _parse_timeout(lock_timeout, "--lock-timeout")
-        statement_timeout_ms = _parse_timeout(statement_timeout, "--statement-timeout")
+        lock_timeout_ms = parse_timeout(lock_timeout, "--lock-timeout")
+        statement_timeout_ms = parse_timeout(statement_timeout, "--statement-timeout")
     except ValueError as error:
         _exit(str(error), 2)
 

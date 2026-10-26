@@ -7,6 +7,7 @@ from importlib.metadata import version
 import pytest
 from syrupy.assertion import SnapshotAssertion
 
+import pgschemadiff.application.migration.render as migration_render
 from pgschemadiff.application.migration.generate import generate_migration
 from pgschemadiff.application.migration.model import MigrationPlan
 from pgschemadiff.application.migration.render import render_bundle
@@ -82,6 +83,18 @@ def _plan(*, realistic: bool) -> MigrationPlan:
         clock=lambda: _CREATED_AT,
         id_factory=lambda: "render-plan" if realistic else "empty-plan",
     )
+
+
+def test_target_label_is_public_and_formats_nested_objects() -> None:
+    public_target_label = getattr(migration_render, "target_label", None)
+    assert callable(public_target_label)
+
+    deltas = tuple(_plan(realistic=True).delta_set)
+    schema_delta = next(delta for delta in deltas if isinstance(delta, CreateSchema))
+    constraint_delta = next(delta for delta in deltas if isinstance(delta, AddConstraint))
+
+    assert public_target_label(schema_delta) == '"public"."app"'
+    assert public_target_label(constraint_delta) == '"app"."accounts".accounts_pkey'
 
 
 @pytest.mark.parametrize(

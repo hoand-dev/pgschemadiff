@@ -30,6 +30,7 @@ pgsd inspect postgresql://user:pass@host:5432/db > snapshot.json
 
 # diff current (source) against desired (target)
 pgsd diff postgresql://user:pass@host/current postgresql://user:pass@host/desired
+pgsd diff postgresql://user:pass@host/current postgresql://user:pass@host/desired --format summary --max-risk dangerous
 
 # generate a migration bundle that moves current to desired
 # (prints the bundle directory; --max-risk defaults to dangerous)
@@ -40,6 +41,15 @@ pgsd apply ./migrations/20260523_120000_diff/ postgresql://.../current --dry-run
 pgsd apply ./migrations/20260523_120000_diff/ postgresql://.../current
 # destructive units need --yes (or interactive confirmation)
 ```
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Success (including `diff` with changes and no gate) |
+| 1 | Runtime failure: connection, inspection, comparison, writing |
+| 2 | Usage or policy: bad option/file, risk gate exceeded, invalid bundle, destructive not approved, BLOCKED bundle |
+| 3 | Apply failed or was cancelled after it started |
 
 ## Development
 

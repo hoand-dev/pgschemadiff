@@ -13,6 +13,7 @@ from pgschemadiff.application.migration.model import (
     MigrationPlanUnit,
     validate_slug,
 )
+from pgschemadiff.application.migration.render import target_label
 from pgschemadiff.application.sql_emit.emitter import SqlEmitter
 from pgschemadiff.application.sql_emit.registry import default_handlers
 from pgschemadiff.application.sql_emit.risk import (
@@ -33,7 +34,6 @@ from pgschemadiff.shared.errors import MigrationError, RiskGateError
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from pgschemadiff.domain.delta import DeltaBase
     from pgschemadiff.domain.identity import ObjectRef
 
 
@@ -43,13 +43,6 @@ def _utc_now() -> datetime:
 
 def _new_plan_id() -> str:
     return str(uuid4())
-
-
-def _target_label(delta: DeltaBase) -> str:
-    target = delta.target
-    if target.parent is None:
-        return target.qname.fqn
-    return f"{target.parent.qname.fqn}.{target.qname.name}"
 
 
 def _clock_utc(clock: Callable[[], datetime]) -> datetime:
@@ -141,7 +134,7 @@ def generate_migration(
         )
         details = "\n".join(
             f"- {delta_id} kind={assessment.delta.model_dump()['kind']} "
-            f"target={_target_label(assessment.delta)} "
+            f"target={target_label(assessment.delta)} "
             f"level={assessment.level.value} reason={assessment.reason}"
             for delta_id, assessment in offending
         )

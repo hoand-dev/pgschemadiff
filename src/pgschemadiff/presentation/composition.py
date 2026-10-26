@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+import psycopg
+
 from pgschemadiff.application.diff.compare_schemas import (
     SchemaComparisonResult,
     compare_schemas_with_snapshots,
@@ -32,6 +34,8 @@ if TYPE_CHECKING:
         MigrationHistoryReader,
         MigrationWriter,
     )
+    from pgschemadiff.domain.database import Database
+    from pgschemadiff.domain.ports import SchemaInspector
 
 _POOL_OPEN_TIMEOUT = 5.0
 CompareCallable = Callable[[str, str, list[str] | None], Awaitable[SchemaComparisonResult]]
@@ -59,6 +63,30 @@ class ExecutorFactory(Protocol):
         lock_timeout_ms: int = 5_000,
         statement_timeout_ms: int = 0,
     ) -> AbstractAsyncContextManager[MigrationExecutor]: ...
+
+
+class _PhasedInspector:
+    """Report progress around a schema inspection without changing its port."""
+
+    def __init__(
+        self,
+        inspector: SchemaInspector,
+        phase: str,
+        on_phase: Callable[[str], None],
+        *,
+        after_phase: str | None = None,
+    ) -> None:
+        self._inspector = inspector
+        self._phase = phase
+        self._after_phase = after_phase
+        self._on_phase = on_phase
+
+    async def inspect(self) -> Database:
+        self._on_phase(self._phase)
+        snapshot = await self._inspector.inspect()
+        if self._after_phase is not None:
+            self._on_phase(self._after_phase)
+        return snapshot
 
 
 @dataclass(frozen=True)
@@ -118,17 +146,30 @@ async def compare_conninfo(
     schemas: list[str] | None = None,
     *,
     renames: RenameAnnotations | None = None,
+    on_phase: Callable[[str], None] | None = None,
 ) -> SchemaComparisonResult:
     """Compare two connections and retain both inspected database snapshots."""
     async with open_inspectors(source_conninfo, target_conninfo, schemas=schemas) as (
         source_inspector,
         target_inspector,
     ):
-        return await compare_schemas_with_snapshots(
-            source_inspector,
-            target_inspector,
-            renames=renames,
-        )
+        source: SchemaInspector = source_inspector
+        target: SchemaInspector = target_inspector
+        if on_phase is not None:
+            source = _PhasedInspector(source_inspector, "inspect-source", on_phase)
+            target = _PhasedInspector(
+                target_inspector, "inspect-target", on_phase, after_phase="compare"
+            )
+        return await compare_schemas_with_snapshots(source, target, renames=renames)
+
+
+async def check_connectivity(conninfo: str) -> None:
+    """Check target connectivity without acquiring a migration lock."""
+    connection = await psycopg.AsyncConnection.connect(conninfo)
+    try:
+        await connection.execute("SELECT 1")
+    finally:
+        await connection.close()
 
 
 def create_migration_writer() -> FilesystemMigrationWriter:

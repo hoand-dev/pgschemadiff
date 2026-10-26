@@ -8,6 +8,7 @@ the interactive Textual TUI implemented in ``pgschemadiff.presentation.tui``.
 from __future__ import annotations
 
 from pathlib import Path  # noqa: TC003 - Typer resolves Path at runtime
+from typing import Literal
 
 import typer
 
@@ -23,6 +24,14 @@ from pgschemadiff.shared.logging import configure_logging
 app = typer.Typer(
     name="pgsd",
     help="Compare PostgreSQL schemas, generate safe migrations.",
+    epilog=(
+        "Exit codes:\n\n"
+        "  0  Success (including diff with changes and no gate)\n\n"
+        "  1  Runtime failure (connection, inspection, comparison, writing)\n\n"
+        "  2  Usage or policy failure (bad option/file, risk gate, invalid bundle, "
+        "unapproved destructive or BLOCKED bundle)\n\n"
+        "  3  Apply failed or cancelled after it started"
+    ),
     invoke_without_command=True,
     add_completion=False,
 )
@@ -92,13 +101,25 @@ def diff(
         "--renames",
         help="YAML or TOML file with explicit rename annotations.",
     ),
+    output_format: Literal["json", "summary"] = typer.Option(
+        "json",
+        "--format",
+        help="Diff output format.",
+    ),
+    max_risk: RiskLevel | None = typer.Option(  # noqa: B008
+        None,
+        "--max-risk",
+        help="Fail if any change exceeds this risk level.",
+    ),
 ) -> None:
-    """Compare two PostgreSQL databases and print schema changes as JSON."""
+    """Compare two PostgreSQL databases and print schema changes."""
     diff_cmd(
         source_url=source_url,
         target_url=target_url,
         schemas=schemas,
         renames_path=renames,
+        output_format=output_format,
+        max_risk=max_risk,
     )
 
 

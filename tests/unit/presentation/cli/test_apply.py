@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 from contextlib import asynccontextmanager
+from io import StringIO
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
@@ -13,6 +14,7 @@ import psycopg
 import psycopg_pool
 import pytest
 import typer
+from rich.console import Console
 from typer.testing import CliRunner
 
 from pgschemadiff.application.migration.apply import (
@@ -166,6 +168,26 @@ def test_apply_help_is_registered() -> None:
     assert "--yes" in result.stdout
 
 
+def test_apply_exit_routes_through_shared_error_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = getattr(apply_command, "output", None)
+    assert output is not None
+    calls: list[tuple[str, int]] = []
+
+    def error(message: str, code: int) -> None:
+        calls.append((message, code))
+        raise typer.Exit(code=code)
+
+    monkeypatch.setattr(output, "error", error)
+
+    with pytest.raises(typer.Exit) as raised:
+        apply_command._exit("Error: operation failed.", 3)
+
+    assert raised.value.exit_code == 3
+    assert calls == [("Error: operation failed.", 3)]
+
+
 @pytest.mark.parametrize(
     ("option", "value", "expected"),
     [
@@ -241,6 +263,18 @@ def test_invalid_timeout_exits_two_and_names_option(
     _assert_password_redacted(result)
 
 
+def test_public_timeout_parser_preserves_units_and_validation() -> None:
+    parse_timeout = getattr(apply_command, "parse_timeout", None)
+    assert callable(parse_timeout)
+
+    assert parse_timeout("4min", "--lock-timeout") == 240_000
+    assert parse_timeout("0", "--statement-timeout") == 0
+    with pytest.raises(ValueError, match="Error: Invalid value for --lock-timeout\\."):
+        parse_timeout("bad", "--lock-timeout")
+    with pytest.raises(ValueError, match="Error: --statement-timeout must not exceed 24 hours\\."):
+        parse_timeout("1441min", "--statement-timeout")
+
+
 def test_filesystem_error_is_generic_and_exits_one(tmp_path: Path) -> None:
     result = _invoke(tmp_path / "missing")
 
@@ -288,7 +322,7 @@ def test_blocked_risk_is_rejected_before_connection(
     async def unexpected_connection(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("blocked bundle attempted database connection")
 
-    monkeypatch.setattr(apply_command, "_check_connectivity", unexpected_connection, raising=False)
+    monkeypatch.setattr(apply_command, "check_connectivity", unexpected_connection)
     monkeypatch.setattr(apply_command, "open_executor", unexpected_connection, raising=False)
     result = _invoke(bundle_dir, "--yes")
 
@@ -382,7 +416,7 @@ def test_dry_run_prints_units_and_checks_connectivity_without_executor(
     connected: list[str] = []
     monkeypatch.setattr(
         apply_command,
-        "_check_connectivity",
+        "check_connectivity",
         lambda url: _record_connectivity(url, connected),
         raising=False,
     )
@@ -413,7 +447,7 @@ def test_dry_run_prints_units_and_checks_connectivity_without_executor(
     _assert_password_redacted(result)
 
 
-def test_connectivity_check_executes_select_one_and_closes_connection(
+def test_public_connectivity_check_executes_select_one_and_closes_connection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     statements: list[str] = []
@@ -432,7 +466,9 @@ def test_connectivity_check_executes_select_one_and_closes_connection(
 
     monkeypatch.setattr(psycopg.AsyncConnection, "connect", connect)
 
-    asyncio.run(apply_command._check_connectivity(_DATABASE_URL))
+    check_connectivity = getattr(apply_command, "check_connectivity", None)
+    assert callable(check_connectivity)
+    asyncio.run(check_connectivity(_DATABASE_URL))
 
     assert statements == ["SELECT 1"]
     assert closed == [True]
@@ -451,7 +487,7 @@ def test_dry_run_connectivity_failure_exits_one_without_details(
     async def failed_connectivity(_url: str) -> None:
         raise psycopg.OperationalError(f"driver detail {_SECRET_PASSWORD}")
 
-    monkeypatch.setattr(apply_command, "_check_connectivity", failed_connectivity)
+    monkeypatch.setattr(apply_command, "check_connectivity", failed_connectivity)
     result = _invoke(bundle_dir, "--dry-run")
 
     assert result.exit_code == 1
@@ -712,3 +748,29 @@ def test_failed_event_prints_class_and_sqlstate(
     assert "SyntaxError" in result.stderr
     assert f"SQLSTATE={'42601' if sqlstate is not None else 'unknown'}" in result.stderr
     _assert_password_redacted(result)
+
+
+def test_failed_event_uses_red_for_terminal_stderr(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = getattr(apply_command, "output", None)
+    assert output is not None
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    stream = StringIO()
+    console = Console(
+        file=stream,
+        force_terminal=True,
+        color_system="standard",
+        markup=False,
+        highlight=False,
+        emoji=False,
+        soft_wrap=True,
+    )
+    monkeypatch.setattr(output, "stderr_console", lambda: console)
+
+    apply_command._print_event(
+        UnitFailed(0, 1, 0, 1, "d0001", (1, 1), "SyntaxError", "42601", True, 0.1)
+    )
+
+    assert "failed" in stream.getvalue()
+    assert "\x1b[" in stream.getvalue()

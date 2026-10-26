@@ -8,12 +8,19 @@ from typing import TYPE_CHECKING
 import psycopg
 import psycopg_pool
 import typer
+from rich.console import Console
+from rich.text import Text
 
+from pgschemadiff.application.migration.generate import assess_deltas
+from pgschemadiff.application.migration.render import target_label
+from pgschemadiff.application.sql_emit.risk import RiskAssessment, RiskLevel
 from pgschemadiff.infrastructure.config.rename_loader import load_renames
 from pgschemadiff.presentation import composition
+from pgschemadiff.presentation.cli import output
 from pgschemadiff.shared.errors import DiffError, InspectionError
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from pgschemadiff.application.diff.renames import RenameAnnotations
@@ -26,6 +33,7 @@ async def compare_urls(
     schemas: list[str] | None,
     *,
     renames: RenameAnnotations | None = None,
+    on_phase: Callable[[str], None] | None = None,
 ) -> DeltaSet:
     """Open both databases and compare their inspected schemas."""
     result = await composition.compare_conninfo(
@@ -33,6 +41,7 @@ async def compare_urls(
         target_url,
         schemas,
         renames=renames,
+        on_phase=on_phase,
     )
     return result.deltas
 
@@ -42,6 +51,8 @@ def diff_cmd(
     target_url: str,
     schemas: list[str] | None,
     renames_path: Path | None,
+    output_format: str = "json",
+    max_risk: RiskLevel | None = None,
 ) -> None:
     """Compare two PostgreSQL databases and print typed schema deltas.
 
@@ -51,20 +62,76 @@ def diff_cmd(
 
     try:
         rename_annotations = load_renames(renames_path) if renames_path is not None else None
+    except DiffError as error:
+        output.error(f"Error: Invalid renames file: {error}", 2)
+
+    phase_steps = {
+        "inspect-source": (1, "Inspecting source"),
+        "inspect-target": (2, "Inspecting target"),
+        "compare": (3, "Comparing"),
+    }
+
+    def on_phase(phase: str) -> None:
+        step, label = phase_steps[phase]
+        output.progress(step, 3, label)
+
+    try:
         delta_set = asyncio.run(
-            compare_urls(source_url, target_url, schemas, renames=rename_annotations)
+            compare_urls(
+                source_url,
+                target_url,
+                schemas,
+                renames=rename_annotations,
+                on_phase=on_phase,
+            )
         )
     except (psycopg.Error, psycopg_pool.PoolTimeout):
-        typer.echo("Error: Database connection failed.", err=True)
-        raise typer.Exit(code=1) from None
+        output.error("Error: Database connection failed.", 1)
     except InspectionError:
-        typer.echo("Error: Schema inspection failed.", err=True)
-        raise typer.Exit(code=1) from None
+        output.error("Error: Schema inspection failed.", 1)
     except DiffError:
-        typer.echo("Error: Schema comparison failed.", err=True)
-        raise typer.Exit(code=1) from None
+        output.error("Error: Schema comparison failed.", 1)
     except Exception:
-        typer.echo("Error: Schema diff failed.", err=True)
-        raise typer.Exit(code=1) from None
+        output.error("Error: Schema diff failed.", 1)
 
-    typer.echo(delta_set.model_dump_json(indent=2))
+    # Assessment re-orders the deltas; skip it for plain JSON without a gate.
+    needs_assessment = output_format == "summary" or max_risk is not None
+    assessments = assess_deltas(delta_set) if needs_assessment else ()
+    if output_format == "summary":
+        _print_summary(assessments)
+    else:
+        typer.echo(delta_set.model_dump_json(indent=2))
+
+    if max_risk is not None:
+        risk_order = tuple(RiskLevel)
+        max_index = risk_order.index(max_risk)
+        exceeded = sum(
+            risk_order.index(assessment.level) > max_index for _delta_id, assessment in assessments
+        )
+        if exceeded:
+            output.error(
+                f"Risk gate failed: {exceeded} change(s) exceed max-risk={max_risk.value}.",
+                2,
+            )
+
+
+def _print_summary(
+    assessments: tuple[tuple[str, RiskAssessment], ...],
+) -> None:
+    if not assessments:
+        typer.echo("No schema changes.")
+        return
+
+    console = Console(markup=False, highlight=False, emoji=False, soft_wrap=True)
+    counts = dict.fromkeys(RiskLevel, 0)
+    for delta_id, assessment in assessments:
+        counts[assessment.level] += 1
+        line = Text(f"{delta_id}  ")
+        line.append_text(output.risk_text(assessment.level))
+        line.append(" " * (11 - len(assessment.level.value)))
+        kind = assessment.delta.model_dump()["kind"]
+        line.append(f"  {kind:<16}  {target_label(assessment.delta)}   {assessment.reason}")
+        console.print(line)
+
+    totals = " ".join(f"{level.value}={counts[level]}" for level in RiskLevel)
+    console.print(f"{len(assessments)} changes: {totals}")
