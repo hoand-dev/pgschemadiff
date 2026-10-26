@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 import psycopg
 from typer.testing import CliRunner
 
-import pgschemadiff.presentation.cli.commands.diff as diff_command
 import pgschemadiff.presentation.cli.commands.generate as generate_command
 from pgschemadiff.application.migration.generate import generate_migration
 from pgschemadiff.application.sql_emit.risk import RiskLevel
@@ -15,6 +14,7 @@ from pgschemadiff.domain.database import Database
 from pgschemadiff.domain.delta import CreateSchema, DeltaSet, DropSchema
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.schema import Schema
+from pgschemadiff.presentation import composition
 from pgschemadiff.presentation.cli.main import app
 from pgschemadiff.shared.errors import DiffError, InspectionError
 
@@ -119,8 +119,8 @@ def _patch_infrastructure(
         inspectors.append(inspector)
         return inspector
 
-    monkeypatch.setattr(diff_command, "Pool", make_pool, raising=False)
-    monkeypatch.setattr(diff_command, "PgCatalogInspector", make_inspector, raising=False)
+    monkeypatch.setattr(composition, "Pool", make_pool)
+    monkeypatch.setattr(composition, "PgCatalogInspector", make_inspector)
     return pools, inspectors
 
 
@@ -141,11 +141,16 @@ def _patch_compare(
         _target: FakeInspector,
         *,
         renames: object | None = None,
-    ) -> DeltaSet:
+    ) -> SimpleNamespace:
         renames_seen.append(renames)
-        return delta_set
+        return SimpleNamespace(deltas=delta_set)
 
-    monkeypatch.setattr(diff_command, "compare_schemas", compare_schemas, raising=False)
+    monkeypatch.setattr(
+        composition,
+        "compare_schemas_with_snapshots",
+        compare_schemas,
+        raising=False,
+    )
     return renames_seen
 
 
@@ -167,11 +172,16 @@ def test_generate_writes_bundle_with_cli_options_and_prints_path_only(
         _target: FakeInspector,
         *,
         renames: object | None = None,
-    ) -> DeltaSet:
+    ) -> SimpleNamespace:
         renames_seen.append(renames)
-        return deltas
+        return SimpleNamespace(deltas=deltas)
 
-    monkeypatch.setattr(diff_command, "compare_schemas", compare_schemas, raising=False)
+    monkeypatch.setattr(
+        composition,
+        "compare_schemas_with_snapshots",
+        compare_schemas,
+        raising=False,
+    )
     rename_path = tmp_path / "renames.yaml"
     loaded_renames = object()
     monkeypatch.setattr(
@@ -288,10 +298,15 @@ def test_risk_gate_rejection_exits_two_and_shows_offending_delta(
         _source: FakeInspector,
         _target: FakeInspector,
         **_kwargs: object,
-    ) -> DeltaSet:
-        return DeltaSet.from_iterable((_drop_schema("legacy"),))
+    ) -> SimpleNamespace:
+        return SimpleNamespace(deltas=DeltaSet.from_iterable((_drop_schema("legacy"),)))
 
-    monkeypatch.setattr(diff_command, "compare_schemas", compare_schemas, raising=False)
+    monkeypatch.setattr(
+        composition,
+        "compare_schemas_with_snapshots",
+        compare_schemas,
+        raising=False,
+    )
 
     result = CliRunner().invoke(
         app,
@@ -320,7 +335,7 @@ def test_connection_failure_redacts_urls_and_driver_message(
             return None
 
     monkeypatch.setattr(generate_command, "asyncio", SimpleNamespace(run=_run_async), raising=False)
-    monkeypatch.setattr(diff_command, "Pool", lambda *_args, **_kwargs: FailingPool())
+    monkeypatch.setattr(composition, "Pool", lambda *_args, **_kwargs: FailingPool())
     source_url = "postgresql://alice:url-secret@source/db"
     target_url = "postgresql://bob:other-secret@target/db"
 
@@ -352,7 +367,12 @@ def test_inspection_failure_exits_one_without_detail(
     ) -> DeltaSet:
         raise InspectionError("inspection-private-detail")
 
-    monkeypatch.setattr(diff_command, "compare_schemas", compare_schemas, raising=False)
+    monkeypatch.setattr(
+        composition,
+        "compare_schemas_with_snapshots",
+        compare_schemas,
+        raising=False,
+    )
     result = CliRunner().invoke(
         app,
         ["generate", "postgresql://source/db", "postgresql://target/db", "--out", str(tmp_path)],
@@ -376,7 +396,12 @@ def test_comparison_failure_exits_one_without_detail(
     ) -> DeltaSet:
         raise DiffError("comparison-private-detail")
 
-    monkeypatch.setattr(diff_command, "compare_schemas", compare_schemas, raising=False)
+    monkeypatch.setattr(
+        composition,
+        "compare_schemas_with_snapshots",
+        compare_schemas,
+        raising=False,
+    )
     result = CliRunner().invoke(
         app,
         ["generate", "postgresql://source/db", "postgresql://target/db", "--out", str(tmp_path)],
@@ -400,7 +425,12 @@ def test_unexpected_comparison_failure_exits_one_without_detail(
     ) -> DeltaSet:
         raise RuntimeError("unexpected-comparison-private-detail")
 
-    monkeypatch.setattr(diff_command, "compare_schemas", compare_schemas, raising=False)
+    monkeypatch.setattr(
+        composition,
+        "compare_schemas_with_snapshots",
+        compare_schemas,
+        raising=False,
+    )
     result = CliRunner().invoke(
         app,
         ["generate", "postgresql://source/db", "postgresql://target/db", "--out", str(tmp_path)],

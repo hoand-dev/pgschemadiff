@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+from pgschemadiff.application.diff.compare_schemas import compare_schemas_with_snapshots
 from pgschemadiff.infrastructure.config.yaml_loader import ProfileLoader
 from pgschemadiff.infrastructure.fs.bundle_reader import FilesystemBundleReader
 from pgschemadiff.infrastructure.fs.migration_writer import FilesystemMigrationWriter
@@ -19,6 +20,8 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from contextlib import AbstractAsyncContextManager
 
+    from pgschemadiff.application.diff.compare_schemas import SchemaComparisonResult
+    from pgschemadiff.application.diff.renames import RenameAnnotations
     from pgschemadiff.application.migration.ports import (
         BundleReader,
         MigrationExecutor,
@@ -99,6 +102,25 @@ async def open_inspectors(
         async with Pool(target_conninfo, open_timeout=_POOL_OPEN_TIMEOUT) as target_pool:
             target_inspector = PgCatalogInspector(target_pool, schemas=schemas)
             yield source_inspector, target_inspector
+
+
+async def compare_conninfo(
+    source_conninfo: str,
+    target_conninfo: str,
+    schemas: list[str] | None = None,
+    *,
+    renames: RenameAnnotations | None = None,
+) -> SchemaComparisonResult:
+    """Compare two connections and retain both inspected database snapshots."""
+    async with open_inspectors(source_conninfo, target_conninfo, schemas=schemas) as (
+        source_inspector,
+        target_inspector,
+    ):
+        return await compare_schemas_with_snapshots(
+            source_inspector,
+            target_inspector,
+            renames=renames,
+        )
 
 
 def create_migration_writer() -> FilesystemMigrationWriter:

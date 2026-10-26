@@ -9,10 +9,8 @@ import psycopg
 import psycopg_pool
 import typer
 
-from pgschemadiff.application.diff.compare_schemas import compare_schemas
 from pgschemadiff.infrastructure.config.rename_loader import load_renames
-from pgschemadiff.infrastructure.postgres.inspector import PgCatalogInspector
-from pgschemadiff.infrastructure.postgres.pool import Pool
+from pgschemadiff.presentation import composition
 from pgschemadiff.shared.errors import DiffError, InspectionError
 
 if TYPE_CHECKING:
@@ -20,8 +18,6 @@ if TYPE_CHECKING:
 
     from pgschemadiff.application.diff.renames import RenameAnnotations
     from pgschemadiff.domain.delta.base import DeltaSet
-
-_POOL_OPEN_TIMEOUT: float = 5.0
 
 
 async def compare_urls(
@@ -32,15 +28,13 @@ async def compare_urls(
     renames: RenameAnnotations | None = None,
 ) -> DeltaSet:
     """Open both databases and compare their inspected schemas."""
-    async with Pool(source_url, open_timeout=_POOL_OPEN_TIMEOUT) as source_pool:
-        source_inspector = PgCatalogInspector(source_pool, schemas=schemas)
-        async with Pool(target_url, open_timeout=_POOL_OPEN_TIMEOUT) as target_pool:
-            target_inspector = PgCatalogInspector(target_pool, schemas=schemas)
-            return await compare_schemas(
-                source_inspector,
-                target_inspector,
-                renames=renames,
-            )
+    result = await composition.compare_conninfo(
+        source_url,
+        target_url,
+        schemas,
+        renames=renames,
+    )
+    return result.deltas
 
 
 def diff_cmd(

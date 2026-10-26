@@ -1,4 +1,11 @@
-from pgschemadiff.application.diff.compare_schemas import compare_schemas
+from dataclasses import FrozenInstanceError
+
+import pytest
+
+from pgschemadiff.application.diff.compare_schemas import (
+    compare_schemas,
+    compare_schemas_with_snapshots,
+)
 from pgschemadiff.application.diff.ignore import IgnoreRules
 from pgschemadiff.application.diff.renames import RenameAnnotations, TableRename
 from pgschemadiff.domain.column import Column
@@ -67,6 +74,26 @@ async def test_compare_schemas_inspects_each_database_once_and_returns_typed_sch
     assert isinstance(result, DeltaSet)
     assert len(result.deltas) == 1
     assert isinstance(result.deltas[0], CreateSchema)
+
+
+async def test_compare_schemas_with_snapshots_returns_snapshots_and_compatible_deltas() -> None:
+    source_snapshot = Database(name="source")
+    target_snapshot = Database(name="target", schemas=(_schema(),))
+    source = StubInspector(source_snapshot)
+    target = StubInspector(target_snapshot)
+    wrapper_source = StubInspector(source_snapshot)
+    wrapper_target = StubInspector(target_snapshot)
+
+    result = await compare_schemas_with_snapshots(source, target)
+    wrapper_deltas = await compare_schemas(wrapper_source, wrapper_target)
+
+    assert result.source is source_snapshot
+    assert result.target is target_snapshot
+    assert result.deltas == wrapper_deltas
+    assert source.calls == target.calls == wrapper_source.calls == wrapper_target.calls == 1
+    assert isinstance(result.deltas, DeltaSet)
+    with pytest.raises(FrozenInstanceError):
+        result.__setattr__("source", target_snapshot)
 
 
 async def test_compare_schemas_uses_all_default_comparators() -> None:

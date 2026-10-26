@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 from pgschemadiff.application.diff.comparators import (
@@ -28,8 +29,18 @@ from pgschemadiff.application.diff.engine import Comparator, DiffEngine
 if TYPE_CHECKING:
     from pgschemadiff.application.diff.ignore import IgnoreRules
     from pgschemadiff.application.diff.renames import RenameAnnotations
+    from pgschemadiff.domain.database import Database
     from pgschemadiff.domain.delta import DeltaSet
     from pgschemadiff.domain.ports import SchemaInspector
+
+
+@dataclass(frozen=True)
+class SchemaComparisonResult:
+    """Inspected database snapshots and their ordered schema differences."""
+
+    source: Database
+    target: Database
+    deltas: DeltaSet
 
 
 async def compare_schemas(
@@ -39,7 +50,24 @@ async def compare_schemas(
     renames: RenameAnnotations | None = None,
     ignore: IgnoreRules | None = None,
 ) -> DeltaSet:
-    """Inspect both databases and return their ordered typed schema changes."""
+    """Inspect and compare both databases, returning only their ordered changes."""
+    result = await compare_schemas_with_snapshots(
+        source_inspector,
+        target_inspector,
+        renames=renames,
+        ignore=ignore,
+    )
+    return result.deltas
+
+
+async def compare_schemas_with_snapshots(
+    source_inspector: SchemaInspector,
+    target_inspector: SchemaInspector,
+    *,
+    renames: RenameAnnotations | None = None,
+    ignore: IgnoreRules | None = None,
+) -> SchemaComparisonResult:
+    """Inspect both databases and return snapshots with ordered typed changes."""
     source = await source_inspector.inspect()
     target = await target_inspector.inspect()
     source_table_owners = {
@@ -74,4 +102,5 @@ async def compare_schemas(
         cast("Comparator", IndexComparator()),
     )
     engine = DiffEngine(comparators=comparators)
-    return order_deltas(engine.diff(source, target, renames=renames, ignore=ignore))
+    deltas = order_deltas(engine.diff(source, target, renames=renames, ignore=ignore))
+    return SchemaComparisonResult(source=source, target=target, deltas=deltas)

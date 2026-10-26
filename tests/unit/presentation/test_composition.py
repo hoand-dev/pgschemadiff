@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+from pgschemadiff.application.diff.renames import RenameAnnotations
 from pgschemadiff.infrastructure.config.yaml_loader import ProfileLoader
 from pgschemadiff.infrastructure.fs.bundle_reader import FilesystemBundleReader
 from pgschemadiff.infrastructure.fs.migration_writer import FilesystemMigrationWriter
@@ -131,6 +137,47 @@ async def test_inspector_scope_uses_two_lazy_pools_with_cli_timeout(
         ("target", 5.0, True),
     ]
     assert [inspector.schemas for inspector in inspectors] == [["app"], ["app"]]
+
+
+@pytest.mark.asyncio
+async def test_compare_conninfo_uses_inspector_scope_and_returns_comparison(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_inspector = object()
+    target_inspector = object()
+    inspectors = (source_inspector, target_inspector)
+    sentinel = object()
+    scope_calls: list[tuple[str, str, list[str] | None]] = []
+    comparison_calls: list[tuple[object, object, object | None]] = []
+
+    @asynccontextmanager
+    async def fake_open_inspectors(
+        source_conninfo: str,
+        target_conninfo: str,
+        *,
+        schemas: list[str] | None = None,
+    ) -> AsyncIterator[tuple[object, object]]:
+        scope_calls.append((source_conninfo, target_conninfo, schemas))
+        yield inspectors
+
+    async def fake_compare(
+        source: object,
+        target: object,
+        *,
+        renames: object | None = None,
+    ) -> object:
+        comparison_calls.append((source, target, renames))
+        return sentinel
+
+    monkeypatch.setattr(composition, "open_inspectors", fake_open_inspectors)
+    monkeypatch.setattr(composition, "compare_schemas_with_snapshots", fake_compare, raising=False)
+    renames = RenameAnnotations()
+
+    result = await composition.compare_conninfo("source", "target", ["app"], renames=renames)
+
+    assert result is sentinel
+    assert scope_calls == [("source", "target", ["app"])]
+    assert comparison_calls == [(source_inspector, target_inspector, renames)]
 
 
 def test_executor_factory_wraps_open_executor_without_opening_it(

@@ -9,11 +9,13 @@ import psycopg
 from typer.testing import CliRunner
 
 import pgschemadiff.presentation.cli.commands.diff as diff_command
+from pgschemadiff.application.diff.renames import RenameAnnotations
 from pgschemadiff.domain.database import Database
 from pgschemadiff.domain.delta.base import DeltaSet
 from pgschemadiff.domain.delta.schema import CreateExtension
 from pgschemadiff.domain.extension import Extension
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
+from pgschemadiff.presentation import composition
 from pgschemadiff.presentation.cli.main import app
 from pgschemadiff.shared.errors import DiffError
 
@@ -103,9 +105,40 @@ def _patch_infrastructure(
         inspectors.append(inspector)
         return inspector
 
-    monkeypatch.setattr(diff_command, "Pool", make_pool, raising=False)
-    monkeypatch.setattr(diff_command, "PgCatalogInspector", make_inspector, raising=False)
+    monkeypatch.setattr(composition, "Pool", make_pool)
+    monkeypatch.setattr(composition, "PgCatalogInspector", make_inspector)
     return pools, inspectors
+
+
+def test_compare_urls_uses_composition_helper_with_connection_inputs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_url = "postgresql://source/db"
+    target_url = "postgresql://target/db"
+    _patch_infrastructure(
+        monkeypatch,
+        {source_url: Database(name="source"), target_url: Database(name="target")},
+    )
+    deltas = DeltaSet()
+    renames = RenameAnnotations()
+    calls: list[tuple[str, str, list[str] | None, object | None]] = []
+
+    async def fake_compare_conninfo(
+        source_conninfo: str,
+        target_conninfo: str,
+        schemas: list[str] | None,
+        *,
+        renames: object | None = None,
+    ) -> SimpleNamespace:
+        calls.append((source_conninfo, target_conninfo, schemas, renames))
+        return SimpleNamespace(deltas=deltas)
+
+    monkeypatch.setattr(composition, "compare_conninfo", fake_compare_conninfo, raising=False)
+
+    result = _run_async(diff_command.compare_urls(source_url, target_url, ["app"], renames=renames))
+
+    assert result is deltas
+    assert calls == [(source_url, target_url, ["app"], renames)]
 
 
 def test_diff_passes_positional_urls_and_repeated_schemas_to_both_inspectors(
@@ -153,12 +186,17 @@ def test_diff_loads_rename_annotations_only_when_requested(
         _target: FakeInspector,
         *,
         renames: object | None = None,
-    ) -> DeltaSet:
+    ) -> SimpleNamespace:
         compare_renames.append(renames)
-        return DeltaSet()
+        return SimpleNamespace(deltas=DeltaSet())
 
     monkeypatch.setattr(diff_command, "load_renames", load_renames, raising=False)
-    monkeypatch.setattr(diff_command, "compare_schemas", compare_schemas, raising=False)
+    monkeypatch.setattr(
+        composition,
+        "compare_schemas_with_snapshots",
+        compare_schemas,
+        raising=False,
+    )
 
     runner = CliRunner()
     without_renames = runner.invoke(app, ["diff", source_url, target_url])
@@ -182,10 +220,15 @@ def test_diff_prints_parseable_typed_delta_json(monkeypatch: pytest.MonkeyPatch)
 
     async def compare_schemas(
         _source: FakeInspector, _target: FakeInspector, **_kwargs: object
-    ) -> DeltaSet:
-        return DeltaSet()
+    ) -> SimpleNamespace:
+        return SimpleNamespace(deltas=DeltaSet())
 
-    monkeypatch.setattr(diff_command, "compare_schemas", compare_schemas, raising=False)
+    monkeypatch.setattr(
+        composition,
+        "compare_schemas_with_snapshots",
+        compare_schemas,
+        raising=False,
+    )
 
     result = CliRunner().invoke(app, ["diff", source_url, target_url])
 
@@ -242,7 +285,12 @@ def test_diff_reports_errors_to_stderr_with_nonzero_exit(
     ) -> DeltaSet:
         raise RuntimeError("private failure detail")
 
-    monkeypatch.setattr(diff_command, "compare_schemas", compare_schemas, raising=False)
+    monkeypatch.setattr(
+        composition,
+        "compare_schemas_with_snapshots",
+        compare_schemas,
+        raising=False,
+    )
 
     result = CliRunner().invoke(app, ["diff", source_url, target_url])
 
@@ -267,7 +315,12 @@ def test_diff_error_redacts_detail_from_output_and_logs(
     ) -> DeltaSet:
         raise DiffError("diff-secret-marker")
 
-    monkeypatch.setattr(diff_command, "compare_schemas", compare_schemas, raising=False)
+    monkeypatch.setattr(
+        composition,
+        "compare_schemas_with_snapshots",
+        compare_schemas,
+        raising=False,
+    )
 
     result = CliRunner().invoke(app, ["diff", source_url, target_url])
 
@@ -291,12 +344,7 @@ def test_connection_error_redacts_dsn_and_driver_message(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     monkeypatch.setattr(diff_command, "asyncio", SimpleNamespace(run=_run_async))
-    monkeypatch.setattr(
-        diff_command,
-        "Pool",
-        lambda *_args, **_kwargs: FailingPool(),
-        raising=False,
-    )
+    monkeypatch.setattr(composition, "Pool", lambda *_args, **_kwargs: FailingPool())
 
     result = CliRunner().invoke(
         app,
