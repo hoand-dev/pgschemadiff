@@ -17,6 +17,7 @@ from pgschemadiff.infrastructure.config.yaml_loader import ProfileLoader
 from pgschemadiff.infrastructure.fs.bundle_reader import FilesystemBundleReader
 from pgschemadiff.infrastructure.fs.migration_writer import FilesystemMigrationWriter
 from pgschemadiff.infrastructure.postgres.applier import open_executor
+from pgschemadiff.infrastructure.postgres.history import PostgresMigrationHistoryReader
 from pgschemadiff.infrastructure.postgres.inspector import PgCatalogInspector
 from pgschemadiff.infrastructure.postgres.pool import Pool
 
@@ -28,6 +29,7 @@ if TYPE_CHECKING:
     from pgschemadiff.application.migration.ports import (
         BundleReader,
         MigrationExecutor,
+        MigrationHistoryReader,
         MigrationWriter,
     )
 
@@ -69,6 +71,7 @@ class TuiDependencies:
     bundle_reader: BundleReader
     executor_factory: ExecutorFactory
     compare: CompareCallable = field(default_factory=lambda: compare_conninfo)
+    history_reader_factory: Callable[[str], MigrationHistoryReader] = PostgresMigrationHistoryReader
 
 
 def resolve_profile_path(config_path: Path | None = None) -> Path:

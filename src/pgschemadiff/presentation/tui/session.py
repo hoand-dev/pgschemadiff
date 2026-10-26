@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from pgschemadiff.application.diff.compare_schemas import SchemaComparisonResult
     from pgschemadiff.application.migration.apply import ApplyEvent, ApplyResult
     from pgschemadiff.application.migration.bundle import ValidatedBundle
+    from pgschemadiff.application.migration.history import MigrationHistoryRun
     from pgschemadiff.application.migration.model import MigrationPlan
     from pgschemadiff.application.migration.render import RenderedBundle
     from pgschemadiff.domain.models import Profile
@@ -33,6 +34,9 @@ class TuiSession:
     apply_result: ApplyResult | None = None
     apply_status: str = ""
     apply_operation: Literal["loading", "dry-run", "apply"] | None = None
+    history_runs: tuple[MigrationHistoryRun, ...] = ()
+    history_status: str = ""
+    selected_history_bundle_id: str | None = None
 
     def set_profiles(self, profiles: list[Profile]) -> None:
         """Replace loaded profiles and select first entry when available."""
@@ -44,7 +48,14 @@ class TuiSession:
         if self.selected_profile != profile:
             self.selected_profile = profile
             self.last_comparison = None
+            self.clear_history()
             self.clear_migration()
+
+    def clear_history(self) -> None:
+        """Discard history associated with another target profile."""
+        self.history_runs = ()
+        self.history_status = ""
+        self.selected_history_bundle_id = None
 
     def clear_migration(self) -> None:
         """Discard migration artifacts derived from the current comparison."""

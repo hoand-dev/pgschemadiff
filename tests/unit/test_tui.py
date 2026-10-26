@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import threading
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, cast
 from unittest.mock import Mock
 
@@ -20,6 +22,11 @@ import pgschemadiff.presentation.tui.app as tui_app_module
 from pgschemadiff.application.diff.compare_schemas import SchemaComparisonResult
 from pgschemadiff.application.migration.apply import apply_migration
 from pgschemadiff.application.migration.generate import generate_migration
+from pgschemadiff.application.migration.history import (
+    MigrationHistoryRun,
+    MigrationHistoryUnavailableError,
+    MigrationHistoryUnit,
+)
 from pgschemadiff.application.migration.ports import UnitFailure
 from pgschemadiff.application.migration.render import RenderedBundle, render_bundle
 from pgschemadiff.application.sql_emit.risk import RiskLevel
@@ -29,8 +36,9 @@ from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.models import ConnectionInfo, Profile
 from pgschemadiff.domain.schema import Schema
 from pgschemadiff.infrastructure.fs.migration_writer import FilesystemMigrationWriter
+from pgschemadiff.infrastructure.postgres.history import PostgresMigrationHistoryReader
 from pgschemadiff.presentation.cli.main import app as cli_app
-from pgschemadiff.presentation.composition import TuiDependencies
+from pgschemadiff.presentation.composition import TuiDependencies, create_tui_dependencies
 from pgschemadiff.presentation.tui import PgsdApp
 from pgschemadiff.presentation.tui._mock import AI_SUGGESTIONS, DIFFS
 from pgschemadiff.presentation.tui.app import _VIEW_CHORDS
@@ -59,6 +67,7 @@ if TYPE_CHECKING:
     from pgschemadiff.application.migration.ports import (
         BundleReader,
         MigrationExecutor,
+        MigrationHistoryReader,
         MigrationWriter,
         RunFailure,
         RunFinishStatus,
@@ -181,6 +190,40 @@ class _RecordingExecutorFactory:
         yield cast("MigrationExecutor", self.executor)
 
 
+class _RecordingHistoryReader:
+    def __init__(
+        self,
+        runs: tuple[MigrationHistoryRun, ...] = (),
+        *,
+        error: Exception | None = None,
+    ) -> None:
+        self.runs = runs
+        self.error = error
+        self.calls = 0
+        self.limits: list[int] = []
+
+    async def list_history(self, *, limit: int = 50) -> tuple[MigrationHistoryRun, ...]:
+        self.calls += 1
+        self.limits.append(limit)
+        if self.error is not None:
+            raise self.error
+        return self.runs
+
+
+class _RecordingHistoryReaderFactory:
+    def __init__(self, reader: _RecordingHistoryReader) -> None:
+        self.reader = reader
+        self.conninfos: list[str] = []
+
+    def __call__(self, conninfo: str) -> MigrationHistoryReader:
+        self.conninfos.append(conninfo)
+        return self.reader
+
+
+def _history_read_count(reader: _RecordingHistoryReader) -> int:
+    return reader.calls
+
+
 def _migration_dependencies(
     tmp_path: Path,
     writer: _RecordingMigrationWriter,
@@ -198,6 +241,98 @@ def _migration_dependencies(
         bundle_reader=cast("BundleReader", bundle_reader or Mock()),
         executor_factory=cast("ExecutorFactory", executor_factory or Mock()),
         compare=cast("CompareCallable", compare) if compare is not None else _no_compare,
+    )
+
+
+def _history_dependencies(
+    tmp_path: Path,
+    profile: Profile,
+    history_reader_factory: _RecordingHistoryReaderFactory,
+    *,
+    profiles: list[Profile] | None = None,
+    bundle_reader: object | None = None,
+    executor_factory: object | None = None,
+) -> TuiDependencies:
+    loader = _FakeProfileLoader(tmp_path / "profiles.yaml", profiles or [profile])
+    return TuiDependencies(
+        profile_loader=cast("ProfileLoader", loader),
+        inspector_scope=cast("InspectorScope", Mock()),
+        migration_writer=cast("MigrationWriter", _RecordingMigrationWriter()),
+        bundle_reader=cast("BundleReader", bundle_reader or Mock()),
+        executor_factory=cast("ExecutorFactory", executor_factory or Mock()),
+        history_reader_factory=history_reader_factory,
+    )
+
+
+def _history_runs() -> tuple[MigrationHistoryRun, ...]:
+    started = datetime(2026, 10, 26, 8, 0, tzinfo=UTC)
+    finished = started + timedelta(seconds=90)
+    return (
+        MigrationHistoryRun(
+            bundle_id="bundle-running",
+            status="running",
+            started_at=started + timedelta(days=1),
+            finished_at=None,
+            up_sql_sha256="fedcba0987654321" * 4,
+            units=(
+                MigrationHistoryUnit(
+                    index=0,
+                    status="running",
+                    transactional=False,
+                    started_at=None,
+                    finished_at=None,
+                    failed_statement_index=None,
+                    error_class=None,
+                    sqlstate=None,
+                ),
+            ),
+        ),
+        MigrationHistoryRun(
+            bundle_id="bundle-new",
+            status="applied",
+            started_at=started,
+            finished_at=finished,
+            up_sql_sha256="abcdef0123456789" * 4,
+            units=(
+                MigrationHistoryUnit(
+                    index=0,
+                    status="applied",
+                    transactional=True,
+                    started_at=started,
+                    finished_at=finished,
+                    failed_statement_index=None,
+                    error_class=None,
+                    sqlstate=None,
+                ),
+            ),
+        ),
+        MigrationHistoryRun(
+            bundle_id="bundle-old",
+            status="failed",
+            started_at=started - timedelta(days=1),
+            finished_at=started - timedelta(days=1) + timedelta(seconds=20),
+            up_sql_sha256="1234567890abcdef" * 4,
+            units=(
+                MigrationHistoryUnit(
+                    index=3,
+                    status="failed",
+                    transactional=False,
+                    started_at=started - timedelta(days=1),
+                    finished_at=started - timedelta(days=1) + timedelta(seconds=20),
+                    failed_statement_index=2,
+                    error_class="UndefinedTable",
+                    sqlstate="42P01",
+                ),
+            ),
+        ),
+        MigrationHistoryRun(
+            bundle_id="bundle-cancelled",
+            status="cancelled",
+            started_at=started - timedelta(days=2),
+            finished_at=started - timedelta(days=2) + timedelta(seconds=5),
+            up_sql_sha256="fedcba0987654321" * 4,
+            units=(),
+        ),
     )
 
 
@@ -1310,6 +1445,366 @@ async def test_history_row_selection_updates_detail() -> None:
         hist.selected_id = "h-238"
         await pilot.pause()
         assert hist.selected_id == "h-238"
+
+
+@pytest.mark.unit
+def test_tui_dependencies_default_history_factory_builds_postgres_reader() -> None:
+    dependencies = create_tui_dependencies()
+
+    reader = dependencies.history_reader_factory("postgresql://history-test")
+
+    assert isinstance(reader, PostgresMigrationHistoryReader)
+
+
+@pytest.mark.unit
+async def test_history_loads_selected_target_and_renders_persisted_timeline(
+    tmp_path: Path,
+) -> None:
+    profile = _profile("selected")
+    reader = _RecordingHistoryReader(_history_runs())
+    factory = _RecordingHistoryReaderFactory(reader)
+    app = PgsdApp(dependencies=_history_dependencies(tmp_path, profile, factory))
+
+    async with app.run_test(size=(150, 50)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        app.switch_view("history")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        assert factory.conninfos == [profile.target.dsn()]
+        assert reader.limits == [50]
+        run_list = "\n".join(_plain(row) for row in app.query_one("#history-runs").query(Static))
+        assert run_list.index("bundle-new") < run_list.index("bundle-old")
+        assert "applied" in run_list
+        assert "failed" in run_list
+        assert "running" in run_list
+        assert "cancelled" in run_list
+        assert "2026-10-26" in run_list
+        assert "90.00s" in run_list
+        assert "n/a" in run_list
+        assert app.session.selected_history_bundle_id == "bundle-running"
+        assert "failure: n/a" in _plain(app.query_one("#history-timeline", Static))
+
+        await pilot.click("#history-run-2")
+        await pilot.pause()
+        assert app.session.selected_history_bundle_id == "bundle-old"
+        detail = _plain(app.query_one("#history-detail", Static))
+        timeline = _plain(app.query_one("#history-timeline", Static))
+        assert "bundle-old" in detail
+        assert "sha256:1234567890ab…" in detail
+        assert "unit 3" in timeline
+        assert "transactional: no" in timeline
+        assert "statement index 2" in timeline
+        assert "UndefinedTable" in timeline
+        assert "SQLSTATE 42P01" in timeline
+
+        history_text = "\n".join(
+            _plain(widget) for widget in app.query_one("#history").query(Static)
+        )
+        hidden_labels = (
+            "author",
+            "snapshot",
+            "dump",
+            "rollback",
+            "dry-run",
+            "pending",
+            "rolled-back",
+        )
+        for hidden in hidden_labels:
+            assert hidden not in history_text.lower()
+
+        await pilot.click("#history-refresh")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert reader.calls == 2
+
+
+@pytest.mark.unit
+async def test_history_load_does_not_cancel_running_comparison(tmp_path: Path) -> None:
+    profile = _profile("selected")
+    release = asyncio.Event()
+    comparison = _comparison()
+
+    async def slow_compare(
+        _source: str, _target: str, _schemas: list[str] | None
+    ) -> SchemaComparisonResult:
+        await release.wait()
+        return comparison
+
+    reader = _RecordingHistoryReader(_history_runs())
+    dependencies = dataclasses.replace(
+        _history_dependencies(tmp_path, profile, _RecordingHistoryReaderFactory(reader)),
+        compare=slow_compare,
+    )
+    app = PgsdApp(dependencies=dependencies)
+
+    async with app.run_test(size=(150, 50)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        app._start_test_both()
+        await pilot.pause()
+        app.switch_view("history")
+        await pilot.pause()
+        release.set()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        assert app.session.last_comparison is comparison
+        assert reader.calls == 1
+
+
+@pytest.mark.unit
+async def test_history_shows_empty_state(tmp_path: Path) -> None:
+    profile = _profile("empty")
+    reader = _RecordingHistoryReader()
+    app = PgsdApp(
+        dependencies=_history_dependencies(
+            tmp_path,
+            profile,
+            _RecordingHistoryReaderFactory(reader),
+        )
+    )
+
+    async with app.run_test(size=(140, 44)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        app.switch_view("history")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        assert _plain(app.query_one("#history-status", Static)) == "No migration history found."
+        assert len(app.query_one("#history-runs").query("#history-run-0")) == 0
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("error", "expected_status"),
+    [
+        (
+            MigrationHistoryUnavailableError("history-secret-sentinel"),
+            "History unavailable (incompatible layout).",
+        ),
+        (OperationalError("history-secret-sentinel"), "Could not load migration history."),
+        (RuntimeError("history-secret-sentinel"), "Could not load migration history."),
+    ],
+    ids=["incompatible-layout", "postgres-error", "unexpected-error"],
+)
+async def test_history_errors_are_fixed_and_redacted(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    error: Exception,
+    expected_status: str,
+) -> None:
+    profile = _profile("errors")
+    reader = _RecordingHistoryReader(error=error)
+    app = PgsdApp(
+        dependencies=_history_dependencies(
+            tmp_path,
+            profile,
+            _RecordingHistoryReaderFactory(reader),
+        )
+    )
+
+    async with app.run_test(size=(140, 44)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        app.switch_view("history")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        view_text = "\n".join(_plain(widget) for widget in app.query_one("#history").query(Static))
+        assert _plain(app.query_one("#history-status", Static)) == expected_status
+        assert "history-secret-sentinel" not in view_text
+        assert "history-secret-sentinel" not in caplog.text
+
+
+@pytest.mark.unit
+async def test_history_without_profile_does_not_start_reader() -> None:
+    app = PgsdApp()
+
+    async with app.run_test(size=(140, 44)) as pilot:
+        await pilot.pause()
+        app.switch_view("history")
+        await pilot.pause()
+
+        assert _plain(app.query_one("#history-status", Static)) == "No profile selected."
+
+
+@pytest.mark.unit
+async def test_history_result_from_previous_profile_is_ignored(tmp_path: Path) -> None:
+    first = _profile("first-target")
+    second = _profile("second-target")
+    app = PgsdApp(
+        dependencies=_history_dependencies(
+            tmp_path,
+            first,
+            _RecordingHistoryReaderFactory(_RecordingHistoryReader()),
+            profiles=[first, second],
+        )
+    )
+
+    async with app.run_test(size=(140, 44)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        old_profile = app.session.selected_profile
+        assert old_profile is first
+        app.session.select_profile(second)
+
+        app.on_history_load_finished(
+            tui_app_module.HistoryLoadFinished(id(first), runs=_history_runs())
+        )
+
+        assert app.session.history_runs == ()
+        assert app.session.selected_history_bundle_id is None
+
+
+@pytest.mark.unit
+async def test_history_markup_like_values_are_rendered_as_literal_text(tmp_path: Path) -> None:
+    literal = "[bold]literal[/] $primary"
+    started = datetime(2026, 10, 26, 8, 0, tzinfo=UTC)
+    run = MigrationHistoryRun(
+        bundle_id=literal,
+        status="failed",
+        started_at=started,
+        finished_at=started + timedelta(seconds=1),
+        up_sql_sha256="abcdef0123456789" * 4,
+        units=(
+            MigrationHistoryUnit(
+                index=0,
+                status="failed",
+                transactional=True,
+                started_at=started,
+                finished_at=started + timedelta(seconds=1),
+                failed_statement_index=0,
+                error_class=literal,
+                sqlstate=literal,
+            ),
+        ),
+    )
+    reader = _RecordingHistoryReader((run,))
+    app = PgsdApp(
+        dependencies=_history_dependencies(
+            tmp_path,
+            _profile("markup"),
+            _RecordingHistoryReaderFactory(reader),
+        )
+    )
+
+    async with app.run_test(size=(150, 50)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        app.switch_view("history")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        text = "\n".join(_plain(widget) for widget in app.query_one("#history").query(Static))
+        assert text.count(literal) >= 3
+
+
+@pytest.mark.unit
+async def test_history_does_not_read_during_apply_and_refreshes_after_finish(
+    tmp_path: Path,
+) -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+    executor = _FakeMigrationExecutor(started=started, release=release)
+    executor_factory = _RecordingExecutorFactory(executor)
+    reader = _RecordingHistoryReader()
+    profile = _profile("apply-history")
+    app = PgsdApp(
+        dependencies=_history_dependencies(
+            tmp_path,
+            profile,
+            _RecordingHistoryReaderFactory(reader),
+            bundle_reader=_FakeBundleReader(_bundle_files(_create_schema_delta())),
+            executor_factory=executor_factory,
+        )
+    )
+
+    async with app.run_test(size=(150, 50)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        app.session.written_bundle_path = tmp_path / "saved-bundle"
+        app.switch_view("apply")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        await pilot.click("#apply-start")
+        await pilot.pause()
+        await pilot.click("#confirm-apply")
+        await started.wait()
+        await pilot.pause()
+
+        app.switch_view("history")
+        await pilot.pause()
+        assert app.session.apply_operation == "apply"
+        assert _history_read_count(reader) == 0
+        assert _plain(app.query_one("#history-status", Static)) == "History refresh after apply."
+        await pilot.click("#history-refresh")
+        await pilot.pause()
+        assert _history_read_count(reader) == 0
+
+        release.set()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert _history_read_count(reader) == 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("outcome", ["success", "failure", "cancelled"])
+async def test_history_refreshes_after_every_apply_outcome(
+    tmp_path: Path,
+    outcome: str,
+) -> None:
+    reader = _RecordingHistoryReader()
+    app = PgsdApp(
+        dependencies=_history_dependencies(
+            tmp_path,
+            _profile(f"apply-{outcome}"),
+            _RecordingHistoryReaderFactory(reader),
+        )
+    )
+
+    async with app.run_test(size=(140, 44)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        app.session.apply_operation = "apply"
+        if outcome == "failure":
+            message = tui_app_module.ApplyOperationFinished(error_message="Migration apply failed.")
+        elif outcome == "cancelled":
+            message = tui_app_module.ApplyOperationFinished(cancelled=True)
+        else:
+            message = tui_app_module.ApplyOperationFinished()
+
+        app.on_apply_operation_finished(message)
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        assert reader.calls == 1
+
+
+@pytest.mark.unit
+async def test_rollback_palette_selects_history_run_without_executing_sql(tmp_path: Path) -> None:
+    reader = _RecordingHistoryReader(_history_runs())
+    app = PgsdApp(
+        dependencies=_history_dependencies(
+            tmp_path,
+            _profile("rollback"),
+            _RecordingHistoryReaderFactory(reader),
+        )
+    )
+
+    async with app.run_test(size=(150, 50)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        app._dispatch_command("rollback bundle-old")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        assert app._active_view == "history"
+        assert app.session.selected_history_bundle_id == "bundle-old"
+        assert "Rollback is not available; down.sql is notes only." in app.query_one(Cmdbar).hint
+        assert reader.calls == 1
 
 
 @pytest.mark.unit

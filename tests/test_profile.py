@@ -67,3 +67,9 @@ def test_profile_is_frozen() -> None:
     p = Profile(name="test", source=src, target=tgt)
     with pytest.raises(Exception):
         p.name = "changed"  # type: ignore[misc]
+
+
+def test_connection_info_repr_hides_password() -> None:
+    info = ConnectionInfo(host="h", database="d", user="u", password="s3cret-sentinel")
+    assert "s3cret-sentinel" not in repr(info)
+    assert "s3cret-sentinel" not in str(info)

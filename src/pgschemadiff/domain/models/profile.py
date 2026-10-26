@@ -19,7 +19,8 @@ class ConnectionInfo(BaseModel):
     port: int = 5432
     database: str
     user: str
-    password: str = ""
+    # Kept out of repr so tracebacks, logs and assertion output never show it.
+    password: str = Field(default="", repr=False)
 
     def display(self) -> str:
         """Hiển thị dạng URL ngắn gọn, ẩn password."""

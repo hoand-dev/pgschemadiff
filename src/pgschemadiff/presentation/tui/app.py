@@ -25,6 +25,10 @@ from pgschemadiff.application.migration.apply import (
 )
 from pgschemadiff.application.migration.bundle import ValidatedBundle, load_bundle
 from pgschemadiff.application.migration.generate import generate_migration
+from pgschemadiff.application.migration.history import (
+    MigrationHistoryUnavailableError,
+    list_migration_history,
+)
 from pgschemadiff.application.migration.render import render_bundle
 from pgschemadiff.application.sql_emit.risk import RiskLevel
 from pgschemadiff.presentation.cli.commands.apply import _check_connectivity, _parse_timeout
@@ -41,6 +45,11 @@ from pgschemadiff.presentation.tui.views.connection import (
     ConnectionView,
     ProfileSelected,
     TestBothRequested,
+)
+from pgschemadiff.presentation.tui.views.history import (
+    HistoryRefreshRequested,
+    HistoryRunSelected,
+    HistoryView,
 )
 from pgschemadiff.presentation.tui.views.migration import (
     GenerateMigrationRequested,
@@ -71,6 +80,7 @@ if TYPE_CHECKING:
 
     from pgschemadiff.application.diff.compare_schemas import SchemaComparisonResult
     from pgschemadiff.application.migration.model import MigrationPlan
+    from pgschemadiff.application.migration.history import MigrationHistoryRun
     from pgschemadiff.application.migration.ports import BundleReader
     from pgschemadiff.domain.models import Profile
     from pgschemadiff.presentation.composition import TuiDependencies
@@ -184,6 +194,22 @@ class ApplyOperationFinished(Message):
         self.cancelled = cancelled
 
 
+class HistoryLoadFinished(Message):
+    """Carry safe target history back to the UI loop."""
+
+    def __init__(
+        self,
+        profile_token: int,
+        *,
+        runs: tuple[MigrationHistoryRun, ...] = (),
+        status: str = "",
+    ) -> None:
+        super().__init__()
+        self.profile_token = profile_token
+        self.runs = runs
+        self.status = status
+
+
 class PgsdApp(App[None]):
     """The pgschemadiff Textual TUI."""
 
@@ -217,6 +243,8 @@ class PgsdApp(App[None]):
         self._bundle_load_worker: Worker[None] | None = None
         self._bundle_load_path: Path | None = None
         self._apply_worker: Worker[None] | None = None
+        self._history_worker: Worker[None] | None = None
+        self._history_io_lock = asyncio.Lock()
         self._pending_apply_request: tuple[Profile, ValidatedBundle, int, int] | None = None
         self._mode = "normal"
         self._chord: str | None = None
@@ -272,6 +300,101 @@ class PgsdApp(App[None]):
             status=status,
         )
 
+    def _refresh_history_view(self) -> None:
+        self.query_one("#history", HistoryView).update_from_session(self.session)
+
+    def _cancel_history_worker(self) -> None:
+        if self._history_worker is not None:
+            self._history_worker.cancel()
+            self._history_worker = None
+
+    def _start_history_load(self) -> None:
+        if self.session.apply_operation == "apply":
+            self.session.history_status = "History refresh after apply."
+            self._refresh_history_view()
+            return
+
+        profile = self.session.selected_profile
+        dependencies = self.dependencies
+        if profile is None:
+            self._cancel_history_worker()
+            self.session.clear_history()
+            self.session.history_status = "No profile selected."
+            self._refresh_history_view()
+            return
+        if dependencies is None:
+            self.session.history_runs = ()
+            self.session.history_status = "Could not load migration history."
+            self._refresh_history_view()
+            return
+
+        self._cancel_history_worker()
+        self.session.history_status = "Loading migration history…"
+        self._refresh_history_view()
+        self._history_worker = self.run_worker(
+            self._read_history(profile, id(profile), dependencies),
+            name="migration-history",
+            # Own group: an exclusive shared read group would cancel a running comparison.
+            group="history-read",
+            exclusive=True,
+        )
+
+    async def _read_history(
+        self,
+        profile: Profile,
+        profile_token: int,
+        dependencies: TuiDependencies,
+    ) -> None:
+        try:
+            async with self._history_io_lock:
+                if self.session.apply_operation == "apply":
+                    self.post_message(
+                        HistoryLoadFinished(
+                            profile_token,
+                            status="History refresh after apply.",
+                        )
+                    )
+                    return
+                reader = dependencies.history_reader_factory(profile.target.dsn())
+                runs = await list_migration_history(reader)
+        except MigrationHistoryUnavailableError:
+            self.post_message(
+                HistoryLoadFinished(
+                    profile_token,
+                    status="History unavailable (incompatible layout).",
+                )
+            )
+        except Exception:
+            self.post_message(
+                HistoryLoadFinished(profile_token, status="Could not load migration history.")
+            )
+        else:
+            self.post_message(HistoryLoadFinished(profile_token, runs=runs))
+
+    def on_history_load_finished(self, message: HistoryLoadFinished) -> None:
+        profile = self.session.selected_profile
+        if profile is None or id(profile) != message.profile_token:
+            return
+        self._history_worker = None
+        self.session.history_runs = message.runs
+        self.session.history_status = message.status or (
+            "No migration history found." if not message.runs else ""
+        )
+        if self.session.selected_history_bundle_id is None and message.runs:
+            self.session.selected_history_bundle_id = message.runs[0].bundle_id
+        self._refresh_history_view()
+        message.stop()
+
+    def on_history_refresh_requested(self, message: HistoryRefreshRequested) -> None:
+        self._start_history_load()
+        message.stop()
+
+    def on_history_run_selected(self, message: HistoryRunSelected) -> None:
+        if any(run.bundle_id == message.bundle_id for run in self.session.history_runs):
+            self.session.selected_history_bundle_id = message.bundle_id
+            self._refresh_history_view()
+        message.stop()
+
     def _start_test_both(self) -> None:
         if self.session.apply_operation in {"dry-run", "apply"}:
             return
@@ -290,6 +413,7 @@ class PgsdApp(App[None]):
             return
 
         self._invalidate_migration()
+        self._cancel_history_worker()
         self._refresh_connection(status="Testing connections…")
         self._comparison_worker = self.run_worker(
             self._compare_profile(profile),
@@ -357,10 +481,12 @@ class PgsdApp(App[None]):
         if self._comparison_worker is not None:
             self._comparison_worker.cancel()
             self._comparison_worker = None
+        self._cancel_history_worker()
         self._cancel_bundle_load()
         self._cancel_migration_generation()
         self.session.select_profile(profile)
         self._refresh_connection()
+        self._refresh_history_view()
         cast("MainScreen", self.screen_stack[0]).update_from_session(self.session)
         self._refresh_migration_view(status="", busy=False)
         self._refresh_apply_controls()
@@ -705,6 +831,10 @@ class PgsdApp(App[None]):
         dry_run: bool,
         approve_destructive: bool,
     ) -> None:
+        if not dry_run:
+            self._cancel_history_worker()
+            self.session.history_status = "History refresh after apply."
+            self._refresh_history_view()
         self.session.apply_events.clear()
         self.session.apply_event_timestamps.clear()
         self.session.apply_result = None
@@ -748,17 +878,18 @@ class PgsdApp(App[None]):
                 def forward_event(event: ApplyEvent) -> None:
                     self.post_message(ApplyEventReceived(event))
 
-                async with dependencies.executor_factory(
-                    profile.target.dsn(),
-                    lock_timeout_ms=lock_timeout_ms,
-                    statement_timeout_ms=statement_timeout_ms,
-                ) as executor:
-                    result = await apply_migration(
-                        bundle,
-                        executor,
-                        approve_destructive=approve_destructive,
-                        on_event=forward_event,
-                    )
+                async with self._history_io_lock:
+                    async with dependencies.executor_factory(
+                        profile.target.dsn(),
+                        lock_timeout_ms=lock_timeout_ms,
+                        statement_timeout_ms=statement_timeout_ms,
+                    ) as executor:
+                        result = await apply_migration(
+                            bundle,
+                            executor,
+                            approve_destructive=approve_destructive,
+                            on_event=forward_event,
+                        )
                 self.post_message(ApplyOperationFinished(result=result))
                 return
         except asyncio.CancelledError:
@@ -810,6 +941,8 @@ class PgsdApp(App[None]):
         else:
             self.session.apply_status = "Migration apply finished."
         self._refresh_apply_controls()
+        if operation == "apply":
+            self._start_history_load()
         message.stop()
 
     def on_cancel_apply_requested(self, message: CancelApplyRequested) -> None:
@@ -843,6 +976,8 @@ class PgsdApp(App[None]):
         self._active_view = view_id
         if view_id == "apply":
             self._ensure_apply_bundle_loaded()
+        elif view_id == "history":
+            self._start_history_load()
 
     def toggle_theme(self) -> None:
         current = self.theme
@@ -995,9 +1130,12 @@ class PgsdApp(App[None]):
             self.switch_view("apply")
             self._set_hint(":apply — executed")
             return
-        if c.startswith("rollback"):
+        if first == "rollback":
+            parts = cmd.strip().split(maxsplit=1)
+            if len(parts) > 1 and parts[1].strip():
+                self.session.selected_history_bundle_id = parts[1].strip()
             self.switch_view("history")
-            self._set_hint("rollback queued — see history")
+            self._set_hint("Rollback is not available; down.sql is notes only.")
             return
         self._set_hint("E492: not an editor command")
 
