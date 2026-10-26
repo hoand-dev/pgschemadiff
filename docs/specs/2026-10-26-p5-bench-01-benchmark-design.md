@@ -1,6 +1,6 @@
 # P5-BENCH-01 — Benchmark suite (10k objects) design
 
-**Status:** Approved by reviewer; implementation pending.
+**Status:** Approved by reviewer; implementation complete (CI `de0c099`).
 **Date:** 2026-10-26
 **Task:** `docs/TASKS.md` P5-BENCH-01 · roadmap row "P5-BENCH-01 10k benchmark"
 **Plan:** `docs/plans/2026-10-26-p5-bench-01-implementation-plan.md`
@@ -140,4 +140,13 @@ No coverage flags. Existing jobs are unchanged: they run `tests/unit` and
 
 ## Results
 
-_Filled in by the reviewer after the first green CI run._
+CI `de0c099`, `ubuntu-24.04`, PostgreSQL 18 (Testcontainers):
+
+| Benchmark | Objects | Deltas | Result |
+|---|---|---|---|
+| B2 end to end | 12,440 | 680 | inspect_source 1.393 s · inspect_target 1.402 s · diff_and_order 0.405 s · generate 0.439 s · render 0.024 s · **total 3.681 s** |
+| B1 in memory | 12,440 | 680 | min 0.778 s · mean 0.789 s · max 0.797 s |
+
+Budget (< 10 s) holds with about 2.7× headroom. Inspection is 76% of the end-to-end time.
+
+Profile of B1 (local): `order_deltas` is the largest cumulative entry (2.2 s of 2.5 s under the profiler), mostly Pydantic `__hash__` on frozen deltas; it runs twice per pipeline (`compare_schemas_with_snapshots` and again inside `assess_deltas`). Not optimized: no budget pressure. Candidate if a larger workload is needed later.

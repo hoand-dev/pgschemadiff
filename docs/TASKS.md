@@ -148,7 +148,7 @@
 | [ ] | P5-REPORT-01 | HTML diff report | backend-engineer | P2 | P3-OUT-01 | L |
 | [ ] | P5-I18N-01 | EN + VI message catalog | backend-engineer | P3 | — | M |
 | [ ] | P5-PKG-01 | `uv build` + PyPI publish workflow | devops-engineer | P1 | M3 reached | M |
-| [ ] | P5-BENCH-01 | Benchmark suite (10k objects) | devops-engineer | P1 | M3 reached | M |
+| [x] | P5-BENCH-01 | Benchmark suite (10k objects) | devops-engineer | P1 | M3 reached | M |
 | [ ] | P5-DOCS-01 | User guide + safe-migration cookbook | architect | P1 | M3 reached | L |
 
 ---

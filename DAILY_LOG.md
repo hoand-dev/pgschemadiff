@@ -453,3 +453,9 @@ NEEDS_HUMAN (open): 3 — P1-TEST-02 (PR #3 human-closed; do not recreate); bran
 - Review catches fixed: `ConnectionInfo.dsn()` did not percent-encode credentials; command palette logged full input; Textual markup escaping fails on a trailing backslash (now `Content.from_markup` variables); history worker shared the comparison's exclusive group and cancelled test-both; `ConnectionInfo` repr showed the password.
 - **M5 reached** on CI `52b6eb9` (142 PG18 integration passed). Panels without a data source are hidden (ui-design §10).
 - Next: Phase 5.
+
+---
+
+## RUN 2026-10-26-3 — Phase 5
+- P5-BENCH-01: spec + plan by Claude, implemented by opencode, reviewed. CI `de0c099`: PG18 end to end 3.68 s at 12,440 objects / 680 deltas (inspect 2.8 s); in-memory 0.79 s. `order_deltas` (Pydantic hashing, run twice) is the profiled hotspot; not optimized.
+- Next: P5-CLI-01.
