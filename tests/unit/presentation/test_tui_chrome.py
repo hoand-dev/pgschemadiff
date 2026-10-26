@@ -8,22 +8,31 @@ from typing import TYPE_CHECKING, cast
 from unittest.mock import Mock
 
 import pytest
+from rich.text import Text
 from textual.widgets import ContentSwitcher, Label, Static, Tree
 
+import pgschemadiff.application.migration.generate as migration_generator
+import pgschemadiff.presentation.tui.views.overview as overview_module
 from pgschemadiff.application.diff.compare_schemas import SchemaComparisonResult
 from pgschemadiff.domain.database import Database
-from pgschemadiff.domain.delta import DeltaSet
+from pgschemadiff.domain.delta import DeltaOp, DeltaSet
 from pgschemadiff.domain.delta.enum import ReplaceEnumLabels
+from pgschemadiff.domain.delta.materialized_view import ReplaceMaterializedView
 from pgschemadiff.domain.delta.table import AlterTableAttrs, CreateTable, DropTable
+from pgschemadiff.domain.delta.view import ReplaceView
 from pgschemadiff.domain.enum_type import EnumType
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
+from pgschemadiff.domain.materialized_view import MaterializedView
 from pgschemadiff.domain.models import ConnectionInfo, Profile
 from pgschemadiff.domain.schema import Schema
 from pgschemadiff.domain.table import Table
+from pgschemadiff.domain.view import View
 from pgschemadiff.presentation.composition import TuiDependencies
 from pgschemadiff.presentation.tui import PgsdApp
 from pgschemadiff.presentation.tui.screens.main import MainScreen
 from pgschemadiff.presentation.tui.views._common import DiffRequested
+from pgschemadiff.presentation.tui.views.diff import DiffView
+from pgschemadiff.presentation.tui.views.overview import OverviewView, _object_name
 from pgschemadiff.presentation.tui.widgets import Statusbar
 
 if TYPE_CHECKING:
@@ -134,6 +143,53 @@ def _dependencies(
         executor_factory=cast("ExecutorFactory", Mock()),
         compare=compare,
     )
+
+
+def _contextual_comparison() -> SchemaComparisonResult:
+    materialized_ref = _ref(ObjectKind.MATERIALIZED_VIEW, "daily_summary")
+    dependent_ref = _ref(ObjectKind.VIEW, "summary_view")
+    old_dependent = View(
+        ref=dependent_ref,
+        columns=(("day", "date"),),
+        definition="SELECT day FROM public.daily_summary",
+        prerequisites=(materialized_ref,),
+    )
+    new_dependent = View(
+        ref=dependent_ref,
+        columns=(("day", "date"),),
+        definition="SELECT CURRENT_DATE AS day",
+    )
+    dependent_delta = ReplaceView(
+        target=dependent_ref,
+        old_view=old_dependent,
+        new_view=new_dependent,
+    )
+    old_materialized = MaterializedView(
+        ref=materialized_ref,
+        columns=(("day", "date"),),
+        definition="SELECT CURRENT_DATE AS day",
+        dependents=(dependent_ref,),
+    )
+    new_materialized = MaterializedView(
+        ref=materialized_ref,
+        columns=(("day", "date"),),
+        definition="SELECT CURRENT_DATE + 1 AS day",
+    )
+    materialized_delta = ReplaceMaterializedView(
+        target=materialized_ref,
+        old_materialized_view=old_materialized,
+        new_materialized_view=new_materialized,
+    )
+    return SchemaComparisonResult(
+        source=Database(name="source_db"),
+        target=Database(name="target_db"),
+        deltas=DeltaSet.from_iterable((materialized_delta, dependent_delta)),
+    )
+
+
+def _plain(widget: Static) -> str:
+    rendered = widget.render()
+    return rendered.plain if isinstance(rendered, Text) else str(rendered)
 
 
 @pytest.mark.unit
@@ -261,3 +317,116 @@ async def test_header_falls_back_to_dev_when_package_metadata_is_missing(
     async with app.run_test(size=(140, 44)) as pilot:
         await pilot.pause()
         assert "pgschemadiff vdev" in str(app.query_one("#brand", Label).render())
+
+
+@pytest.mark.unit
+async def test_overview_without_comparison_shows_explicit_empty_state() -> None:
+    app = PgsdApp()
+
+    async with app.run_test(size=(140, 44)) as pilot:
+        await pilot.pause()
+
+        empty_state = app.query_one("#overview-empty", Static)
+        assert "No comparison" in _plain(empty_state)
+
+
+@pytest.mark.unit
+def test_overview_stat_mapping_covers_every_delta_operation() -> None:
+    assert getattr(overview_module, "STAT_CARD_BY_OP", None) == {
+        DeltaOp.CREATE: "added",
+        DeltaOp.ALTER: "modified",
+        DeltaOp.RENAME: "modified",
+        DeltaOp.REPLACE: "modified",
+        DeltaOp.DROP: "dropped",
+    }
+
+
+@pytest.mark.unit
+def test_overview_object_labels_include_parent_and_routine_signature() -> None:
+    table_ref = _ref(ObjectKind.TABLE, "users")
+    column_ref = ObjectRef(
+        kind=ObjectKind.COLUMN,
+        qname=QualifiedName(namespace="public", name="user_id"),
+        parent=table_ref,
+    )
+    function_ref = ObjectRef(
+        kind=ObjectKind.FUNCTION,
+        qname=QualifiedName(namespace="public", name="find_user"),
+        arg_signature=("integer", "text"),
+    )
+
+    assert _object_name(column_ref) == "users.user_id"
+    assert _object_name(function_ref) == "find_user(integer, text)"
+
+
+@pytest.mark.unit
+async def test_overview_renders_ordered_real_deltas_and_op_counts() -> None:
+    result = _comparison(schema_name="a[b]", table_name="things[b]")
+    app = PgsdApp(dependencies=_dependencies(_profile(), result))
+
+    async with app.run_test(size=(140, 44)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        app.action_test_both()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        overview = app.query_one("#overview", OverviewView)
+        assert callable(getattr(migration_generator, "assess_deltas", None))
+        expected_ids = tuple(
+            delta_id for delta_id, _assessment in migration_generator.assess_deltas(result.deltas)
+        )
+        expected_assessments = migration_generator.assess_deltas(result.deltas)
+        rows = [row for row in overview.query(".change-row") if isinstance(row, Static)]
+        assert tuple(str(row.id).removeprefix("change-") for row in rows) == expected_ids
+        header = _plain(overview.query_one(".change-head", Static))
+        assert all(
+            label in header
+            for label in ("delta ID", "op", "kind", "schema", "object", "risk", "reason")
+        )
+        for row, (delta_id, assessment) in zip(rows, expected_assessments, strict=True):
+            rendered = _plain(row)
+            assert delta_id in rendered
+            assert assessment.delta.target.qname.namespace in rendered
+            assert assessment.delta.target.qname.name in rendered
+            assert assessment.level.value in rendered
+            assert assessment.reason in rendered
+        assert "+1" in _plain(overview.query_one("#stat-added", Static))
+        assert "~2" in _plain(overview.query_one("#stat-modified", Static))
+        assert "-1" in _plain(overview.query_one("#stat-dropped", Static))
+        assert "!1" in _plain(overview.query_one("#stat-blocked", Static))
+        assert any("things[b]_added" in _plain(row) for row in rows)
+        assert any("a[b]" in _plain(row) for row in rows)
+        assert "AI review" not in "\n".join(_plain(widget) for widget in overview.query(Static))
+        assert "Dependency graph" not in "\n".join(
+            _plain(widget) for widget in overview.query(Static)
+        )
+
+        await pilot.click(f"#change-{expected_ids[0]}")
+        await pilot.pause()
+        assert app.query_one("#diff", DiffView).object_key == expected_ids[0]
+
+
+@pytest.mark.unit
+async def test_overview_and_statusbar_use_contextual_view_dependency_risk() -> None:
+    result = _contextual_comparison()
+    app = PgsdApp(dependencies=_dependencies(_profile(), result))
+
+    async with app.run_test(size=(140, 44)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        app.action_test_both()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        assessments = migration_generator.assess_deltas(result.deltas)
+        materialized = next(
+            (delta_id, assessment)
+            for delta_id, assessment in assessments
+            if isinstance(assessment.delta, ReplaceMaterializedView)
+        )
+        assert materialized[1].level.value == "dangerous"
+        assert app.query_one(Statusbar).blocked_count == 0
+        assert "2 changes" in _plain(app.query_one("#sb-counts", Label))
+        row = app.query_one(f"#change-{materialized[0]}", Static)
+        assert "dangerous" in _plain(row)

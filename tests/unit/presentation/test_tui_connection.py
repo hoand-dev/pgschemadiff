@@ -62,6 +62,7 @@ class FakeProfileLoader:
 
 class FakeSnapshot:
     def __init__(self, table_count: int) -> None:
+        self.name = "fake_database"
         self._table_count = table_count
         self.schemas = ()
         self.extensions = ()

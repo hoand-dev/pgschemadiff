@@ -16,12 +16,13 @@ from pgschemadiff.application.migration.model import (
 from pgschemadiff.application.sql_emit.emitter import SqlEmitter
 from pgschemadiff.application.sql_emit.registry import default_handlers
 from pgschemadiff.application.sql_emit.risk import (
+    RiskAssessment,
     RiskLevel,
     classify_risk,
     passes_risk_limit,
 )
 from pgschemadiff.application.sql_emit.transaction import split_units
-from pgschemadiff.domain.delta import CreateTable
+from pgschemadiff.domain.delta import CreateTable, DeltaSet
 from pgschemadiff.domain.delta.materialized_view import (
     DropMaterializedView,
     ReplaceMaterializedView,
@@ -32,7 +33,7 @@ from pgschemadiff.shared.errors import MigrationError, RiskGateError
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from pgschemadiff.domain.delta import DeltaBase, DeltaSet
+    from pgschemadiff.domain.delta import DeltaBase
     from pgschemadiff.domain.identity import ObjectRef
 
 
@@ -89,6 +90,26 @@ def _resolved_view_dependencies(
     return frozenset(resolved)
 
 
+def assess_deltas(delta_set: DeltaSet) -> tuple[tuple[str, RiskAssessment], ...]:
+    """Return generator-ordered delta IDs and contextual risk assessments."""
+    ordered_deltas = order_deltas(delta_set)
+    created_tables = frozenset(
+        delta.target for delta in delta_set if isinstance(delta, CreateTable)
+    )
+    resolved_view_dependencies = _resolved_view_dependencies(ordered_deltas)
+    return tuple(
+        (
+            f"d{index:04d}",
+            classify_risk(
+                delta,
+                created_tables=created_tables,
+                resolved_view_dependencies=resolved_view_dependencies,
+            ),
+        )
+        for index, delta in enumerate(ordered_deltas, start=1)
+    )
+
+
 def generate_migration(
     delta_set: DeltaSet,
     *,
@@ -107,20 +128,10 @@ def generate_migration(
     except ValueError as error:
         raise MigrationError(str(error)) from error
 
-    ordered_deltas = order_deltas(delta_set)
-    delta_ids = tuple(f"d{index:04d}" for index in range(1, len(ordered_deltas) + 1))
-    created_tables = frozenset(
-        delta.target for delta in delta_set if isinstance(delta, CreateTable)
-    )
-    resolved_view_dependencies = _resolved_view_dependencies(ordered_deltas)
-    risk_assessments = tuple(
-        classify_risk(
-            delta,
-            created_tables=created_tables,
-            resolved_view_dependencies=resolved_view_dependencies,
-        )
-        for delta in ordered_deltas
-    )
+    assessed_deltas = assess_deltas(delta_set)
+    delta_ids = tuple(delta_id for delta_id, _assessment in assessed_deltas)
+    risk_assessments = tuple(assessment for _delta_id, assessment in assessed_deltas)
+    ordered_deltas = DeltaSet.from_iterable(assessment.delta for assessment in risk_assessments)
 
     if not passes_risk_limit(risk_assessments, max_risk=max_risk):
         offending = tuple(

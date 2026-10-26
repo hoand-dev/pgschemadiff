@@ -254,6 +254,7 @@ class MainScreen(Screen[None]):
         """Refresh chrome from the current profile and comparison snapshots."""
         self.query_one(HeaderBar).update_profile(session.selected_profile)
         self.query_one(Statusbar).update_comparison(session.last_comparison)
+        self.query_one("#overview", OverviewView).update_comparison(session.last_comparison)
         self.update_tree(session.last_comparison)
 
     def update_tree(self, comparison: SchemaComparisonResult | None) -> None:

@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+import pgschemadiff.application.migration.generate as migration_generator
 from pgschemadiff.application.diff.dependencies import order_deltas
 from pgschemadiff.application.migration import generate_migration
 from pgschemadiff.application.sql_emit.risk import RiskAssessment, RiskLevel, classify_risk
@@ -21,10 +22,12 @@ from pgschemadiff.domain.delta import (
     DeltaBase,
     DeltaSet,
     DropSchema,
+    ReplaceMaterializedView,
     ReplaceView,
 )
 from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index, IndexKeyColumn
+from pgschemadiff.domain.materialized_view import MaterializedView
 from pgschemadiff.domain.schema import Schema
 from pgschemadiff.domain.table import Table
 from pgschemadiff.domain.view import View
@@ -85,6 +88,68 @@ def test_generation_uses_injected_metadata_and_preserves_fingerprints() -> None:
     assert plan.source_fingerprint == "source-hash"
     assert plan.target_fingerprint == "target-hash"
     assert plan.delta_set.deltas == (delta,)
+
+
+def test_assess_deltas_matches_generation_with_resolved_view_dependencies() -> None:
+    materialized_ref = ObjectRef(
+        kind=ObjectKind.MATERIALIZED_VIEW,
+        qname=QualifiedName(namespace="public", name="daily_summary"),
+    )
+    dependent_ref = ObjectRef(
+        kind=ObjectKind.VIEW,
+        qname=QualifiedName(namespace="public", name="summary_view"),
+    )
+    old_dependent = View(
+        ref=dependent_ref,
+        columns=(("day", "date"),),
+        definition="SELECT day FROM public.daily_summary",
+        prerequisites=(materialized_ref,),
+    )
+    new_dependent = View(
+        ref=dependent_ref,
+        columns=(("day", "date"),),
+        definition="SELECT CURRENT_DATE AS day",
+    )
+    dependent_delta = ReplaceView(
+        target=dependent_ref,
+        old_view=old_dependent,
+        new_view=new_dependent,
+    )
+    old_materialized = MaterializedView(
+        ref=materialized_ref,
+        columns=(("day", "date"),),
+        definition="SELECT CURRENT_DATE AS day",
+        dependents=(dependent_ref,),
+    )
+    new_materialized = MaterializedView(
+        ref=materialized_ref,
+        columns=(("day", "date"),),
+        definition="SELECT CURRENT_DATE + 1 AS day",
+    )
+    materialized_delta = ReplaceMaterializedView(
+        target=materialized_ref,
+        old_materialized_view=old_materialized,
+        new_materialized_view=new_materialized,
+    )
+    delta_set = DeltaSet.from_iterable((materialized_delta, dependent_delta))
+
+    assess_deltas = getattr(migration_generator, "assess_deltas", None)
+    assert callable(assess_deltas)
+    assessments = assess_deltas(delta_set)
+    materialized_assessment = next(
+        assessment
+        for _delta_id, assessment in assessments
+        if assessment.delta == materialized_delta
+    )
+    assert classify_risk(materialized_delta).level is RiskLevel.BLOCKED
+    assert materialized_assessment.level is RiskLevel.DANGEROUS
+
+    plan = generate_migration(
+        delta_set,
+        clock=_clock,
+        id_factory=lambda: "resolved-view-dependency",
+    )
+    assert assessments == tuple((item.delta_id, item.assessment) for item in plan.assessments)
 
 
 def test_ordering_is_deterministic_and_bundle_ids_follow_order() -> None:

@@ -10,7 +10,8 @@ from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Label
 
-from pgschemadiff.application.sql_emit.risk import RiskLevel, classify_risk
+from pgschemadiff.application.migration.generate import assess_deltas
+from pgschemadiff.application.sql_emit.risk import RiskLevel
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -59,7 +60,8 @@ class Statusbar(Widget):
             return
         self.change_count = len(comparison.deltas)
         self.blocked_count = sum(
-            classify_risk(delta).level is RiskLevel.BLOCKED for delta in comparison.deltas
+            assessment.level is RiskLevel.BLOCKED
+            for _delta_id, assessment in assess_deltas(comparison.deltas)
         )
 
     def _refresh(self) -> None:
