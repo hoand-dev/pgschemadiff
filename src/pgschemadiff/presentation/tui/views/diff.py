@@ -17,7 +17,7 @@ from pgschemadiff.presentation.tui.views._common import (
     Panel,
     SectionHeader,
     chip,
-    escape_text,
+    markup,
     op_chip,
     risk_chip,
 )
@@ -105,16 +105,17 @@ def _model_fields(model: BaseModel, depth: int = 0) -> Iterator[Static]:
 def _tree_lines(label: str, value: object, depth: int) -> Iterator[Static]:
     indent = "  " * depth
     if isinstance(value, BaseModel):
-        yield Static(f"{indent}{escape_text(label)}:", classes="tree-line")
+        yield Static(markup("$indent$label:", indent=indent, label=label), classes="tree-line")
         yield from _model_fields(value, depth + 1)
         return
     if isinstance(value, (tuple, list)) and any(isinstance(item, BaseModel) for item in value):
-        yield Static(f"{indent}{escape_text(label)}:", classes="tree-line")
+        yield Static(markup("$indent$label:", indent=indent, label=label), classes="tree-line")
         for index, item in enumerate(value):
             yield from _tree_lines(f"[{index}]", item, depth + 1)
         return
     yield Static(
-        f"{indent}{escape_text(label)}: {escape_text(_value_text(value))}", classes="tree-line"
+        markup("$indent$label: $value", indent=indent, label=label, value=_value_text(value)),
+        classes="tree-line",
     )
 
 
@@ -237,7 +238,7 @@ class DiffView(Widget):
         if selected is None:
             yield SectionHeader("Diff")
             if self.delta_id:
-                yield Static(f"Unknown delta ID: {escape_text(self.delta_id)}")
+                yield Static(markup("Unknown delta ID: $delta_id", delta_id=self.delta_id))
             else:
                 yield Static("Select a changed object from Overview.")
             return
@@ -249,19 +250,21 @@ class DiffView(Widget):
         target_object = _find_snapshot_object(comparison.target, target)
         qualified_name = _qualified_name(target)
         profile = self.profile_name or "profile"
-        crumb = escape_text(
+        crumb = (
             f"{profile} · {comparison.source.name} → {comparison.target.name} · {target.kind.value}"
         )
 
         yield SectionHeader(f"Diff: {qualified_name}", crumb)
         with VerticalScroll():
-            yield Static(
-                f"{op_chip(delta.op.name)} "
-                f"{chip(target.kind.value)} "
-                f"{risk_chip(assessment.level.value)}",
-                classes="summary",
+            summary = (
+                op_chip(delta.op.name)
+                .append(" ")
+                .append(chip(target.kind.value))
+                .append(" ")
+                .append(risk_chip(assessment.level.value))
             )
-            yield Static(f"Risk reason: {escape_text(assessment.reason)}", classes="reason")
+            yield Static(summary, classes="summary")
+            yield Static(markup("Risk reason: $reason", reason=assessment.reason), classes="reason")
             with Horizontal(classes="toolbar"), Horizontal(classes="mode-pills"):
                 for mode in _MODES:
                     classes = "pill active" if mode == self.mode else "pill"
@@ -272,7 +275,11 @@ class DiffView(Widget):
                 yield Static("next →", classes="nav", id="nav-next")
                 for index, (candidate_id, _candidate) in enumerate(assessed):
                     classes = "chip active" if candidate_id == self.delta_id else "chip"
-                    yield Static(candidate_id, classes=f"{classes} jump-chip", id=f"jump-{index}")
+                    yield Static(
+                        markup("$delta_id", delta_id=candidate_id),
+                        classes=f"{classes} jump-chip",
+                        id=f"jump-{index}",
+                    )
             if self.mode == "inline":
                 yield from self._inline(delta, source_object, target_object)
             elif self.mode == "tree":
@@ -293,13 +300,13 @@ class DiffView(Widget):
         with Horizontal(classes="sides"):
             with VerticalScroll(classes="side left"):
                 yield Static(
-                    f"SOURCE · {escape_text(comparison.source.name)} · definitions",
+                    markup("SOURCE · $database · definitions", database=comparison.source.name),
                     classes="side-head src",
                 )
                 yield from self._definition(source_object)
             with VerticalScroll(classes="side"):
                 yield Static(
-                    f"TARGET · {escape_text(comparison.target.name)} · definitions",
+                    markup("TARGET · $database · definitions", database=comparison.target.name),
                     classes="side-head tgt",
                 )
                 yield from self._definition(target_object)
@@ -309,7 +316,7 @@ class DiffView(Widget):
         if model is None:
             yield Static("absent", classes="diff-line")
             return
-        yield Static(f"{escape_text(type(model).__name__)}:", classes="diff-line")
+        yield Static(markup("$model:", model=type(model).__name__), classes="diff-line")
         yield from _model_fields(model, 1)
 
     def _inline(
@@ -324,15 +331,15 @@ class DiffView(Widget):
                 yield Static("No payload fields on this delta.", classes="diff-line")
             for line in lines:
                 if line.startswith("+ "):
-                    colour = "$success"
+                    content = markup("[$success]$line[/]", line=line)
                     classes = "diff-line diff-add"
                 elif line.startswith("- "):
-                    colour = "$error"
+                    content = markup("[$error]$line[/]", line=line)
                     classes = "diff-line diff-del"
                 else:
-                    colour = "$text"
+                    content = markup("[$text]$line[/]", line=line)
                     classes = "diff-line"
-                yield Static(f"[{colour}]{escape_text(line)}[/]", classes=classes)
+                yield Static(content, classes=classes)
 
     def _tree(
         self,

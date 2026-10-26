@@ -4,18 +4,18 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from rich.markup import escape
 from textual.containers import Horizontal, VerticalScroll
 from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import Button, DataTable, Static
 
-from pgschemadiff.presentation.tui.views._common import Panel, SectionHeader
+from pgschemadiff.presentation.tui.views._common import Panel, SectionHeader, markup
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from textual.app import ComposeResult
+    from textual.content import Content
 
     from pgschemadiff.domain.models import ConnectionInfo, Profile
     from pgschemadiff.presentation.tui.session import TuiSession
@@ -40,25 +40,32 @@ def _connection_markup(
     role: str,
     schemas: str,
     table_count: int | None,
-) -> str:
-    rows = (
-        ("host", connection.host),
-        ("port", str(connection.port)),
-        ("database", connection.database),
-        ("user", connection.user),
-        ("schemas", schemas),
-        ("SSL", "n/a"),
-        ("server version", "n/a"),
-        ("latency", "n/a"),
-        ("tables", "n/a" if table_count is None else str(table_count)),
-        ("size", "n/a"),
+) -> Content:
+    header_template = (
+        "[$secondary bold]● $role[/]  [$primary]$profile[/]"
+        if role == "source"
+        else "[$warning bold]● $role[/]  [$primary]$profile[/]"
     )
-    accent = "$secondary" if role == "source" else "$warning"
-    head = f"[{accent} bold]● {role.upper()}[/]  [$primary]{escape(profile.name)}[/]"
-    body = "\n".join(
-        f"[$text-muted]{label:<15}[/] [$text]{escape(value)}[/]" for label, value in rows
+    head = markup(header_template, role=role.upper(), profile=profile.name)
+    body = markup(
+        "[$text-muted]host           [/] [$text]$host[/]\n"
+        "[$text-muted]port           [/] [$text]$port[/]\n"
+        "[$text-muted]database       [/] [$text]$database[/]\n"
+        "[$text-muted]user           [/] [$text]$user[/]\n"
+        "[$text-muted]schemas        [/] [$text]$schemas[/]\n"
+        "[$text-muted]SSL            [/] [$text]n/a[/]\n"
+        "[$text-muted]server version [/] [$text]n/a[/]\n"
+        "[$text-muted]latency        [/] [$text]n/a[/]\n"
+        "[$text-muted]tables         [/] [$text]$tables[/]\n"
+        "[$text-muted]size           [/] [$text]n/a[/]",
+        host=connection.host,
+        port=connection.port,
+        database=connection.database,
+        user=connection.user,
+        schemas=schemas,
+        tables="n/a" if table_count is None else table_count,
     )
-    return f"{head}\n\n{body}"
+    return head.append("\n\n").append(body)
 
 
 class ConnectionView(Widget):
@@ -107,12 +114,14 @@ class ConnectionView(Widget):
     ) -> None:
         """Render current session state using only explicit non-secret fields."""
         path_text = (
-            f"Profiles read from {escape(str(profiles_path))}"
+            markup("Profiles read from $path", path=profiles_path)
             if profiles_path is not None
             else "Profile path unavailable"
         )
         self.query_one("#connection-profile-path", Static).update(path_text)
-        self.query_one("#connection-status", Static).update(escape(status) if status else " ")
+        self.query_one("#connection-status", Static).update(
+            markup("$status", status=status) if status else " "
+        )
 
         table = self.query_one("#saved-profiles", DataTable)
         table.clear()
@@ -129,7 +138,7 @@ class ConnectionView(Widget):
                 empty.update("Profiles unavailable.")
             elif not session.profiles and profiles_path is not None:
                 empty.update(
-                    f"No profiles found. Profiles are read from {escape(str(profiles_path))}."
+                    markup("No profiles found. Profiles are read from $path.", path=profiles_path)
                 )
             else:
                 empty.update("No profile selected.")
@@ -165,12 +174,13 @@ class ConnectionView(Widget):
         )
         filters = "unsupported profile filters" if selected.ignore_patterns else "none"
         self.query_one("#connection-options", Static).update(
-            "\n".join(
-                (
-                    f"[$text-muted]Include schemas[/]  [$text]{escape(schemas)}[/]",
-                    f"[$text-muted]Exclude tables[/]   [$text]{filters}[/]",
-                    f"[$text-muted]Mode[/]             [$text]{escape(selected.mode)}[/]",
-                )
+            markup(
+                "[$text-muted]Include schemas[/]  [$text]$schemas[/]\n"
+                "[$text-muted]Exclude tables[/]   [$text]$filters[/]\n"
+                "[$text-muted]Mode[/]             [$text]$mode[/]",
+                schemas=schemas,
+                filters=filters,
+                mode=selected.mode,
             )
         )
         self.query_one("#btn-test-both", Button).disabled = False

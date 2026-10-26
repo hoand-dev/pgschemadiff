@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from rich.markup import escape
 from textual.containers import Horizontal
 from textual.reactive import reactive
 from textual.widget import Widget
@@ -12,6 +11,7 @@ from textual.widgets import Label
 
 from pgschemadiff.application.migration.generate import assess_deltas
 from pgschemadiff.application.sql_emit.risk import RiskLevel
+from pgschemadiff.presentation.tui.views._common import markup
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -68,7 +68,9 @@ class Statusbar(Widget):
         try:
             self.query_one("#sb-mode", Label).update(self.mode.upper())
             self.query_one("#sb-path", Label).update(f"pgschemadiff/{self.view}")
-            self.query_one("#sb-selected", Label).update(escape(self.selected))
+            self.query_one("#sb-selected", Label).update(
+                markup("$selected", selected=self.selected)
+            )
             label = f"{self.change_count} changes"
             if self.blocked_count:
                 label = f"{self.blocked_count} blocked · {label}"

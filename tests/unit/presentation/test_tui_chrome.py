@@ -9,6 +9,8 @@ from unittest.mock import Mock
 
 import pytest
 from rich.text import Text
+from textual.content import Content
+from textual.geometry import Region
 from textual.widgets import ContentSwitcher, Label, Static, Tree
 
 import pgschemadiff.application.migration.generate as migration_generator
@@ -32,10 +34,10 @@ from pgschemadiff.domain.view import View
 from pgschemadiff.presentation.composition import TuiDependencies
 from pgschemadiff.presentation.tui import PgsdApp
 from pgschemadiff.presentation.tui.screens.main import MainScreen
-from pgschemadiff.presentation.tui.views._common import DiffRequested
+from pgschemadiff.presentation.tui.views._common import DiffRequested, SectionHeader
 from pgschemadiff.presentation.tui.views.diff import DiffView
 from pgschemadiff.presentation.tui.views.overview import OverviewView, _object_name
-from pgschemadiff.presentation.tui.widgets import Cmdbar, Statusbar
+from pgschemadiff.presentation.tui.widgets import Cmdbar, HeaderBar, Statusbar
 
 if TYPE_CHECKING:
     from textual.message import Message
@@ -245,9 +247,27 @@ def _column_comparison() -> SchemaComparisonResult:
     )
 
 
-def _plain(widget: Static) -> str:
+def _untrusted_comparison(value: str) -> SchemaComparisonResult:
+    table = Table(
+        ref=_ref(ObjectKind.TABLE, value, schema=value),
+        columns=(Column(name="id", position=1, data_type="integer", nullable=False),),
+        comment=value,
+    )
+    schema = _schema(value, tables=(table,))
+    return SchemaComparisonResult(
+        source=Database(name=value, schemas=(schema,)),
+        target=Database(name=value, schemas=(schema,)),
+        deltas=DeltaSet.from_iterable((AlterTableAttrs(target=table.ref, new_comment=value),)),
+    )
+
+
+def _plain(widget: Static | Label) -> str:
     rendered = widget.render()
-    return rendered.plain if isinstance(rendered, Text) else str(rendered)
+    return rendered.plain if isinstance(rendered, (Text, Content)) else str(rendered)
+
+
+def _label_text(label: object) -> str:
+    return label.plain if isinstance(label, (Content, Text)) else str(label)
 
 
 def _diff_text(view: DiffView) -> str:
@@ -358,13 +378,18 @@ async def test_comparison_populates_tree_header_and_status_from_session(
 
         tree = app.query_one("#schema-tree", Tree)
         schema_node = tree.root.children[0]
-        labels = [str(node.label) for group in schema_node.children for node in group.children]
-        header_version = str(app.query_one("#brand", Label).render())
-        pills = str(app.query_one("#connection-pills", Label).render())
-        counts = str(app.query_one("#sb-counts", Label).render())
+        labels = [
+            _label_text(node.label) for group in schema_node.children for node in group.children
+        ]
+        header_version = _plain(app.query_one("#brand", Label))
+        pills = _plain(app.query_one("#connection-pills", Label))
+        counts = _plain(app.query_one("#sb-counts", Label))
 
-        assert str(schema_node.label).endswith("a[b]")
-        assert {str(node.label) for node in schema_node.children} >= {"▾ tables", "▾ enums"}
+        assert _label_text(schema_node.label).endswith("a[b]")
+        assert {_label_text(node.label) for node in schema_node.children} >= {
+            "▾ tables",
+            "▾ enums",
+        }
         assert any("things[b]_added" in label and "+" in label for label in labels)
         assert any("things[b]_modified" in label and "~" in label for label in labels)
         assert any("things[b]_dropped" in label and "-" in label for label in labels)
@@ -385,7 +410,7 @@ async def test_comparison_populates_tree_header_and_status_from_session(
         )
         tree.select_node(added_node)
         await pilot.pause()
-        assert "things[b]_added" in str(app.query_one("#sb-selected", Label).render())
+        assert "things[b]_added" in _plain(app.query_one("#sb-selected", Label))
         assert app.query_one("#content", ContentSwitcher).current == "overview"
         assert posted_diffs == []
         assert not tree.show_root
@@ -417,14 +442,14 @@ async def test_mixed_create_and_drop_for_one_object_shows_modify_glyph() -> None
 
         tree = app.query_one("#schema-tree", Tree)
         schema_node = tree.root.children[0]
-        tables = next(node for node in schema_node.children if "tables" in str(node.label))
+        tables = next(node for node in schema_node.children if "tables" in _label_text(node.label))
         modified_node = next(
-            node for node in tables.children if "users_modified" in str(node.label)
+            node for node in tables.children if "users_modified" in _label_text(node.label)
         )
 
-        assert "~" in str(modified_node.label)
-        assert "+" not in str(modified_node.label)
-        assert "-" not in str(modified_node.label)
+        assert "~" in _label_text(modified_node.label)
+        assert "+" not in _label_text(modified_node.label)
+        assert "-" not in _label_text(modified_node.label)
 
 
 @pytest.mark.unit
@@ -717,3 +742,115 @@ async def test_diff_exposes_no_accept_skip_or_ai_actions() -> None:
         assert app._active_view == "diff"
         assert "accepted" not in app.query_one(Cmdbar).hint
         assert "skipped" not in app.query_one(Cmdbar).hint
+
+
+@pytest.mark.unit
+async def test_header_tree_and_statusbar_render_untrusted_values_literally() -> None:
+    values = ("C:\\", "[bold]x[/]", "$primary")
+    app = PgsdApp(dependencies=_dependencies(_profile(), _untrusted_comparison("initial")))
+
+    async with app.run_test(size=(140, 44)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        screen = cast("MainScreen", app.screen)
+        header = app.query_one(HeaderBar)
+        statusbar = app.query_one(Statusbar)
+        tree = app.query_one("#schema-tree", Tree)
+
+        for value in values:
+            base_profile = _profile()
+            selected_profile = base_profile.model_copy(
+                update={
+                    "name": value,
+                    "source": base_profile.source.model_copy(update={"database": value}),
+                    "target": base_profile.target.model_copy(update={"database": value}),
+                }
+            )
+            header.update_profile(selected_profile)
+            comparison = _untrusted_comparison(value)
+            screen.update_tree(comparison)
+            statusbar.update_comparison(comparison)
+            statusbar.update_selected(value)
+            await pilot.pause()
+
+            pills = _plain(app.query_one("#connection-pills", Label))
+            assert pills.count(value) >= 3
+            assert "tgt →" in pills
+            if value == "C:\\":
+                assert "C:\\[/b]" not in pills
+
+            schema_node = tree.root.children[0]
+            assert _label_text(schema_node.label).endswith(value)
+            table_group = next(
+                node for node in schema_node.children if "tables" in _label_text(node.label)
+            )
+            assert value in _label_text(table_group.children[0].label)
+            assert "1 changes" in _plain(app.query_one("#sb-counts", Label))
+            assert _plain(app.query_one("#sb-selected", Label)) == value
+
+
+@pytest.mark.unit
+async def test_overview_and_diff_render_untrusted_values_and_following_text() -> None:
+    values = ("C:\\", "[bold]x[/]", "$primary")
+    app = PgsdApp(dependencies=_dependencies(_profile(), _untrusted_comparison("initial")))
+
+    async with app.run_test(size=(140, 44)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        screen = cast("MainScreen", app.screen)
+        overview = app.query_one("#overview", OverviewView)
+        diff = app.query_one("#diff", DiffView)
+
+        for value in values:
+            comparison = _untrusted_comparison(value)
+            selected_profile = _profile().model_copy(update={"name": value})
+            app.session.select_profile(selected_profile)
+            app.session.last_comparison = comparison
+            screen.update_from_session(app.session)
+            diff.delta_id = "d0001"
+            await pilot.pause()
+
+            overview_row = overview.query_one(".change-row", Static)
+            row_text = _plain(overview_row)
+            assessment = migration_generator.assess_deltas(comparison.deltas)[0][1]
+            assert value in row_text
+            assert assessment.reason in row_text
+            assert "reason" in _plain(overview.query_one(".change-head", Static))
+
+            diff_text = _diff_text(diff)
+            assert value in diff_text
+            assert assessment.reason in diff_text
+            assert "Generate a plan to preview SQL" in diff_text
+
+            diff.mode = "inline"
+            await pilot.pause()
+            assert value in _diff_text(diff)
+            assert "Risk reason:" in _diff_text(diff)
+
+            diff.mode = "tree"
+            await pilot.pause()
+            assert value in _diff_text(diff)
+            assert "before definition" in _diff_text(diff)
+
+            diff.mode = "side"
+            diff.delta_id = value
+            await pilot.pause()
+            assert f"Unknown delta ID: {value}" in _diff_text(diff)
+
+
+@pytest.mark.unit
+async def test_section_header_treats_title_and_crumb_as_literal_text() -> None:
+    app = PgsdApp()
+    async with app.run_test(size=(140, 44)) as pilot:
+        await pilot.pause()
+        section = SectionHeader("C:\\", "[bold]x[/] $primary tail")
+        await app.screen.mount(section)
+        await pilot.pause()
+
+        assert _plain(section) == "C:\\   [bold]x[/] $primary tail"
+        lines = section.render_lines(Region(0, 0, section.size.width, section.size.height))
+        assert any(
+            segment.style is not None and segment.style.bold and segment.style.color is not None
+            for line in lines
+            for segment in line
+        )

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
-from rich.markup import escape
+from rich.text import Text
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import ContentSwitcher, Input, Static, Tree
@@ -21,6 +21,7 @@ from pgschemadiff.presentation.tui.views import (
     OverviewView,
     SettingsView,
 )
+from pgschemadiff.presentation.tui.views._common import markup
 from pgschemadiff.presentation.tui.widgets import (
     Cmdbar,
     HeaderBar,
@@ -116,10 +117,11 @@ def _object_key(ref: ObjectRef) -> str:
     return f"{ref.qname.namespace}.{ref.kind.value}{parent}.{ref.qname.name}{signature}"
 
 
-def _tree_label(kind: ObjectKind, name: str, status: str | None = None) -> str:
+def _tree_label(kind: ObjectKind, name: str, status: str | None = None) -> Text:
     icon = _KIND_ICONS.get(kind, "·")
     glyph = f"  {_GLYPHS[status]}" if status is not None else ""
-    return f"{icon} {escape(name)}{glyph}"
+    content = markup("$icon $name$glyph", icon=icon, name=name, glyph=glyph)
+    return Text(content.plain)
 
 
 def _snapshot_objects(

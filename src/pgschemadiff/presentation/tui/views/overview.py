@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from rich.markup import escape
 from textual.containers import Horizontal, VerticalScroll
 from textual.reactive import reactive
 from textual.widget import Widget
@@ -17,12 +16,14 @@ from pgschemadiff.presentation.tui.views._common import (
     DiffRequested,
     Panel,
     SectionHeader,
+    markup,
     op_colour,
 )
 
 if TYPE_CHECKING:
     from textual import events
     from textual.app import ComposeResult
+    from textual.content import Content
 
     from pgschemadiff.application.diff.compare_schemas import SchemaComparisonResult
     from pgschemadiff.application.sql_emit.risk import RiskAssessment
@@ -35,13 +36,24 @@ STAT_CARD_BY_OP = {
     DeltaOp.REPLACE: "modified",
     DeltaOp.DROP: "dropped",
 }
+_STAT_MARKUP = {
+    "$success": "[$text-muted]$label[/]\n[$success bold]$value[/]",
+    "$warning": "[$text-muted]$label[/]\n[$warning bold]$value[/]",
+    "$error": "[$text-muted]$label[/]\n[$error bold]$value[/]",
+}
+_OP_MARKUP = {
+    "$success": "[$success]$value[/]",
+    "$warning": "[$warning]$value[/]",
+    "$error": "[$error]$value[/]",
+    "$text-muted": "[$text-muted]$value[/]",
+}
 
 
 class _ChangeRow(Static):
     """A single clickable change row in the Overview table."""
 
-    def __init__(self, delta_id: str, markup: str) -> None:
-        super().__init__(markup, classes="change-row", id=f"change-{delta_id}")
+    def __init__(self, delta_id: str, content: Content) -> None:
+        super().__init__(content, classes="change-row", id=f"change-{delta_id}")
         self._delta_id = delta_id
 
     @property
@@ -74,9 +86,7 @@ class OverviewView(Widget):
     def compose(self) -> ComposeResult:
         comparison = self.comparison
         crumb = (
-            escape(f"{comparison.source.name} → {comparison.target.name}")
-            if comparison is not None
-            else ""
+            f"{comparison.source.name} → {comparison.target.name}" if comparison is not None else ""
         )
         yield SectionHeader("Overview", crumb)
         with VerticalScroll():
@@ -115,8 +125,8 @@ class OverviewView(Widget):
     # ----------------------------------------------------------------- helpers
 
     @staticmethod
-    def _stat(label: str, value: str, colour: str) -> str:
-        return f"[$text-muted]{escape(label)}[/]\n[{colour} bold]{escape(value)}[/]"
+    def _stat(label: str, value: str, colour: str) -> Content:
+        return markup(_STAT_MARKUP[colour], label=label, value=value)
 
     @staticmethod
     def _table_header() -> str:
@@ -126,20 +136,24 @@ class OverviewView(Widget):
         return f"[$text-muted bold]{columns}[/]"
 
     @staticmethod
-    def _row_markup(delta_id: str, assessment: RiskAssessment) -> str:
+    def _row_markup(delta_id: str, assessment: RiskAssessment) -> Content:
         delta = assessment.delta
         target = delta.target
         op = delta.op.name
         object_name = _object_name(target)
-        return (
-            f"[$text-muted]{escape(delta_id):<10}[/]"
-            f"[{op_colour(op)}]{escape(op):<10}[/]"
-            f"[$text-muted]{escape(target.kind.value):<20}[/]"
-            f"[$text-muted]{escape(target.qname.namespace):<16}[/]"
-            f"[$primary]{escape(object_name):<30}[/]"
-            f"[$text-muted]{escape(assessment.level.value):<12}[/]"
-            f"[$text-muted]{escape(assessment.reason)}[/]"
+        segments = (
+            markup("[$text-muted]$value[/]", value=f"{delta_id:<10}"),
+            markup(_OP_MARKUP[op_colour(op)], value=f"{op:<10}"),
+            markup("[$text-muted]$value[/]", value=f"{target.kind.value:<20}"),
+            markup("[$text-muted]$value[/]", value=f"{target.qname.namespace:<16}"),
+            markup("[$primary]$value[/]", value=f"{object_name:<30}"),
+            markup("[$text-muted]$value[/]", value=f"{assessment.level.value:<12}"),
+            markup("[$text-muted]$value[/]", value=assessment.reason),
         )
+        row = segments[0]
+        for segment in segments[1:]:
+            row = row.append(segment)
+        return row
 
     # ----------------------------------------------------------------- events
 

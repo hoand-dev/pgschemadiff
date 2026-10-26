@@ -12,6 +12,7 @@ import re
 
 from rich.markup import escape
 from textual.containers import Vertical
+from textual.content import Content
 from textual.message import Message
 from textual.widgets import Static
 
@@ -192,22 +193,30 @@ _RISK_COLOUR = {
 _STATUS_GLYPH = {"add": "+", "mod": "~", "del": "-", "conflict": "!"}
 _STATUS_COLOUR = {"add": "$success", "mod": "$warning", "del": "$error", "conflict": "$warning"}
 
+_CHIP_MARKUP = {
+    "$success": "[$success on $boost] $text [/]",
+    "$warning": "[$warning on $boost] $text [/]",
+    "$error": "[$error on $boost] $text [/]",
+    "$text-muted": "[$text-muted on $boost] $text [/]",
+}
 
-def chip(text: str, colour: str = "$text-muted") -> str:
+
+def markup(template: str, **values: object) -> Content:
+    """Parse trusted markup while inserting values as literal text."""
+    return Content.from_markup(template, **{name: str(value) for name, value in values.items()})
+
+
+def chip(text: str, colour: str = "$text-muted") -> Content:
     """A small inline 'chip' rendered with a boosted background."""
-    return f"[{colour} on $boost] {escape_text(text)} [/]"
+    template = _CHIP_MARKUP.get(colour, _CHIP_MARKUP["$text-muted"])
+    return markup(template, text=text)
 
 
-def escape_text(text: str) -> str:
-    """Escape every opening bracket for Textual/Rich markup contexts."""
-    return text.replace("[", r"\[")
-
-
-def op_chip(op: str) -> str:
+def op_chip(op: str) -> Content:
     return chip(op, _OP_COLOUR.get(op, "$text-muted"))
 
 
-def risk_chip(risk: str) -> str:
+def risk_chip(risk: str) -> Content:
     return chip(risk, _RISK_COLOUR.get(risk, "$text-muted"))
 
 
@@ -244,10 +253,13 @@ class SectionHeader(Static):
     """
 
     def __init__(self, title: str, crumb: str = "") -> None:
-        markup = f"[$primary bold]{escape_text(title)}[/]"
         if crumb:
-            markup += f"   [$text-muted]{crumb}[/]"
-        super().__init__(markup)
+            content = markup(
+                "[$primary bold]$title[/]   [$text-muted]$crumb[/]", title=title, crumb=crumb
+            )
+        else:
+            content = markup("[$primary bold]$title[/]", title=title)
+        super().__init__(content)
 
 
 class Panel(Vertical):

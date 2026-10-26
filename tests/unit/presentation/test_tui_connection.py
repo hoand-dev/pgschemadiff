@@ -8,6 +8,7 @@ import pytest
 from psycopg import OperationalError
 from psycopg_pool import PoolTimeout
 from rich.text import Text
+from textual.content import Content
 from textual.widgets import DataTable, Static
 
 from pgschemadiff.application.diff.compare_schemas import SchemaComparisonResult
@@ -135,14 +136,14 @@ def dependencies(
 
 def plain(app: PgsdApp, selector: str) -> str:
     rendered = app.query_one(selector, Static).render()
-    return rendered.plain if isinstance(rendered, Text) else str(rendered)
+    return rendered.plain if isinstance(rendered, (Text, Content)) else str(rendered)
 
 
 def rendered_statics(app: PgsdApp) -> str:
     values = []
     for widget in app.query(Static):
         rendered = widget.render()
-        values.append(rendered.plain if isinstance(rendered, Text) else str(rendered))
+        values.append(rendered.plain if isinstance(rendered, (Text, Content)) else str(rendered))
     return "\n".join(values)
 
 
@@ -151,7 +152,7 @@ def rendered_connection_statics(app: PgsdApp) -> str:
     values = []
     for widget in view.query(Static):
         rendered = widget.render()
-        values.append(rendered.plain if isinstance(rendered, Text) else str(rendered))
+        values.append(rendered.plain if isinstance(rendered, (Text, Content)) else str(rendered))
     return "\n".join(values)
 
 
@@ -426,3 +427,33 @@ async def test_bare_app_still_mounts_without_dependencies() -> None:
 
         assert app.dependencies is None
         assert app.query_one("#connection")
+
+
+@pytest.mark.unit
+async def test_connection_view_renders_profile_status_and_path_as_literal_text(
+    tmp_path: Path,
+) -> None:
+    values = ("C:\\", "[bold]x[/]", "$primary")
+    path = tmp_path / "profiles [bold]x[/] $primary.yaml"
+    deps, _ = dependencies([profile("initial")], path=path)
+    app = PgsdApp(dependencies=deps)
+
+    async with app.run_test(size=(140, 44)) as pilot:
+        await wait_for_workers(app, pilot)
+        view = app.query_one("#connection", ConnectionView)
+
+        for value in values:
+            app.session.set_profiles([profile(value)])
+            view.update_session(app.session, profiles_path=path, status=value)
+            await pilot.pause()
+
+            source = plain(app, "#connection-source")
+            assert value in source
+            assert "port" in source
+            assert "database" in source
+            if value == "C:\\":
+                assert "C:\\[/]" not in source
+            assert plain(app, "#connection-status") == value
+
+        profile_path = plain(app, "#connection-profile-path")
+        assert profile_path == f"Profiles read from {path}"

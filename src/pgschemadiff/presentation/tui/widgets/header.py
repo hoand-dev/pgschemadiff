@@ -5,14 +5,16 @@ from __future__ import annotations
 from importlib import metadata
 from typing import TYPE_CHECKING
 
-from rich.markup import escape
 from textual.containers import Horizontal
 from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Label
 
+from pgschemadiff.presentation.tui.views._common import markup
+
 if TYPE_CHECKING:
     from textual.app import ComposeResult
+    from textual.content import Content
 
     from pgschemadiff.domain.models import Profile
 
@@ -49,7 +51,7 @@ class HeaderBar(Widget):
     def compose(self) -> ComposeResult:
         with Horizontal():
             yield Label(
-                f"◈ pgschemadiff v{escape(_package_version())}",
+                markup("◈ pgschemadiff v$version", version=_package_version()),
                 id="brand",
                 classes="brand",
             )
@@ -60,13 +62,13 @@ class HeaderBar(Widget):
     def update_profile(self, profile: Profile | None) -> None:
         """Render only selected profile name and database labels."""
         if profile is None:
-            label = "src → —  tgt → —"
+            label: str | Content = "src → —  tgt → —"
         else:
-            profile_name = escape(profile.name)
-            source = escape(profile.source.database)
-            target = escape(profile.target.database)
-            label = (
-                f"src → [b]{profile_name} / {source}[/b]  tgt → [b]{profile_name} / {target}[/b]"
+            label = markup(
+                "src → [b]$profile / $source[/b]  tgt → [b]$profile / $target[/b]",
+                profile=profile.name,
+                source=profile.source.database,
+                target=profile.target.database,
             )
         self.query_one("#connection-pills", Label).update(label)
 
