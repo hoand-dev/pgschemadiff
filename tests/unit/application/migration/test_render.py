@@ -104,7 +104,11 @@ def test_target_label_is_public_and_formats_nested_objects() -> None:
 def test_render_bundle_snapshots_all_five_artifacts(
     realistic: bool,
     snapshot: SnapshotAssertion,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Pin tool_version so a release bump does not rewrite the snapshots;
+    # the real version is asserted separately.
+    monkeypatch.setattr(migration_render, "version", lambda _name: "0.0.0")
     bundle = render_bundle(_plan(realistic=realistic))
 
     assert bundle.dir_name == "20261024_123045_diff"
