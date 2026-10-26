@@ -273,11 +273,16 @@ swap per view. **Do not** add mock data anywhere outside `_mock.py`.
 | [x] | P4-TUI-07 | HistoryView — run list + detail + timeline |
 | [x] | P4-TUI-08 | SettingsView with live config.toml preview |
 
-All seven views are implemented against `presentation/tui/_mock.py` (§8).
-They render the full design and are fully interactive (clickable change rows,
-diff jump chips, mode toggles, the apply worker, etc.) but are **not yet wired
-to real `application/` use cases** — that swap lands incrementally as Phase 1-3
-data arrives. The mock import in each view is the single seam to replace.
+All seven views are wired to real `application/` use cases (2026-10-26, spec
+`docs/specs/2026-10-26-p4-tui-wiring-design.md`). `_mock.py` stays on disk for
+demo/test fixtures only; a unit test forbids live modules from importing it.
+
+Design elements that wait for a real data source and are hidden in live mode:
+AI review panel and modal, dependency graph, lock and duration estimates,
+row counts, replica-lag / free-space / backup preflight probes, accept/skip
+per delta, pause/continue during apply, executable rollback, and editable
+settings (fonts, keymap, telemetry, `config.toml` preview). They return when
+the backend provides the data.
 
 ## 11. Pitfalls / decisions worth knowing
 

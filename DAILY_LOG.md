@@ -444,3 +444,12 @@ NEEDS_HUMAN (open): 3 — P1-TEST-02 (PR #3 human-closed; do not recreate); bran
 - **M4 reached** on CI `c8bb1c9`: 136 PG18 integration passed.
 - Known limits: policy expressions referencing other relations and composite attribute type changes are not dependency-ordered; views depending on altered/dropped columns are not rebuilt.
 - Next: TD-RISK-02, then Phase 4 TUI wiring.
+
+---
+
+## RUN 2026-10-26-2 — Phase 4 TUI wiring
+- TD-RISK-02 done (table owner change DANGEROUS). `pgsd inspect` no longer prints driver/inspection text.
+- Spec `docs/specs/2026-10-26-p4-tui-wiring-design.md` by opencode, reviewed; 12 slices delivered and CI-verified.
+- Review catches fixed: `ConnectionInfo.dsn()` did not percent-encode credentials; command palette logged full input; Textual markup escaping fails on a trailing backslash (now `Content.from_markup` variables); history worker shared the comparison's exclusive group and cancelled test-both; `ConnectionInfo` repr showed the password.
+- **M5 reached** on CI `52b6eb9` (142 PG18 integration passed). Panels without a data source are hidden (ui-design §10).
+- Next: Phase 5.

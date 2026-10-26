@@ -126,18 +126,19 @@
 |---|---|---|---|---|---|---|
 | [x] | P4-UX-01 | Import user UI design → `docs/ui-design.md` (+ bundle in `docs/ui-design/reference/`) | tui-engineer | P0 | user input | S |
 | [x] | P4-TUI-01 | TUI app shell — Catppuccin theme, vim chord dispatcher, command palette, help modal, 7 placeholder views, `pgsd tui` entry | tui-engineer | P0 | P4-UX-01 | L |
-| [ ] | P4-TUI-02 | ConnectionView wired to real source/target profiles | tui-engineer | P1 | P1-INFRA-05 | M |
-| [ ] | P4-TUI-03 | OverviewView wired to `application/diff` | tui-engineer | P1 | P2-DIFF-01 | M |
-| [ ] | P4-TUI-04 | DiffView (side / inline / tree modes) | tui-engineer | P1 | P2-DIFF-02 | L |
-| [ ] | P4-TUI-05 | MigrationView wired to `application/sql_emit` | tui-engineer | P1 | P3-OUT-01 | M |
-| [ ] | P4-TUI-06 | ApplyView with progress worker + log stream | tui-engineer | P1 | P3-APPLY-01 | L |
-| [ ] | P4-TUI-07 | HistoryView reading the migration manifest store | tui-engineer | P1 | P3-OUT-01 | M |
-| [ ] | P4-TUI-08 | SettingsView with live config.toml preview | tui-engineer | P2 | P4-TUI-01 | M |
+| [x] | P4-TUI-02 | ConnectionView wired to real source/target profiles | tui-engineer | P1 | P1-INFRA-05 | M |
+| [x] | P4-TUI-03 | OverviewView wired to `application/diff` | tui-engineer | P1 | P2-DIFF-01 | M |
+| [x] | P4-TUI-04 | DiffView (side / inline / tree modes) | tui-engineer | P1 | P2-DIFF-02 | L |
+| [x] | P4-TUI-05 | MigrationView wired to `application/sql_emit` | tui-engineer | P1 | P3-OUT-01 | M |
+| [x] | P4-TUI-06 | ApplyView with progress worker + log stream | tui-engineer | P1 | P3-APPLY-01 | L |
+| [x] | P4-TUI-07 | HistoryView reading the migration manifest store | tui-engineer | P1 | P3-OUT-01 | M |
+| [x] | P4-TUI-08 | SettingsView with live config.toml preview | tui-engineer | P2 | P4-TUI-01 | M |
 
-> **Note (P4-TUI-02…08):** all seven views are implemented and interactive on
-> `presentation/tui/_mock.py` (see `docs/ui-design.md` §10). These boxes stay
-> unchecked because their task scope is wiring views to real use cases; the
-> required Phase 1-3 data is not fully available yet. The design is provided.
+> **Note (P4-TUI-02…08):** done 2026-10-26 per
+> `docs/specs/2026-10-26-p4-tui-wiring-design.md` (CI `52b6eb9`). All views read
+> real profiles, comparisons, migration bundles, apply events and target
+> history. Panels without a real data source (AI review, dependency graph,
+> lock/time estimates, preflight probes, editable settings) are hidden.
 
 ## Phase 5 — Production readiness
 

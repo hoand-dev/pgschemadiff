@@ -21,7 +21,7 @@ Goal: inspect two Postgres DBs, show schema diff, generate safe migration SQL.
 - Phase 2 complete: `pgsd diff`, comparators, rename/ignore rules, dependencies, topo-sort, and tests done. M2 reached at unit level; Docker integration not run locally.
 - P3-RISK-01, P3-SQL-01..06, P3-TX-01, P3-OUT-01, P3-APPLY-01, P3-CLI-01 done; `pgsd generate` and `pgsd apply` shipped; TD-RISK-01, P3-TEST-01 and P3-TEST-02 done. **M3 reached 2026-10-26** (CI `aeef321`). TD-INSPECT-01, TD-INSPECT-02, TD-EMIT-01 done; CI `0c9536b`: PG18 corpus 48 passed, 0 xfail.
 - Phase 3b: P3-MVPB-01..10 done (views, matviews, functions, procedures, sequences, enums, triggers, RLS policies, composite and domain types). **M4 reached 2026-10-26** (CI `c8bb1c9`: 136 PG18 integration passed).
-- Phase 4 TUI shell and seven views run on mock data; not wired to real use cases.
+- Phase 4: P4-TUI-02..08 done; every TUI view reads real profiles, comparisons, bundles, apply events and target history. **M5 reached 2026-10-26** (CI `52b6eb9`: 142 PG18 integration passed).
 
 ---
 
@@ -36,10 +36,10 @@ Goal: inspect two Postgres DBs, show schema diff, generate safe migration SQL.
 ---
 
 ## Execution Queue
-1. Phase 4 TUI wiring (P4-TUI-02..08) per upcoming spec `docs/specs/2026-10-26-p4-tui-wiring-design.md`; views still run on mock data. TD-RISK-02 done (CI `c6b0d1b`).
+1. Phase 5 production readiness (P5-CLI-01, P5-PKG-01, P5-BENCH-01, P5-REPORT-01, P5-I18N-01).
 
 ## Next Actions
-- Review the Phase 4 TUI wiring spec.
+- Pick the first Phase 5 task (P5-BENCH-01 or P5-PKG-01).
 
 ## Ready To Merge
 - None.

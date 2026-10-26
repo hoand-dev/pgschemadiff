@@ -140,7 +140,7 @@ per-type comparators per ADR-0006; explicit-annotation renames per ADR-0007.
 | P3-TEST-02 | Emitter snapshot corpus | done | P3-SQL-02..05 | — | 0 | high |
 
 ## Phase 4 — TUI
-P4-UX-01 and P4-TUI-01 DONE. The shell and all seven views are implemented on mock data (`presentation/tui/_mock.py`); P4-TUI-02..08 real-use-case wiring remains TODO.
+P4-UX-01, P4-TUI-01..08 DONE. All seven views are wired to real use cases (spec `docs/specs/2026-10-26-p4-tui-wiring-design.md`, CI `52b6eb9`). **M5 reached 2026-10-26.**
 
 ---
 
