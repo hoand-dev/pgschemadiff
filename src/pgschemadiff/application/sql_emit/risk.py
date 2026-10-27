@@ -461,7 +461,8 @@ def classify_risk(  # noqa: PLR0912, PLR0915
         else:
             level, reason = (
                 RiskLevel.WARNING,
-                "Index creation may block because execution mode is not specified.",
+                "Builds the index CONCURRENTLY outside a transaction; it waits for running "
+                "transactions and can leave an INVALID index if interrupted.",
             )
     elif isinstance(delta, DropIndex):
         if delta.index.unique:
