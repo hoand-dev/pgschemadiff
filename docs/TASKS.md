@@ -150,7 +150,7 @@
 | [x] | P5-PKG-01 | `uv build` + PyPI publish workflow | devops-engineer | P1 | M3 reached | M |
 | [x] | P5-BENCH-01 | Benchmark suite (10k objects) | devops-engineer | P1 | M3 reached | M |
 | [x] | P5-DOCS-01 | User guide + safe-migration cookbook | architect | P1 | M3 reached | L |
-| [ ] | P5-SAFE-01 | Refuse apply when the database is not the bundle's source state (fingerprint guard) | backend-engineer | P1 | P5-REPORT-01 | M |
+| [x] | P5-SAFE-01 | Refuse apply when the database is not the bundle's source state (fingerprint guard) | backend-engineer | P1 | P5-REPORT-01 | M |
 
 ---
 

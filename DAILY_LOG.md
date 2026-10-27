@@ -464,4 +464,5 @@ NEEDS_HUMAN (open): 3 — P1-TEST-02 (PR #3 human-closed; do not recreate); bran
 - **Bug fixed** `04fb3bb`: the TUI compared current=profile.source but applied/dry-ran/read history on profile.target, so a bundle would run inverse changes on the wrong database. Now current=profile.target.
 - P5-REPORT-01 (CI `2003b75`): `pgsd diff --format html` and `pgsd report BUNDLE_DIR`; stdlib renderer, everything escaped, no scripts, CSP blocks external resources; database names only.
 - Review: shared review venv lost its `py.typed` files mid-run (mypy 461 errors); rebuilt from lock. Briefs now forbid touching Python environments.
-- Next: P5-SAFE-01 (bundle format 2 with source/target fingerprints; apply refuses on mismatch).
+- P5-SAFE-01 (CI `c549bd2`): bundle format 2 with source/target fingerprints and schema scope; apply and dry run re-inspect and refuse on mismatch (exit 2, CLI `--skip-source-check`); post-apply verification line. First push broke 118 application-level integration tests that render plans without fingerprints (not runnable locally); fixed with a placeholder-fingerprint helper.
+- Next: P5-I18N-01.

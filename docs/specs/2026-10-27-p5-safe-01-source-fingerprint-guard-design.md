@@ -1,6 +1,6 @@
 # P5-SAFE-01 — Source fingerprint guard design
 
-**Status:** Approved by reviewer; implementation pending.
+**Status:** Approved by reviewer; implementation complete (CI `c549bd2`). Added outcome `skipped_applied` for an already-applied bundle.
 **Date:** 2026-10-27
 **Task:** new `docs/TASKS.md` row P5-SAFE-01 "Refuse apply when the database is not the bundle's source state"
 **Plan:** `docs/plans/2026-10-27-p5-safe-01-implementation-plan.md`
