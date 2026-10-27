@@ -460,4 +460,6 @@ NEEDS_HUMAN (open): 3 — P1-TEST-02 (PR #3 human-closed; do not recreate); bran
 - P5-BENCH-01: spec + plan by Claude, implemented by opencode, reviewed. CI `de0c099`: PG18 end to end 3.68 s at 12,440 objects / 680 deltas (inspect 2.8 s); in-memory 0.79 s. `order_deltas` (Pydantic hashing, run twice) is the profiled hotspot; not optimized.
 - P5-CLI-01 (CI `e4f3b6f`): progress and color on stderr TTY only, `diff --format summary` and `--max-risk` gate, `generate` rejects `--max-risk blocked` and missing `--out` before connecting, `--renames` errors exit 2, exit codes 0-3 documented; TUI no longer imports private CLI helpers. Review fix: skip `assess_deltas` for plain JSON diff.
 - P5-PKG-01 (CI `bcb6b5d`): version 0.1.0 single-sourced, `Build package` CI job (build, twine check, content check, clean-venv smoke), `release.yml` (tag to PyPI, dispatch to TestPyPI, trusted publishing). Bundle snapshots now pin `tool_version`. Publish waits on human setup.
-- Next: P5-DOCS-01.
+- P5-DOCS-01 (CI `afd1391`): `docs/guide/` (getting started, CLI, TUI, bundles, risk, limitations) and nine cookbook recipes executed on PG18 (diff summary, up.sql excerpts, apply, idempotent re-diff).
+- **Bug fixed** `04fb3bb`: the TUI compared current=profile.source but applied/dry-ran/read history on profile.target, so a bundle would run inverse changes on the wrong database. Now current=profile.target.
+- Next: P5-REPORT-01.

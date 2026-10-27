@@ -273,7 +273,7 @@ Frozen domain models, phân tầng rõ, import-linter, mypy strict, lossless del
 | [ ] **P5-I18N-01 EN/VI** | M · ~0,5 ngày | Message keys → catalog EN/VI; test fallback và không hard-code message ngoài scope. |
 | [x] **P5-PKG-01 Build/release** | M · ~0,5 ngày; M3 | Source → wheel/sdist/release workflow; `uv build`, test catalog resources và `pgsd` entry point. |
 | [x] **P5-BENCH-01 10k benchmark** | M · ~0,5 ngày; M3 | Fixture 10k objects → inspect/diff/generate benchmark; mục tiêu dưới 10 giây, profile trước khi optimize. |
-| [ ] **P5-DOCS-01 User guide/cookbook** | L · 1–2 ngày; hành vi ổn định | Implemented behavior → CLI guide, safe migration và rollback limitations; ví dụ phải chạy được. |
+| [x] **P5-DOCS-01 User guide/cookbook** | L · 1–2 ngày; hành vi ổn định | Implemented behavior → CLI guide, safe migration và rollback limitations; ví dụ phải chạy được. |
 | [ ] **OPS-03 Branch protection** | S · human action | Branch policy → linear history/review/checks bắt buộc; xác nhận GitHub settings, không auto-merge. |
 
 ## 5. Refactor, technical debt, performance và tests

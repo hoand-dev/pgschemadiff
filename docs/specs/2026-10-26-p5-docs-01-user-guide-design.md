@@ -1,6 +1,6 @@
 # P5-DOCS-01 — User guide and safe-migration cookbook design
 
-**Status:** Approved by reviewer; implementation pending.
+**Status:** Approved by reviewer; implementation complete (CI `afd1391`).
 **Date:** 2026-10-26
 **Task:** `docs/TASKS.md` P5-DOCS-01 "User guide + safe-migration cookbook" ·
 roadmap row "Implemented behavior → CLI guide, safe migration và rollback limitations; ví dụ phải chạy được"

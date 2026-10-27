@@ -149,7 +149,7 @@
 | [ ] | P5-I18N-01 | EN + VI message catalog | backend-engineer | P3 | — | M |
 | [x] | P5-PKG-01 | `uv build` + PyPI publish workflow | devops-engineer | P1 | M3 reached | M |
 | [x] | P5-BENCH-01 | Benchmark suite (10k objects) | devops-engineer | P1 | M3 reached | M |
-| [ ] | P5-DOCS-01 | User guide + safe-migration cookbook | architect | P1 | M3 reached | L |
+| [x] | P5-DOCS-01 | User guide + safe-migration cookbook | architect | P1 | M3 reached | L |
 
 ---
 
