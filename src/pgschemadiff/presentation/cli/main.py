@@ -18,6 +18,7 @@ from pgschemadiff.presentation.cli.commands.apply import apply_cmd
 from pgschemadiff.presentation.cli.commands.diff import diff_cmd
 from pgschemadiff.presentation.cli.commands.generate import generate_cmd
 from pgschemadiff.presentation.cli.commands.inspect import inspect_cmd
+from pgschemadiff.presentation.cli.commands.report import report_cmd
 from pgschemadiff.presentation.cli.commands.tui import launch as launch_tui
 from pgschemadiff.shared.logging import configure_logging
 
@@ -101,10 +102,10 @@ def diff(
         "--renames",
         help="YAML or TOML file with explicit rename annotations.",
     ),
-    output_format: Literal["json", "summary"] = typer.Option(
+    output_format: Literal["json", "summary", "html"] = typer.Option(
         "json",
         "--format",
-        help="Diff output format.",
+        help="Diff output format (json, summary, or html).",
     ),
     max_risk: RiskLevel | None = typer.Option(  # noqa: B008
         None,
@@ -160,6 +161,23 @@ def generate(
         max_risk=max_risk,
         name=name,
     )
+
+
+@app.command("report")
+def report(
+    bundle_dir: Path = typer.Argument(  # noqa: B008
+        ...,
+        metavar="BUNDLE_DIR",
+        help="Directory containing a validated migration bundle.",
+    ),
+    out_file: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--out",
+        help="Write the HTML report to a new file instead of stdout.",
+    ),
+) -> None:
+    """Render a saved migration bundle as an offline HTML report."""
+    report_cmd(bundle_dir, out_file)
 
 
 @app.command("apply")

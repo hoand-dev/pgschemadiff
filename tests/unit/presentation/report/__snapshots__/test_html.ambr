@@ -1,0 +1,162 @@
+# serializer version: 1
+# name: test_bundle_report_matches_snapshot
+  '''
+  <!doctype html>
+  <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>pgschemadiff report</title><style>
+      :root{
+        color-scheme:light dark;--bg:#f5f7fa;--panel:#fff;--ink:#17202a;
+        --muted:#56616f;--line:#d8dee7;--accent:#244d70
+      }
+      @media(prefers-color-scheme:dark){:root{
+        --bg:#111820;--panel:#1a2530;--ink:#e8edf2;--muted:#a9b4c0;
+        --line:#34414e;--accent:#9fc7e8
+      }}
+      *{box-sizing:border-box}
+      body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 system-ui,sans-serif}
+      main{max-width:1100px;margin:0 auto;padding:clamp(1rem,4vw,3rem)}
+      header,section{margin-bottom:2rem}
+      h1{font-size:clamp(2rem,5vw,3.5rem);line-height:1.05;margin:.2rem 0}
+      h2{font-size:1.35rem;margin-bottom:.8rem}
+      header p,.muted{color:var(--muted)}
+      .databases span{display:inline-block;margin-left:1.2rem;color:var(--muted)}
+      .databases span{font-size:.8rem;text-transform:uppercase;letter-spacing:.08em}
+      dl{display:grid;grid-template-columns:max-content 1fr;gap:.35rem 1rem}
+      dt{color:var(--muted)}dd{margin:0;overflow-wrap:anywhere}
+      .risk-totals{display:flex;flex-wrap:wrap;gap:.6rem;list-style:none;padding:0}
+      .risk-totals li{display:flex;gap:.45rem;align-items:center;background:var(--panel)}
+      .risk-totals li{border:1px solid var(--line);border-radius:.5rem;padding:.4rem .65rem}
+      .badge{display:inline-block;border-radius:999px;padding:.08rem .5rem;font-size:.82rem}
+      .badge{font-weight:700;text-transform:capitalize;background:#e1e8ef;color:#17202a}
+      .risk-warning{background:#fff0bd;color:#4b3800}
+      .risk-dangerous{background:#f5d7b5;color:#542700}
+      .risk-destructive,.risk-blocked{background:#f2c9ce;color:#5b1019}
+      .risk-none{background:#e1e8ef;color:#17202a}
+      table{border-collapse:collapse;width:100%;background:var(--panel)}
+      th,td{text-align:left;vertical-align:top;padding:.65rem .75rem}
+      th,td{border-bottom:1px solid var(--line)}
+      th{color:var(--muted);font-size:.82rem;text-transform:uppercase;letter-spacing:.04em}
+      .table-scroll{overflow-x:auto}
+      .empty{border-left:3px solid var(--accent);padding:.6rem 1rem;background:var(--panel)}
+      pre{overflow:auto;background:var(--panel);border:1px solid var(--line)}
+      pre{border-radius:.5rem;padding:1rem;line-height:1.45}
+      .line-number{display:inline-block;min-width:3ch;margin-right:1rem;color:var(--muted)}
+      .line-number{text-align:right}.sql-line{display:inline-block;min-width:100%}
+      footer{border-top:1px solid var(--line);padding-top:.8rem;color:var(--muted)}
+      footer{font-size:.9rem}
+      @media print{
+        body{background:#fff;color:#111;font-size:10pt}main{max-width:none;padding:0}
+        header,section,pre,table{break-inside:avoid}
+        .badge{border:1px solid #777;background:#fff!important;color:#111!important}
+      }
+      </style></head><body><main><header><h1>pgschemadiff report</h1><p>Version 0.1.0 · Generated 2026-10-27T01:02:03+00:00</p><dl><dt>Bundle ID</dt><dd>bundle-123</dd><dt>Slug</dt><dd>release-1</dd><dt>Created</dt><dd>2026-10-26T12:00:00Z</dd><dt>Delta count</dt><dd>1</dd><dt>Overall max risk</dt><dd><span class="badge risk-dangerous">dangerous</span></dd><dt>up.sql SHA-256</dt><dd><code>bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb</code></dd></dl></header><section><h2>Risk totals</h2><ul class="risk-totals"><li><span class="badge risk-safe">safe</span> <span>0</span></li><li><span class="badge risk-warning">warning</span> <span>0</span></li><li><span class="badge risk-dangerous">dangerous</span> <span>1</span></li><li><span class="badge risk-destructive">destructive</span> <span>0</span></li><li><span class="badge risk-blocked">blocked</span> <span>0</span></li></ul></section><section><h2>Changes</h2><div class="table-scroll"><table><thead><tr><th scope="col">ID</th><th scope="col">Level</th><th scope="col">Kind</th><th scope="col">Target</th><th scope="col">Reason</th><th scope="col">Reversible</th><th scope="col">Reason</th></tr></thead><tbody><tr><td>d0001</td><td><span class="badge risk-dangerous">dangerous</span></td><td>create_schema</td><td>public.app</td><td>Creates schema.</td><td>no</td><td>No inverse SQL is generated.</td></tr></tbody></table></div></section><section><h2>Execution units</h2><div class="table-scroll"><table><thead><tr><th scope="col">Unit</th><th scope="col">Execution</th><th scope="col">Max risk</th><th scope="col">Delta IDs</th><th scope="col">up.sql lines</th></tr></thead><tbody><tr><td>1</td><td>transactional</td><td><span class="badge risk-dangerous">dangerous</span></td><td>d0001</td><td>6-6</td></tr></tbody></table></div><section class="unit-sql"><h3>Unit 1 SQL</h3><pre><code><span class="sql-line"><span class="line-number">6</span> CREATE SCHEMA app</span>
+  <span class="sql-line"><span class="line-number">7</span> ;</span>
+  </code></pre></section></section><footer><p>Risk levels are static classifications, not runtime estimates. <code>down.sql</code> is notes only; no automatic rollback.</p></main></body></html>
+  
+  '''
+# ---
+# name: test_empty_comparison_report_matches_snapshot
+  '''
+  <!doctype html>
+  <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>pgschemadiff report</title><style>
+      :root{
+        color-scheme:light dark;--bg:#f5f7fa;--panel:#fff;--ink:#17202a;
+        --muted:#56616f;--line:#d8dee7;--accent:#244d70
+      }
+      @media(prefers-color-scheme:dark){:root{
+        --bg:#111820;--panel:#1a2530;--ink:#e8edf2;--muted:#a9b4c0;
+        --line:#34414e;--accent:#9fc7e8
+      }}
+      *{box-sizing:border-box}
+      body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 system-ui,sans-serif}
+      main{max-width:1100px;margin:0 auto;padding:clamp(1rem,4vw,3rem)}
+      header,section{margin-bottom:2rem}
+      h1{font-size:clamp(2rem,5vw,3.5rem);line-height:1.05;margin:.2rem 0}
+      h2{font-size:1.35rem;margin-bottom:.8rem}
+      header p,.muted{color:var(--muted)}
+      .databases span{display:inline-block;margin-left:1.2rem;color:var(--muted)}
+      .databases span{font-size:.8rem;text-transform:uppercase;letter-spacing:.08em}
+      dl{display:grid;grid-template-columns:max-content 1fr;gap:.35rem 1rem}
+      dt{color:var(--muted)}dd{margin:0;overflow-wrap:anywhere}
+      .risk-totals{display:flex;flex-wrap:wrap;gap:.6rem;list-style:none;padding:0}
+      .risk-totals li{display:flex;gap:.45rem;align-items:center;background:var(--panel)}
+      .risk-totals li{border:1px solid var(--line);border-radius:.5rem;padding:.4rem .65rem}
+      .badge{display:inline-block;border-radius:999px;padding:.08rem .5rem;font-size:.82rem}
+      .badge{font-weight:700;text-transform:capitalize;background:#e1e8ef;color:#17202a}
+      .risk-warning{background:#fff0bd;color:#4b3800}
+      .risk-dangerous{background:#f5d7b5;color:#542700}
+      .risk-destructive,.risk-blocked{background:#f2c9ce;color:#5b1019}
+      .risk-none{background:#e1e8ef;color:#17202a}
+      table{border-collapse:collapse;width:100%;background:var(--panel)}
+      th,td{text-align:left;vertical-align:top;padding:.65rem .75rem}
+      th,td{border-bottom:1px solid var(--line)}
+      th{color:var(--muted);font-size:.82rem;text-transform:uppercase;letter-spacing:.04em}
+      .table-scroll{overflow-x:auto}
+      .empty{border-left:3px solid var(--accent);padding:.6rem 1rem;background:var(--panel)}
+      pre{overflow:auto;background:var(--panel);border:1px solid var(--line)}
+      pre{border-radius:.5rem;padding:1rem;line-height:1.45}
+      .line-number{display:inline-block;min-width:3ch;margin-right:1rem;color:var(--muted)}
+      .line-number{text-align:right}.sql-line{display:inline-block;min-width:100%}
+      footer{border-top:1px solid var(--line);padding-top:.8rem;color:var(--muted)}
+      footer{font-size:.9rem}
+      @media print{
+        body{background:#fff;color:#111;font-size:10pt}main{max-width:none;padding:0}
+        header,section,pre,table{break-inside:avoid}
+        .badge{border:1px solid #777;background:#fff!important;color:#111!important}
+      }
+      </style></head><body><main><header><h1>pgschemadiff report</h1><p>Version 0.1.0 · Generated 2026-10-27T01:02:03+00:00</p><p class="databases"><span>Current</span> current<span>Desired</span> desired</p></header><section><h2>Risk totals</h2><ul class="risk-totals"><li><span class="badge risk-safe">safe</span> <span>0</span></li><li><span class="badge risk-warning">warning</span> <span>0</span></li><li><span class="badge risk-dangerous">dangerous</span> <span>0</span></li><li><span class="badge risk-destructive">destructive</span> <span>0</span></li><li><span class="badge risk-blocked">blocked</span> <span>0</span></li></ul></section><section><h2>Changes</h2><p class="empty">No schema changes.</p></section><footer><p>Risk levels are static classifications, not runtime estimates.</p></main></body></html>
+  
+  '''
+# ---
+# name: test_realistic_comparison_report_matches_snapshot
+  '''
+  <!doctype html>
+  <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>pgschemadiff report</title><style>
+      :root{
+        color-scheme:light dark;--bg:#f5f7fa;--panel:#fff;--ink:#17202a;
+        --muted:#56616f;--line:#d8dee7;--accent:#244d70
+      }
+      @media(prefers-color-scheme:dark){:root{
+        --bg:#111820;--panel:#1a2530;--ink:#e8edf2;--muted:#a9b4c0;
+        --line:#34414e;--accent:#9fc7e8
+      }}
+      *{box-sizing:border-box}
+      body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 system-ui,sans-serif}
+      main{max-width:1100px;margin:0 auto;padding:clamp(1rem,4vw,3rem)}
+      header,section{margin-bottom:2rem}
+      h1{font-size:clamp(2rem,5vw,3.5rem);line-height:1.05;margin:.2rem 0}
+      h2{font-size:1.35rem;margin-bottom:.8rem}
+      header p,.muted{color:var(--muted)}
+      .databases span{display:inline-block;margin-left:1.2rem;color:var(--muted)}
+      .databases span{font-size:.8rem;text-transform:uppercase;letter-spacing:.08em}
+      dl{display:grid;grid-template-columns:max-content 1fr;gap:.35rem 1rem}
+      dt{color:var(--muted)}dd{margin:0;overflow-wrap:anywhere}
+      .risk-totals{display:flex;flex-wrap:wrap;gap:.6rem;list-style:none;padding:0}
+      .risk-totals li{display:flex;gap:.45rem;align-items:center;background:var(--panel)}
+      .risk-totals li{border:1px solid var(--line);border-radius:.5rem;padding:.4rem .65rem}
+      .badge{display:inline-block;border-radius:999px;padding:.08rem .5rem;font-size:.82rem}
+      .badge{font-weight:700;text-transform:capitalize;background:#e1e8ef;color:#17202a}
+      .risk-warning{background:#fff0bd;color:#4b3800}
+      .risk-dangerous{background:#f5d7b5;color:#542700}
+      .risk-destructive,.risk-blocked{background:#f2c9ce;color:#5b1019}
+      .risk-none{background:#e1e8ef;color:#17202a}
+      table{border-collapse:collapse;width:100%;background:var(--panel)}
+      th,td{text-align:left;vertical-align:top;padding:.65rem .75rem}
+      th,td{border-bottom:1px solid var(--line)}
+      th{color:var(--muted);font-size:.82rem;text-transform:uppercase;letter-spacing:.04em}
+      .table-scroll{overflow-x:auto}
+      .empty{border-left:3px solid var(--accent);padding:.6rem 1rem;background:var(--panel)}
+      pre{overflow:auto;background:var(--panel);border:1px solid var(--line)}
+      pre{border-radius:.5rem;padding:1rem;line-height:1.45}
+      .line-number{display:inline-block;min-width:3ch;margin-right:1rem;color:var(--muted)}
+      .line-number{text-align:right}.sql-line{display:inline-block;min-width:100%}
+      footer{border-top:1px solid var(--line);padding-top:.8rem;color:var(--muted)}
+      footer{font-size:.9rem}
+      @media print{
+        body{background:#fff;color:#111;font-size:10pt}main{max-width:none;padding:0}
+        header,section,pre,table{break-inside:avoid}
+        .badge{border:1px solid #777;background:#fff!important;color:#111!important}
+      }
+      </style></head><body><main><header><h1>pgschemadiff report</h1><p>Version 0.1.0 · Generated 2026-10-27T01:02:03+00:00</p><p class="databases"><span>Current</span> current<span>Desired</span> desired</p></header><section><h2>Risk totals</h2><ul class="risk-totals"><li><span class="badge risk-safe">safe</span> <span>1</span></li><li><span class="badge risk-warning">warning</span> <span>0</span></li><li><span class="badge risk-dangerous">dangerous</span> <span>0</span></li><li><span class="badge risk-destructive">destructive</span> <span>1</span></li><li><span class="badge risk-blocked">blocked</span> <span>0</span></li></ul></section><section><h2>Changes</h2><div class="table-scroll"><table><thead><tr><th scope="col">ID</th><th scope="col">Level</th><th scope="col">Kind</th><th scope="col">Target</th><th scope="col">Reason</th></tr></thead><tbody><tr><td>d0001</td><td><span class="badge risk-safe">safe</span></td><td>create_schema</td><td>&quot;public&quot;.&quot;app&quot;</td><td>Creates an empty schema.</td></tr><tr><td>d0002</td><td><span class="badge risk-destructive">destructive</span></td><td>drop_schema</td><td>&quot;public&quot;.&quot;legacy&quot;</td><td>Removes a schema and its objects.</td></tr></tbody></table></div></section><footer><p>Risk levels are static classifications, not runtime estimates.</p></main></body></html>
+  
+  '''
+# ---

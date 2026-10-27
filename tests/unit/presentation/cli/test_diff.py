@@ -11,6 +11,7 @@ import pytest
 from typer.testing import CliRunner
 
 import pgschemadiff.presentation.cli.commands.diff as diff_command
+from pgschemadiff.application.diff.compare_schemas import SchemaComparisonResult
 from pgschemadiff.application.diff.renames import RenameAnnotations
 from pgschemadiff.application.migration.generate import assess_deltas
 from pgschemadiff.application.migration.render import target_label
@@ -374,6 +375,75 @@ def test_diff_summary_empty_diff_omits_totals(monkeypatch: pytest.MonkeyPatch) -
 
     assert result.exit_code == 0
     assert result.stdout == "No schema changes.\n"
+
+
+def _patch_comparison_result(
+    monkeypatch: pytest.MonkeyPatch,
+    delta_set: DeltaSet,
+) -> None:
+    monkeypatch.setattr(diff_command, "asyncio", SimpleNamespace(run=_run_async))
+
+    async def compare_conninfo(
+        _source_url: str,
+        _target_url: str,
+        _schemas: list[str] | None,
+        **_kwargs: object,
+    ) -> SchemaComparisonResult:
+        return SchemaComparisonResult(
+            source=Database(name="current_db"),
+            target=Database(name="desired_db"),
+            deltas=delta_set,
+        )
+
+    monkeypatch.setattr(composition, "compare_conninfo", compare_conninfo)
+
+
+def test_diff_html_uses_snapshot_names_and_summary_rows_without_connection_secrets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    delta_set = DeltaSet.from_iterable((_drop_schema("legacy"), _create_schema("new")))
+    _patch_comparison_result(monkeypatch, delta_set)
+    source_url = "postgresql://alice:sentinel-password@source/db"
+    target_url = "postgresql://bob:other-secret@target/db"
+
+    result = CliRunner().invoke(
+        app,
+        ["diff", source_url, target_url, "--format", "html"],
+    )
+
+    assert result.exit_code == 0
+    assert "<!doctype html>" in result.stdout
+    assert "current_db" in result.stdout
+    assert "desired_db" in result.stdout
+    assert result.stdout.index("d0001") < result.stdout.index("d0002")
+    assert "drop_schema" in result.stdout
+    assert "create_schema" in result.stdout
+    assert "sentinel-password" not in result.stdout
+    assert "other-secret" not in result.stdout
+    assert "postgresql://" not in result.stdout
+
+
+def test_diff_html_prints_report_before_max_risk_gate_exits_two(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_comparison_result(monkeypatch, DeltaSet.from_iterable((_drop_schema("legacy"),)))
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "diff",
+            "postgresql://source/db",
+            "postgresql://target/db",
+            "--format",
+            "html",
+            "--max-risk",
+            "safe",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "<!doctype html>" in result.stdout
+    assert result.stderr == "Risk gate failed: 1 change(s) exceed max-risk=safe.\n"
 
 
 def test_diff_max_risk_passes_when_changes_are_within_limit(

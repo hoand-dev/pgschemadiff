@@ -39,11 +39,22 @@ Both URLs are required. Source is current; target is desired.
 |---|---:|---|
 | `--schema`, `-s TEXT` | all user schemas | Repeat to limit schemas inspected. |
 | `--renames PATH` | none | YAML or TOML explicit rename annotations. |
-| `--format [json\|summary]` | `json` | Structured JSON or human-readable risk summary. |
+| `--format [json\|summary\|html]` | `json` | Structured JSON, human-readable risk summary, or a self-contained HTML report. |
 | `--max-risk [safe\|warning\|dangerous\|destructive\|blocked]` | no gate | Exit with a policy error if any change is above this level. The report is still printed. |
 | `--help` | — | Show help. |
 
 Diff output goes to stdout. Errors and progress go to stderr.
+
+## `report`
+
+```bash
+pgsd report BUNDLE_DIR [--out FILE]
+```
+
+Read and validate a saved migration bundle, then render its changes, execution
+units, and SQL as a self-contained HTML report. No database connection is used.
+The report goes to stdout by default; `--out FILE` writes to a new file whose
+parent directory must already exist. Existing output files are never replaced.
 
 ## `generate`
 
@@ -123,7 +134,8 @@ uppercase letters, dots, or other characters requiring PostgreSQL quoting.
 ## Output, color, and logs
 
 - `inspect`: JSON on stdout.
-- `diff`: JSON or summary on stdout.
+- `diff`: JSON, summary, or HTML on stdout.
+- `report`: validated bundle report on stdout, or to the new `--out` file.
 - `generate`: bundle path on stdout; progress and summary on stderr.
 - `apply`: final success on stdout; progress and errors on stderr.
 - Logging is written to stderr. `PGSD_LOG_LEVEL` defaults to `INFO`; valid

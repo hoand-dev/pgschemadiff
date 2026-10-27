@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import psycopg
@@ -17,12 +18,15 @@ from pgschemadiff.application.sql_emit.risk import RiskAssessment, RiskLevel
 from pgschemadiff.infrastructure.config.rename_loader import load_renames
 from pgschemadiff.presentation import composition
 from pgschemadiff.presentation.cli import output
+from pgschemadiff.presentation.report.html import render_report
+from pgschemadiff.presentation.report.model import from_comparison
 from pgschemadiff.shared.errors import DiffError, InspectionError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from pgschemadiff.application.diff.compare_schemas import SchemaComparisonResult
     from pgschemadiff.application.diff.renames import RenameAnnotations
     from pgschemadiff.domain.delta.base import DeltaSet
 
@@ -75,16 +79,29 @@ def diff_cmd(
         step, label = phase_steps[phase]
         output.progress(step, 3, label)
 
+    comparison_result: SchemaComparisonResult | None = None
     try:
-        delta_set = asyncio.run(
-            compare_urls(
-                source_url,
-                target_url,
-                schemas,
-                renames=rename_annotations,
-                on_phase=on_phase,
+        if output_format == "html":
+            comparison_result = asyncio.run(
+                composition.compare_conninfo(
+                    source_url,
+                    target_url,
+                    schemas,
+                    renames=rename_annotations,
+                    on_phase=on_phase,
+                )
             )
-        )
+            delta_set = comparison_result.deltas
+        else:
+            delta_set = asyncio.run(
+                compare_urls(
+                    source_url,
+                    target_url,
+                    schemas,
+                    renames=rename_annotations,
+                    on_phase=on_phase,
+                )
+            )
     except (psycopg.Error, psycopg_pool.PoolTimeout):
         output.error("Error: Database connection failed.", 1)
     except InspectionError:
@@ -95,9 +112,17 @@ def diff_cmd(
         output.error("Error: Schema diff failed.", 1)
 
     # Assessment re-orders the deltas; skip it for plain JSON without a gate.
-    needs_assessment = output_format == "summary" or max_risk is not None
+    needs_assessment = output_format in {"summary", "html"} or max_risk is not None
     assessments = assess_deltas(delta_set) if needs_assessment else ()
-    if output_format == "summary":
+    if output_format == "html":
+        assert comparison_result is not None
+        model = from_comparison(
+            comparison_result,
+            assessments,
+            generated_at=datetime.now(UTC),
+        )
+        typer.echo(render_report(model))
+    elif output_format == "summary":
         _print_summary(assessments)
     else:
         typer.echo(delta_set.model_dump_json(indent=2))

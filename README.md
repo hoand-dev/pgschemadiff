@@ -42,6 +42,7 @@ pgsd diff postgresql://user:pass@host/current postgresql://user:pass@host/desire
 # generate a migration bundle that moves current to desired
 # (prints the bundle directory; --max-risk defaults to dangerous)
 pgsd generate postgresql://.../current postgresql://.../desired --out ./migrations/
+pgsd report ./migrations/20260523_120000_diff --out migration-report.html
 
 # preview, then apply it to the current database
 pgsd apply ./migrations/20260523_120000_diff/ postgresql://.../current --dry-run
