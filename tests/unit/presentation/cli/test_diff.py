@@ -582,6 +582,37 @@ def test_diff_reports_progress_phases(monkeypatch: pytest.MonkeyPatch) -> None:
     ]
 
 
+def test_diff_progress_labels_use_vietnamese(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_infrastructure(
+        monkeypatch,
+        {
+            "postgresql://source/db": Database(name="source"),
+            "postgresql://target/db": Database(name="target"),
+        },
+    )
+    output = getattr(diff_command, "output", None)
+    assert output is not None
+    progress_calls: list[tuple[int, int, str]] = []
+    monkeypatch.setattr(
+        output,
+        "progress",
+        lambda step, total, label: progress_calls.append((step, total, label)),
+    )
+
+    result = CliRunner().invoke(
+        app,
+        ["diff", "postgresql://source/db", "postgresql://target/db"],
+        env={"PGSD_LANG": "vi"},
+    )
+
+    assert result.exit_code == 0
+    assert progress_calls == [
+        (1, 3, "Đang đọc schema nguồn"),
+        (2, 3, "Đang đọc schema đích"),
+        (3, 3, "Đang so sánh"),
+    ]
+
+
 def test_diff_compares_database_wide_extensions_under_schema_filter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -673,6 +704,72 @@ def test_diff_error_redacts_detail_from_output_and_logs(
     assert "diff-secret-marker" not in result.stderr
     assert "diff-secret-marker" not in result.output
     assert "diff-secret-marker" not in caplog.text
+
+
+def test_connection_failure_uses_vietnamese_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FailingPool:
+        async def __aenter__(self) -> FailingPool:
+            raise psycopg.OperationalError("private connection detail")
+
+        async def __aexit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
+            return None
+
+    monkeypatch.setattr(diff_command, "asyncio", SimpleNamespace(run=_run_async))
+    monkeypatch.setattr(composition, "Pool", lambda *_args, **_kwargs: FailingPool())
+
+    result = CliRunner().invoke(
+        app,
+        ["diff", "postgresql://source/db", "postgresql://target/db"],
+        env={"PGSD_LANG": "vi"},
+    )
+
+    assert result.exit_code == 1
+    assert result.stderr == "Lỗi: Không kết nối được cơ sở dữ liệu.\n"
+
+
+def test_risk_gate_error_uses_vietnamese_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_delta_set(
+        monkeypatch,
+        DeltaSet.from_iterable((_drop_schema("legacy"),)),
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "diff",
+            "postgresql://source/db",
+            "postgresql://target/db",
+            "--max-risk",
+            "safe",
+        ],
+        env={"PGSD_LANG": "vi"},
+    )
+
+    assert result.exit_code == 2
+    assert result.stderr.startswith("Lỗi: ")
+
+
+@pytest.mark.parametrize("output_format", ["json", "summary"])
+def test_diff_stdout_is_byte_identical_across_languages(
+    monkeypatch: pytest.MonkeyPatch,
+    output_format: str,
+) -> None:
+    delta_set = DeltaSet.from_iterable((_create_schema("new"),))
+    _patch_delta_set(monkeypatch, delta_set)
+    runner = CliRunner()
+    args = [
+        "diff",
+        "postgresql://source/db",
+        "postgresql://target/db",
+        "--format",
+        output_format,
+    ]
+
+    english = runner.invoke(app, args, env={"PGSD_LANG": "en"})
+    vietnamese = runner.invoke(app, args, env={"PGSD_LANG": "vi"})
+
+    assert english.exit_code == vietnamese.exit_code == 0
+    assert vietnamese.stdout == english.stdout
 
 
 class FailingPool:

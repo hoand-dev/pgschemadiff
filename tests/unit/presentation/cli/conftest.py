@@ -15,5 +15,6 @@ def _plain_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("NO_COLOR", "1")
     monkeypatch.setenv("TERM", "dumb")
     monkeypatch.setenv("COLUMNS", "120")
+    monkeypatch.setenv("PGSD_LANG", "en")
     monkeypatch.delenv("FORCE_COLOR", raising=False)
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)

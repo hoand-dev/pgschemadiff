@@ -23,6 +23,7 @@ import typer
 from pgschemadiff.application.inspect.inspect_schema import inspect_schema
 from pgschemadiff.infrastructure.postgres.inspector import PgCatalogInspector
 from pgschemadiff.infrastructure.postgres.pool import Pool
+from pgschemadiff.presentation.i18n import t
 from pgschemadiff.shared.errors import InspectionError
 
 # Timeout (seconds) for opening the connection pool.  A short value ensures
@@ -60,10 +61,10 @@ def inspect_cmd(conn_url: str, schemas: list[str] | None) -> None:
     try:
         json_output = asyncio.run(_run())
     except (psycopg.Error, psycopg_pool.PoolTimeout):
-        typer.echo("Error: Database connection failed.", err=True)
+        typer.echo(t("cli.error.connection_failed"), err=True)
         raise typer.Exit(code=1) from None
     except InspectionError:
-        typer.echo("Error: Schema inspection failed.", err=True)
+        typer.echo(t("cli.error.schema_inspection_failed"), err=True)
         raise typer.Exit(code=1) from None
 
     typer.echo(json_output, file=sys.stdout)

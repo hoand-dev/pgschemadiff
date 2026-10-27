@@ -89,6 +89,22 @@ def test_report_refuses_to_overwrite_output_file(tmp_path: Path) -> None:
     assert report_path.read_text(encoding="utf-8") == "keep me"
 
 
+def test_report_existing_output_error_uses_vietnamese(tmp_path: Path) -> None:
+    bundle_dir = _write_bundle(tmp_path)
+    report_path = tmp_path / "report.html"
+    report_path.write_text("keep me", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        app,
+        ["report", str(bundle_dir), "--out", str(report_path)],
+        env={"PGSD_LANG": "vi"},
+    )
+
+    assert result.exit_code == 2
+    assert result.stderr == "Lỗi: Tệp --out đã tồn tại.\n"
+    assert report_path.read_text(encoding="utf-8") == "keep me"
+
+
 def test_report_rejects_missing_output_parent_with_exit_two(tmp_path: Path) -> None:
     bundle_dir = _write_bundle(tmp_path)
     report_path = tmp_path / "missing" / "report.html"

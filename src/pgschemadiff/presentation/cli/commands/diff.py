@@ -18,6 +18,7 @@ from pgschemadiff.application.sql_emit.risk import RiskAssessment, RiskLevel
 from pgschemadiff.infrastructure.config.rename_loader import load_renames
 from pgschemadiff.presentation import composition
 from pgschemadiff.presentation.cli import output
+from pgschemadiff.presentation.i18n import t
 from pgschemadiff.presentation.report.html import render_report
 from pgschemadiff.presentation.report.model import from_comparison
 from pgschemadiff.shared.errors import DiffError, InspectionError
@@ -67,17 +68,17 @@ def diff_cmd(
     try:
         rename_annotations = load_renames(renames_path) if renames_path is not None else None
     except DiffError as error:
-        output.error(f"Error: Invalid renames file: {error}", 2)
+        output.error(t("diff.error.invalid_renames", error=error), 2)
 
     phase_steps = {
-        "inspect-source": (1, "Inspecting source"),
-        "inspect-target": (2, "Inspecting target"),
-        "compare": (3, "Comparing"),
+        "inspect-source": (1, "diff.progress.inspect_source"),
+        "inspect-target": (2, "diff.progress.inspect_target"),
+        "compare": (3, "diff.progress.compare"),
     }
 
     def on_phase(phase: str) -> None:
-        step, label = phase_steps[phase]
-        output.progress(step, 3, label)
+        step, key = phase_steps[phase]
+        output.progress(step, 3, t(key))
 
     comparison_result: SchemaComparisonResult | None = None
     try:
@@ -103,13 +104,13 @@ def diff_cmd(
                 )
             )
     except (psycopg.Error, psycopg_pool.PoolTimeout):
-        output.error("Error: Database connection failed.", 1)
+        output.error(t("cli.error.connection_failed"), 1)
     except InspectionError:
-        output.error("Error: Schema inspection failed.", 1)
+        output.error(t("cli.error.schema_inspection_failed"), 1)
     except DiffError:
-        output.error("Error: Schema comparison failed.", 1)
+        output.error(t("cli.error.schema_comparison_failed"), 1)
     except Exception:
-        output.error("Error: Schema diff failed.", 1)
+        output.error(t("cli.error.schema_diff_failed"), 1)
 
     # Assessment re-orders the deltas; skip it for plain JSON without a gate.
     needs_assessment = output_format in {"summary", "html"} or max_risk is not None
@@ -135,7 +136,11 @@ def diff_cmd(
         )
         if exceeded:
             output.error(
-                f"Risk gate failed: {exceeded} change(s) exceed max-risk={max_risk.value}.",
+                t(
+                    "diff.error.risk_gate",
+                    count=exceeded,
+                    level=max_risk.value,
+                ),
                 2,
             )
 

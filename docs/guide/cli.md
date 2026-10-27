@@ -149,6 +149,20 @@ uppercase letters, dots, or other characters requiring PostgreSQL quoting.
 - `PGSD_LOG_FORMAT` selects `console` (default) or `json` logging.
 - Set `NO_COLOR=1` to disable terminal color.
 
+## Language
+
+Set `PGSD_LANG=vi` for Vietnamese CLI messages or `PGSD_LANG=en` for English.
+Values are case-insensitive; any other set value selects English. If
+`PGSD_LANG` is unset, the CLI checks the first non-empty value among `LC_ALL`,
+`LC_MESSAGES`, and `LANG`. A locale beginning with `vi` selects Vietnamese;
+other locales, or no locale, select English. There is no language flag.
+
+Errors, warnings, confirmation prompts, progress, the `generate` summary,
+`apply` outcomes, and dry-run explanatory notes are translated. Data and
+technical output remains unchanged: `inspect` JSON, `diff` JSON and summary
+stdout, the generated bundle path, dry-run unit lines, and `apply` event
+records. Typer help, HTML reports, the TUI, and logs are also English.
+
 ## Exit codes
 
 | Code | Meaning |

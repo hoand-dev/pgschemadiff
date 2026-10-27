@@ -34,6 +34,7 @@ from pgschemadiff.infrastructure.postgres.applier import open_executor
 from pgschemadiff.presentation import composition
 from pgschemadiff.presentation.cli import output
 from pgschemadiff.presentation.composition import check_connectivity
+from pgschemadiff.presentation.i18n import t
 from pgschemadiff.presentation.timeouts import parse_timeout
 from pgschemadiff.shared.errors import ApplyMigrationError, MigrationError, RiskGateError
 
@@ -43,6 +44,22 @@ if TYPE_CHECKING:
 
 def _exit(message: str, code: int) -> NoReturn:
     output.error(message, code)
+
+
+def _timeout_error_message(error: ValueError) -> str:
+    message = str(error)
+    invalid_prefix = "Error: Invalid value for "
+    if message.startswith(invalid_prefix) and message.endswith("."):
+        option = message.removeprefix(invalid_prefix).removesuffix(".")
+        return t("apply.error.timeout_invalid", option=option)
+
+    maximum_prefix = "Error: "
+    maximum_suffix = " must not exceed 24 hours."
+    if message.startswith(maximum_prefix) and message.endswith(maximum_suffix):
+        option = message.removeprefix(maximum_prefix).removesuffix(maximum_suffix)
+        return t("apply.error.timeout_maximum", option=option)
+
+    return t("apply.error.failure", message=message)
 
 
 def _requires_destructive_approval(bundle: ValidatedBundle) -> bool:
@@ -88,29 +105,29 @@ def _read_bundle(bundle_dir: Path) -> ValidatedBundle:
     try:
         manifest_bytes, up_sql_bytes = FilesystemBundleReader().read(bundle_dir)
     except OSError:
-        _exit("Error: Could not read migration bundle.", 1)
+        _exit(t("apply.error.bundle_read"), 1)
 
     try:
         return load_bundle(manifest_bytes, up_sql_bytes)
     except MigrationError as error:
-        _exit(f"Error: Invalid migration bundle: {error}", 2)
+        _exit(t("apply.error.bundle_invalid", error=error), 2)
 
 
 def _confirm_risk(bundle: ValidatedBundle, *, dry_run: bool, yes: bool) -> tuple[bool, bool]:
     if any(unit.max_risk is RiskLevel.BLOCKED for unit in bundle.units):
-        _exit("Migration bundle contains a BLOCKED unit and cannot be applied.", 2)
+        _exit(t("apply.error.blocked_bundle"), 2)
 
     destructive = _requires_destructive_approval(bundle)
     approved = yes
     if destructive and not dry_run and not yes:
         if not sys.stdin.isatty():
-            _exit("Destructive migration requires --yes when stdin is non-interactive.", 2)
+            _exit(t("apply.error.destructive_requires_yes"), 2)
         try:
-            approved = typer.confirm("This migration contains destructive changes. Continue?")
+            approved = typer.confirm(t("apply.confirm.destructive"))
         except (KeyboardInterrupt, asyncio.CancelledError):
-            _exit("Apply cancelled; earlier units remain applied.", 3)
+            _exit(t("apply.error.cancelled"), 3)
         if not approved:
-            _exit("Destructive migration was not approved.", 2)
+            _exit(t("apply.error.destructive_not_approved"), 2)
     return destructive, approved
 
 
@@ -159,19 +176,22 @@ def _print_apply_failure(error: ApplyMigrationError, bundle: ValidatedBundle) ->
         statement_position = statement_index + 1 if statement_index is not None else "?"
         line_range = result.line_range
         lines = f"{line_range[0]}-{line_range[1]}" if line_range is not None else "unknown"
-        message += (
-            f" Unit {unit_index + 1}/{result.unit_count} (index {unit_index}), "
-            f"statement {statement_position}/{statement_count} (index {statement_index}), "
-            f"delta={result.delta_id}, "
-            f"lines {lines}, error={result.error_class}, "
-            f"SQLSTATE={result.sqlstate or 'unknown'}."
+        message += t(
+            "apply.error.failure_metadata",
+            unit=unit_index + 1,
+            unit_count=result.unit_count,
+            unit_index=unit_index,
+            statement=statement_position,
+            statement_count=statement_count,
+            statement_index=statement_index,
+            delta_id=result.delta_id,
+            lines=lines,
+            error_class=result.error_class,
+            sqlstate=result.sqlstate or "unknown",
         )
         if result.manual_inspection_required:
-            message += (
-                " PostgreSQL may have left an INVALID index; manually inspect and clean it up "
-                "before retry."
-            )
-    _exit(message, 3)
+            message += t("apply.error.invalid_index_warning")
+    _exit(t("apply.error.failure", message=message), 3)
 
 
 def _print_dry_run(bundle: ValidatedBundle) -> None:
@@ -183,23 +203,23 @@ def _print_dry_run(bundle: ValidatedBundle) -> None:
             f"risk={unit.max_risk.value}; statements={len(unit.statements)}; "
             f"deltas={delta_ids}; lines={unit.start_line}-{unit.end_line}"
         )
-    typer.echo("Dry-run does not prove permissions or future execution success.")
+    typer.echo(t("apply.note.dry_run_limit"))
 
 
 def _dry_run(bundle: ValidatedBundle, db_url: str, *, destructive: bool) -> None:
     if destructive:
         typer.echo(
-            "Warning: bundle contains destructive-risk units; dry-run executes no migration SQL.",
+            t("apply.warning.dry_run_destructive"),
             err=True,
         )
     try:
         asyncio.run(check_connectivity(db_url))
     except (psycopg.Error, psycopg_pool.PoolTimeout):
-        _exit("Error: Database connection failed.", 1)
+        _exit(t("cli.error.connection_failed"), 1)
     except (KeyboardInterrupt, asyncio.CancelledError):
-        _exit("Apply cancelled; earlier units remain applied.", 3)
+        _exit(t("apply.error.cancelled"), 3)
     except Exception:
-        _exit("Error: Migration apply failed.", 3)
+        _exit(t("cli.error.migration_apply_failed"), 3)
     _print_dry_run(bundle)
 
 
@@ -222,20 +242,24 @@ def _real_apply(
             )
         )
     except (psycopg.Error, psycopg_pool.PoolTimeout):
-        _exit("Error: Database connection failed.", 1)
+        _exit(t("cli.error.connection_failed"), 1)
     except RiskGateError as error:
-        _exit(str(error), 2)
+        _exit(t("apply.error.failure", message=str(error)), 2)
     except ApplyMigrationError as error:
         _print_apply_failure(error, bundle)
     except (KeyboardInterrupt, asyncio.CancelledError):
-        _exit("Apply cancelled; earlier units remain applied.", 3)
+        _exit(t("apply.error.cancelled"), 3)
     except Exception:
-        _exit("Error: Migration apply failed.", 3)
+        _exit(t("cli.error.migration_apply_failed"), 3)
 
-    outcome = "Resumed" if result.resumed else "Applied"
     typer.echo(
-        f"{outcome} migration: units-applied={result.applied_unit_count}/"
-        f"{result.unit_count} bundle={result.bundle_id}"
+        t(
+            "apply.outcome.migration",
+            outcome=t("apply.outcome.resumed" if result.resumed else "apply.outcome.applied"),
+            applied=result.applied_unit_count,
+            total=result.unit_count,
+            bundle_id=result.bundle_id,
+        )
     )
     if not result.resumed and bundle.format_version == 2:
         try:
@@ -243,11 +267,10 @@ def _real_apply(
         except Exception:
             verified = False
         if verified:
-            typer.echo("Verified: database now matches the desired schema.")
+            typer.echo(t("apply.outcome.verified"))
         else:
             typer.echo(
-                "Warning: database does not match the desired schema after apply; "
-                "run diff to inspect.",
+                t("apply.warning.verification_mismatch"),
                 err=True,
             )
 
@@ -267,19 +290,19 @@ def _apply_cmd(
         lock_timeout_ms = parse_timeout(lock_timeout, "--lock-timeout")
         statement_timeout_ms = parse_timeout(statement_timeout, "--statement-timeout")
     except ValueError as error:
-        _exit(str(error), 2)
+        _exit(_timeout_error_message(error), 2)
 
     bundle = _read_bundle(bundle_dir)
     if any(unit.max_risk is RiskLevel.BLOCKED for unit in bundle.units):
-        _exit("Migration bundle contains a BLOCKED unit and cannot be applied.", 2)
+        _exit(t("apply.error.blocked_bundle"), 2)
 
     guard_result: GuardResult | None = None
     if skip_source_check:
-        typer.echo("Warning: Source schema check skipped by --skip-source-check.", err=True)
+        typer.echo(t("apply.warning.source_check_skipped"), err=True)
     if bundle.format_version == 1:
         guard_result = GuardResult.SKIPPED_LEGACY
         typer.echo(
-            "Bundle has no source fingerprint (format 1); the database state cannot be verified.",
+            t("apply.warning.legacy_source_missing"),
             err=True,
         )
     elif not skip_source_check:
@@ -288,24 +311,28 @@ def _apply_cmd(
         except SourceStateMismatchError as error:
             detail = str(error).removesuffix(".")
             _exit(
-                f"Error: {detail}. Re-run generate against this database, or pass "
-                "--skip-source-check after review.",
+                t("apply.error.source_mismatch", detail=detail),
                 2,
             )
         except (psycopg.Error, psycopg_pool.PoolTimeout):
-            _exit("Error: Database connection failed.", 1)
+            _exit(t("cli.error.connection_failed"), 1)
         except (KeyboardInterrupt, asyncio.CancelledError):
-            _exit("Apply cancelled; earlier units remain applied.", 3)
+            _exit(t("apply.error.cancelled"), 3)
         except Exception:
-            _exit("Error: Schema inspection failed.", 1)
+            _exit(t("cli.error.schema_inspection_failed"), 1)
 
     destructive, approve_destructive = _confirm_risk(bundle, dry_run=dry_run, yes=yes)
     if dry_run:
         if skip_source_check:
-            typer.echo("Source state check: skipped (--skip-source-check).")
+            typer.echo(t("apply.source_check.skipped_override"))
         else:
             assert guard_result is not None
-            typer.echo(f"Source state check: {guard_result.value}.")
+            typer.echo(
+                t(
+                    "apply.source_check",
+                    status=t(f"apply.source_check.{guard_result.value}"),
+                )
+            )
         _dry_run(bundle, db_url, destructive=destructive)
         return
     _real_apply(
@@ -341,6 +368,6 @@ def apply_cmd(
     except typer.Exit:
         raise
     except (KeyboardInterrupt, asyncio.CancelledError):
-        _exit("Apply cancelled; earlier units remain applied.", 3)
+        _exit(t("apply.error.cancelled"), 3)
     except Exception:
-        _exit("Error: Migration apply failed.", 3)
+        _exit(t("cli.error.migration_apply_failed"), 3)

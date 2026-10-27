@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import psycopg
+import pytest
 from typer.testing import CliRunner
 
 import pgschemadiff.presentation.cli.commands.generate as generate_command
@@ -24,8 +25,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
     from pathlib import Path
     from typing import Any
-
-    import pytest
 
     from pgschemadiff.application.migration.model import MigrationPlan
 
@@ -158,9 +157,15 @@ def _patch_compare(
     return renames_seen
 
 
+@pytest.mark.parametrize(
+    ("language", "summary_prefix"),
+    [("en", "Generated migration:"), ("vi", "Đã tạo migration:")],
+)
 def test_generate_writes_bundle_with_cli_options_and_prints_path_only(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    language: str,
+    summary_prefix: str,
 ) -> None:
     source_url = "postgresql://source/db"
     target_url = "postgresql://target/db"
@@ -260,11 +265,13 @@ def test_generate_writes_bundle_with_cli_options_and_prints_path_only(
             "--name",
             "nightly",
         ],
+        env={"PGSD_LANG": language},
     )
 
     bundle_path = tmp_path / "bundle"
     assert result.exit_code == 0
     assert result.stdout == f"{bundle_path}\n"
+    assert summary_prefix in result.stderr
     assert "deltas=1" in result.stderr
     assert "max-risk=safe" in result.stderr
     assert "units=1" in result.stderr
@@ -354,6 +361,23 @@ def test_risk_gate_rejection_exits_two_and_shows_offending_delta(
     assert "target-secret" not in result.output
     assert source_url not in result.output
     assert target_url not in result.output
+
+
+def test_risk_gate_uses_vietnamese_wrapper_and_preserves_application_detail(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _patch_compare(monkeypatch, DeltaSet.from_iterable((_drop_schema("legacy"),)))
+
+    result = CliRunner().invoke(
+        app,
+        ["generate", "postgresql://source/db", "postgresql://target/db", "--out", str(tmp_path)],
+        env={"PGSD_LANG": "vi"},
+    )
+
+    assert result.exit_code == 2
+    assert result.stderr.startswith("Lỗi: ")
+    assert "Migration risk gate failed" in result.stderr
 
 
 def test_connection_failure_redacts_urls_and_driver_message(
@@ -706,6 +730,58 @@ def test_generate_reports_progress_phases(
         (3, 5, "Comparing"),
         (4, 5, "Generating migration"),
         (5, 5, "Writing bundle"),
+    ]
+
+
+def test_generate_progress_labels_use_vietnamese(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    progress_calls: list[tuple[int, int, str]] = []
+    output = getattr(generate_command, "output", None)
+    assert output is not None
+    monkeypatch.setattr(
+        output,
+        "progress",
+        lambda step, total, label: progress_calls.append((step, total, label)),
+    )
+
+    async def compare_conninfo(
+        _source: str,
+        _target: str,
+        _schemas: list[str] | None,
+        *,
+        renames: object | None = None,
+        on_phase: Callable[[str], None] | None = None,
+    ) -> SchemaComparisonResult:
+        _ = renames
+        if on_phase is not None:
+            for phase in ("inspect-source", "inspect-target", "compare"):
+                on_phase(phase)
+        return SchemaComparisonResult(
+            source=Database(name="source"),
+            target=Database(name="target"),
+            deltas=DeltaSet(),
+        )
+
+    monkeypatch.setattr(composition, "compare_conninfo", compare_conninfo)
+    result = CliRunner().invoke(
+        app,
+        [
+            "generate",
+            "postgresql://source/db",
+            "postgresql://target/db",
+            "--out",
+            str(tmp_path),
+        ],
+        env={"PGSD_LANG": "vi"},
+    )
+
+    assert result.exit_code == 0
+    assert progress_calls == [
+        (1, 5, "Đang đọc schema nguồn"),
+        (2, 5, "Đang đọc schema đích"),
+        (3, 5, "Đang so sánh"),
     ]
 
 

@@ -322,6 +322,65 @@ def test_invalid_timeout_exits_two_and_names_option(
     _assert_password_redacted(result)
 
 
+@pytest.mark.parametrize(
+    ("option", "value", "expected"),
+    [
+        (
+            "--lock-timeout",
+            "bad",
+            "Lỗi: Giá trị của --lock-timeout không hợp lệ.",
+        ),
+        (
+            "--statement-timeout",
+            "bad",
+            "Lỗi: Giá trị của --statement-timeout không hợp lệ.",
+        ),
+        (
+            "--lock-timeout",
+            "1441min",
+            "Lỗi: --lock-timeout không được vượt quá 24 giờ.",
+        ),
+        (
+            "--statement-timeout",
+            "1441min",
+            "Lỗi: --statement-timeout không được vượt quá 24 giờ.",
+        ),
+    ],
+)
+def test_timeout_errors_use_vietnamese(
+    tmp_path: Path,
+    option: str,
+    value: str,
+    expected: str,
+) -> None:
+    result = CliRunner().invoke(
+        app,
+        ["apply", str(tmp_path / "unused"), _DATABASE_URL, option, value],
+        env={"PGSD_LANG": "vi"},
+    )
+
+    assert result.exit_code == 2
+    assert result.stderr == expected + "\n"
+
+
+def test_unrecognized_timeout_error_keeps_english_detail_in_translated_wrapper(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_parse(_value: str, _option: str) -> int:
+        raise ValueError("unexpected parser detail")
+
+    monkeypatch.setattr(apply_command, "parse_timeout", fail_parse)
+    result = CliRunner().invoke(
+        app,
+        ["apply", str(tmp_path / "unused"), _DATABASE_URL],
+        env={"PGSD_LANG": "vi"},
+    )
+
+    assert result.exit_code == 2
+    assert result.stderr == "Lỗi: unexpected parser detail\n"
+
+
 def test_public_timeout_parser_preserves_units_and_validation() -> None:
     parse_timeout = getattr(apply_command, "parse_timeout", None)
     assert callable(parse_timeout)
@@ -388,6 +447,84 @@ def test_blocked_risk_is_rejected_before_connection(
     assert result.exit_code == 2
     assert "BLOCKED" in result.stderr
     _assert_password_redacted(result)
+
+
+def test_blocked_bundle_error_uses_vietnamese(
+    tmp_path: Path,
+) -> None:
+    bundle_dir = _write_bundle(tmp_path / "bundle", risk=RiskLevel.BLOCKED)
+
+    result = CliRunner().invoke(
+        app,
+        ["apply", str(bundle_dir), _DATABASE_URL, "--yes"],
+        env={"PGSD_LANG": "vi"},
+    )
+
+    assert result.exit_code == 2
+    assert result.stderr == "Lỗi: Migration bundle có unit BLOCKED nên không thể áp dụng.\n"
+
+
+def test_destructive_confirmation_and_apply_outcome_use_vietnamese(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle_dir = _write_bundle(tmp_path / "bundle", risk=RiskLevel.DESTRUCTIVE)
+    _interactive(monkeypatch, True)
+    prompts: list[str] = []
+
+    def confirm(prompt: str) -> bool:
+        prompts.append(prompt)
+        return True
+
+    monkeypatch.setattr(typer, "confirm", confirm)
+    _install_successful_apply(monkeypatch)
+    result = CliRunner().invoke(
+        app,
+        ["apply", str(bundle_dir), _DATABASE_URL],
+        env={"PGSD_LANG": "vi"},
+    )
+
+    assert result.exit_code == 0
+    assert prompts == ["Migration này có thay đổi phá hủy dữ liệu. Tiếp tục?"]
+    assert result.stdout == "Đã áp dụng migration: units-applied=1/1 bundle=bundle-test-id\n"
+
+
+def test_rejected_destructive_confirmation_uses_vietnamese_error_prefix(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle_dir = _write_bundle(tmp_path / "bundle", risk=RiskLevel.DESTRUCTIVE)
+    _interactive(monkeypatch, True)
+    monkeypatch.setattr(typer, "confirm", lambda _prompt: False)
+
+    result = CliRunner().invoke(
+        app,
+        ["apply", str(bundle_dir), _DATABASE_URL],
+        env={"PGSD_LANG": "vi"},
+    )
+
+    assert result.exit_code == 2
+    assert result.stderr.endswith("Lỗi: Migration có thay đổi phá hủy dữ liệu chưa được phê duyệt.\n")
+
+
+def test_dry_run_note_uses_vietnamese_and_unit_lines_stay_english(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle_dir = _write_bundle(tmp_path / "bundle")
+    monkeypatch.setattr(apply_command, "check_connectivity", lambda _url: asyncio.sleep(0))
+
+    result = CliRunner().invoke(
+        app,
+        ["apply", str(bundle_dir), _DATABASE_URL, "--dry-run"],
+        env={"PGSD_LANG": "vi"},
+    )
+
+    assert result.exit_code == 0
+    assert "unit 1/1: transactional;" in result.stdout
+    assert result.stdout.endswith(
+        "Dry-run không xác nhận quyền hạn và không bảo đảm lần chạy thật sẽ thành công.\n"
+    )
 
 
 def test_destructive_apply_requires_yes_when_stdin_is_noninteractive(
@@ -776,6 +913,24 @@ def test_success_prints_progress_events_and_summary(
     assert "1/1" in result.stdout
     assert "bundle-test-id" in result.stdout
     _assert_password_redacted(result)
+
+
+def test_apply_event_records_stay_english_in_vietnamese(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle_dir = _write_bundle(tmp_path / "bundle")
+    event = StatementStarted(0, 0, 1, 1, "d0001", (1, 1), 0.0)
+    _install_successful_apply(monkeypatch, events=(event,))
+
+    result = CliRunner().invoke(
+        app,
+        ["apply", str(bundle_dir), _DATABASE_URL],
+        env={"PGSD_LANG": "vi"},
+    )
+
+    assert result.exit_code == 0
+    assert "unit 1/1 statement 1/1 started delta=d0001 lines 1-1\n" in result.stderr
 
 
 def test_resumed_apply_prints_resumed_summary(

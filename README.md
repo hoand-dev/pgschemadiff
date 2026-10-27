@@ -28,6 +28,8 @@ pipx install pgschemadiff
 
 See the [user guide](docs/guide/README.md) for CLI options, risk gates, bundles, TUI behavior, and migration limitations.
 
+CLI messages support English (default) and Vietnamese via `PGSD_LANG=vi`.
+
 ```bash
 # launch the TUI
 pgsd                  # or: pgsd tui
