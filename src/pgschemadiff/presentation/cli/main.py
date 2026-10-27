@@ -30,7 +30,8 @@ app = typer.Typer(
         "  0  Success (including diff with changes and no gate)\n\n"
         "  1  Runtime failure (connection, inspection, comparison, writing)\n\n"
         "  2  Usage or policy failure (bad option/file, risk gate, invalid bundle, "
-        "unapproved destructive or BLOCKED bundle)\n\n"
+        "unapproved destructive or BLOCKED bundle, database not in the bundle's "
+        "source state)\n\n"
         "  3  Apply failed or cancelled after it started"
     ),
     invoke_without_command=True,

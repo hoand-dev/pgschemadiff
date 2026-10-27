@@ -2,16 +2,15 @@
 
 > Compare PostgreSQL schemas, generate safe migrations, with an interactive TUI and a scriptable CLI.
 
-**Status:** Phase 0 done except P0-CI-03; Phase 1 feature shipped (P1-TEST-02 needs-human, benchmark unmeasured); Phase 2 complete (M2 unit-level); Phase 3a in progress, P3-SQL-02 next; TUI shell/views use mock data. See [`docs/ROADMAP.md`](docs/ROADMAP.md) and [`docs/PROJECT_CONTEXT.md`](docs/PROJECT_CONTEXT.md).
-
+**Status:** 0.1.0 (alpha). Phases 0–5 delivered: inspect, diff, risk-gated generate, guarded apply, HTML reports and a TUI on real data; first PyPI release pending. See [`docs/ROADMAP.md`](docs/ROADMAP.md) and the [user guide](docs/guide/README.md).
 ## What it does
 
-- Connect to two PostgreSQL 18 databases (or one DB and a target schema file)
-- Introspect schemas via `pg_catalog` (async, consistent snapshot)
-- Diff every object kind: tables, columns, indexes, constraints, foreign keys, views, materialized views, functions, procedures, sequences, enums, triggers, RLS policies, composite/domain types, extensions
+- Compare two PostgreSQL databases (tested on PostgreSQL 18)
+- Introspect schemas via `pg_catalog` (async, one read-only REPEATABLE READ snapshot)
+- Diff the supported object kinds: tables, columns, indexes, constraints, foreign keys, views, materialized views, functions, procedures, sequences, enums, triggers, RLS policies, composite/domain types, extensions
 - Classify each change by risk: `SAFE` / `WARNING` / `DANGEROUS` / `DESTRUCTIVE` / `BLOCKED`
 - Generate ordered migration SQL (topologically sorted; non-transactional units split out)
-- Apply migrations with per-unit transaction semantics and lock-timeout safety
+- Apply migrations with per-unit transaction semantics, lock-timeout safety, resumable history, and a check that the database is still in the bundle's source state
 - Drive everything from a Textual TUI or a `pgsd` CLI
 
 ## Installation
@@ -58,7 +57,7 @@ pgsd apply ./migrations/20260523_120000_diff/ postgresql://.../current
 |---|---|
 | 0 | Success (including `diff` with changes and no gate) |
 | 1 | Runtime failure: connection, inspection, comparison, writing |
-| 2 | Usage or policy: bad option/file, risk gate exceeded, invalid bundle, destructive not approved, BLOCKED bundle |
+| 2 | Usage or policy: bad option/file, risk gate exceeded, invalid bundle, destructive not approved, BLOCKED bundle, database not in the bundle's source state |
 | 3 | Apply failed or was cancelled after it started |
 
 ## Development
@@ -67,8 +66,9 @@ pgsd apply ./migrations/20260523_120000_diff/ postgresql://.../current
 # requires Python 3.13 and uv 0.8+
 uv sync --extra dev
 
-# run the test suite
-uv run pytest
+# run the test suite (integration tests need Docker)
+uv run pytest -m "not integration"
+uv run pytest tests/integration
 
 # lint + format
 uv run ruff check .

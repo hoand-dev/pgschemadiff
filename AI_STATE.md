@@ -39,7 +39,7 @@ Goal: inspect two Postgres DBs, show schema diff, generate safe migration SQL.
 1. Phase 5 production readiness (P5-CLI-01, P5-PKG-01, P5-BENCH-01, P5-REPORT-01, P5-I18N-01).
 
 ## Next Actions
-- P5-BENCH-01 done (CI `de0c099`: 12,440 objects end to end in 3.68 s). P5-CLI-01 done (CI `e4f3b6f`). P5-PKG-01 done (CI `bcb6b5d`; 0.1.0 builds, release.yml not yet triggered). P5-DOCS-01 done (CI `afd1391`; 9 cookbook recipes executed on PG18). TUI direction bug fixed in `04fb3bb`. P5-REPORT-01 done (CI `2003b75`). P5-SAFE-01 done (CI `c549bd2`; bundle format 2, apply refuses a database that is not the bundle's source state). Next: P5-I18N-01.
+- P5-BENCH-01 done (CI `de0c099`: 12,440 objects end to end in 3.68 s). P5-CLI-01 done (CI `e4f3b6f`). P5-PKG-01 done (CI `bcb6b5d`; 0.1.0 builds, release.yml not yet triggered). P5-DOCS-01 done (CI `afd1391`; 9 cookbook recipes executed on PG18). TUI direction bug fixed in `04fb3bb`. P5-REPORT-01 done (CI `2003b75`). P5-SAFE-01 done (CI `c549bd2`; bundle format 2, apply refuses a database that is not the bundle's source state). P5-I18N-01 done (CI `98ac93f`). Phase 5 tasks complete; final whole-project review in progress.
 
 ## Ready To Merge
 - None.

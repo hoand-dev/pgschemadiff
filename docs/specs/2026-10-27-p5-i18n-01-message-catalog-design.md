@@ -1,6 +1,6 @@
 # P5-I18N-01 — EN + VI message catalog design
 
-**Status:** Approved by reviewer; implementation pending.
+**Status:** Approved by reviewer; implementation complete (CI `98ac93f`).
 **Date:** 2026-10-27
 **Task:** `docs/TASKS.md` P5-I18N-01 "EN + VI message catalog" ·
 roadmap row "Message keys → catalog EN/VI; test fallback và không hard-code message ngoài scope"
