@@ -32,6 +32,8 @@ from pgschemadiff.domain.table import Table
 from pgschemadiff.shared.errors import MigrationError
 
 _CREATED_AT = datetime(2026, 10, 24, 12, 30, 45, tzinfo=UTC)
+_SOURCE_FINGERPRINT = f"sha256:{'1' * 64}"
+_TARGET_FINGERPRINT = f"sha256:{'2' * 64}"
 _Manifest = dict[str, object]
 _Mutation = Callable[[_Manifest], None]
 
@@ -63,8 +65,9 @@ def rendered_bundle() -> tuple[MigrationPlan, bytes, bytes]:
     )
     plan = generate_migration(
         DeltaSet.from_iterable(deltas),
-        source_fingerprint="source-fingerprint",
-        target_fingerprint="target-fingerprint",
+        source_fingerprint=_SOURCE_FINGERPRINT,
+        target_fingerprint=_TARGET_FINGERPRINT,
+        inspected_schemas=("app",),
         clock=lambda: _CREATED_AT,
         id_factory=lambda: "bundle-test-id",
     )
@@ -120,7 +123,7 @@ def _checksum_up_sql(manifest: _Manifest, up_sql: bytes) -> None:
 
 
 def _invalid_format_version(manifest: _Manifest) -> None:
-    manifest["format_version"] = 2
+    manifest["format_version"] = 3
 
 
 def _missing_top_level_field(manifest: _Manifest) -> None:
@@ -149,6 +152,10 @@ def _extra_statement_field(manifest: _Manifest) -> None:
 
 def _extra_checksums_field(manifest: _Manifest) -> None:
     _object(manifest["checksums"])["down_sql_sha256"] = "0" * 64
+
+
+def _remove_root_field(manifest: _Manifest, field: str) -> None:
+    del manifest[field]
 
 
 def _set_root_field(manifest: _Manifest, key: str, value: object) -> None:
@@ -331,10 +338,22 @@ def test_load_round_trips_rendered_plan_and_extracts_exact_statement_sql(
     assert bundle.overall_max_risk is plan.overall_max_risk
     assert bundle.source_fingerprint == plan.source_fingerprint
     assert bundle.target_fingerprint == plan.target_fingerprint
+    assert bundle.inspected_schemas == plan.inspected_schemas
     assert [unit.transactional for unit in bundle.units] == [
         unit.transaction_unit.transactional for unit in plan.units
     ]
     assert all(isinstance(unit.max_risk, RiskLevel) for unit in bundle.units)
+
+
+def test_rendered_manifest_records_v2_fingerprints_and_schema_scope(
+    rendered_bundle: tuple[MigrationPlan, bytes, bytes],
+) -> None:
+    manifest = _manifest(rendered_bundle)
+
+    assert manifest["format_version"] == 2
+    assert manifest["source_fingerprint"] == _SOURCE_FINGERPRINT
+    assert manifest["target_fingerprint"] == _TARGET_FINGERPRINT
+    assert manifest["inspected_schemas"] == ["app"]
 
 
 def test_enum_addition_round_trips_as_an_isolated_transactional_bundle_unit() -> None:
@@ -342,6 +361,8 @@ def test_enum_addition_round_trips_as_an_isolated_transactional_bundle_unit() ->
     delta = AddEnumValue(target=enum_ref, label="happy", after="okay")
     plan = generate_migration(
         DeltaSet.from_iterable((delta,)),
+        source_fingerprint=_SOURCE_FINGERPRINT,
+        target_fingerprint=_TARGET_FINGERPRINT,
         clock=lambda: _CREATED_AT,
         id_factory=lambda: "enum-addition-bundle",
     )
@@ -361,6 +382,8 @@ def test_enum_addition_round_trips_as_an_isolated_transactional_bundle_unit() ->
 def test_empty_bundle_round_trips_without_risk_or_units() -> None:
     plan = generate_migration(
         DeltaSet(),
+        source_fingerprint=_SOURCE_FINGERPRINT,
+        target_fingerprint=_TARGET_FINGERPRINT,
         clock=lambda: _CREATED_AT,
         id_factory=lambda: "empty-bundle",
     )
@@ -371,6 +394,7 @@ def test_empty_bundle_round_trips_without_risk_or_units() -> None:
     assert bundle.assessments == ()
     assert bundle.units == ()
     assert bundle.overall_max_risk is None
+    assert bundle.inspected_schemas is None
 
 
 def test_validated_bundle_is_frozen(rendered_bundle: tuple[MigrationPlan, bytes, bytes]) -> None:
@@ -429,8 +453,8 @@ def test_rejects_non_bytes_inputs(
 
 def test_rejects_duplicate_json_keys(rendered_bundle: tuple[MigrationPlan, bytes, bytes]) -> None:
     manifest_bytes = rendered_bundle[1].replace(
-        b'  "format_version": 1,',
-        b'  "format_version": 1,\n  "format_version": 1,',
+        b'  "format_version": 2,',
+        b'  "format_version": 2,\n  "format_version": 2,',
         1,
     )
     assert manifest_bytes != rendered_bundle[1]
@@ -456,6 +480,52 @@ def test_rejects_unknown_format_version(
 ) -> None:
     with pytest.raises(MigrationError, match="format_version"):
         _load_mutated(rendered_bundle, _invalid_format_version)
+
+
+def test_loads_legacy_v1_bundle_without_schema_scope(
+    rendered_bundle: tuple[MigrationPlan, bytes, bytes],
+) -> None:
+    manifest = _manifest(rendered_bundle)
+    manifest["format_version"] = 1
+    manifest.pop("inspected_schemas")
+    manifest["source_fingerprint"] = None
+    manifest["target_fingerprint"] = None
+
+    bundle = load_bundle(_manifest_bytes(manifest), rendered_bundle[2])
+
+    assert bundle.format_version == 1
+    assert bundle.source_fingerprint is None
+    assert bundle.target_fingerprint is None
+    assert bundle.inspected_schemas is None
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        pytest.param("source_fingerprint", None, id="null-source-fingerprint"),
+        pytest.param("target_fingerprint", "not-a-fingerprint", id="invalid-target-fingerprint"),
+        pytest.param("inspected_schemas", {}, id="invalid-schema-scope-type"),
+        pytest.param("inspected_schemas", ["app", 7], id="invalid-schema-scope-item"),
+    ],
+)
+def test_rejects_invalid_v2_fingerprints_or_schema_scope(
+    rendered_bundle: tuple[MigrationPlan, bytes, bytes],
+    field: str,
+    value: object,
+) -> None:
+    def mutate(manifest: _Manifest) -> None:
+        manifest[field] = value
+
+    with pytest.raises(MigrationError):
+        _load_mutated(rendered_bundle, mutate)
+
+
+@pytest.mark.parametrize("field", ["source_fingerprint", "target_fingerprint", "inspected_schemas"])
+def test_rejects_missing_v2_fingerprint_or_schema_scope(
+    rendered_bundle: tuple[MigrationPlan, bytes, bytes], field: str
+) -> None:
+    with pytest.raises(MigrationError):
+        _load_mutated(rendered_bundle, lambda manifest: _remove_root_field(manifest, field))
 
 
 @pytest.mark.parametrize(

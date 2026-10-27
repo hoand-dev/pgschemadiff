@@ -23,13 +23,14 @@
       'manifest.json',
       '''
         {
-          "format_version": 1,
+          "format_version": 2,
           "tool_version": "0.0.0",
           "id": "empty-plan",
           "slug": "diff",
           "created_at": "2026-10-24T12:30:45Z",
-          "source_fingerprint": null,
-          "target_fingerprint": null,
+          "source_fingerprint": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "target_fingerprint": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+          "inspected_schemas": null,
           "delta_count": 0,
           "overall_max_risk": null,
           "assessments": [],
@@ -56,6 +57,9 @@
         # Migration empty-plan
         
         - Created at: 2026-10-24T12:30:45Z
+        - Source fingerprint: `sha256:1111111111111111111111111111111111111111111111111111111111111111`
+        - Target fingerprint: `sha256:2222222222222222222222222222222222222222222222222222222222222222`
+        - Inspected schemas: all user schemas
         - Delta count: 0
         - Overall max risk: none
         
@@ -77,7 +81,7 @@
         
         - `up.sql`: `0eb5058ab4b1dc96629142de35512a802ceabb4d5c82e7b8d8ce06b099fb3999`
         - `down.sql`: `f77f041ac786eec0f610920280436fdb7c91045e7f91e0d0d06388ea254916b8`
-        - `manifest.json`: `705364b2acf30587e61caf56e8861119978ba90db3e5467613523e159d972da4`
+        - `manifest.json`: `3ba53953835519b5f8cf3bc21bb580d69bee9387f7cdd61c9ee3e472904fefbc`
         - `deltas.json`: `4438bfb5b0df4f54606ffec1f2ec725dbd574cec0b6df311d0769ed55344ca9f`
         
         ## Warnings
@@ -135,13 +139,16 @@
       'manifest.json',
       '''
         {
-          "format_version": 1,
+          "format_version": 2,
           "tool_version": "0.0.0",
           "id": "render-plan",
           "slug": "diff",
           "created_at": "2026-10-24T12:30:45Z",
-          "source_fingerprint": "source-hash",
-          "target_fingerprint": "target-hash",
+          "source_fingerprint": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "target_fingerprint": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+          "inspected_schemas": [
+            "app"
+          ],
           "delta_count": 4,
           "overall_max_risk": "safe",
           "assessments": [
@@ -436,8 +443,9 @@
         # Migration render-plan
         
         - Created at: 2026-10-24T12:30:45Z
-        - Source fingerprint: `source-hash`
-        - Target fingerprint: `target-hash`
+        - Source fingerprint: `sha256:1111111111111111111111111111111111111111111111111111111111111111`
+        - Target fingerprint: `sha256:2222222222222222222222222222222222222222222222222222222222222222`
+        - Inspected schemas: ["app"]
         - Delta count: 4
         - Overall max risk: safe
         
@@ -460,7 +468,7 @@
         
         - `up.sql`: `a6e992690fd58b789759956c7ec05f9c01aa1694ab140f106d2a915c6f8bd526`
         - `down.sql`: `e87201d8d4470825bb2bea1bd7a4503e7152abd3a22dbd70418d51cfa851166e`
-        - `manifest.json`: `04fa4ef4e470362e9755d7177a7988b21c8d956dd3254c962b5702bb05a8deb8`
+        - `manifest.json`: `b26830e2f3c7e967bbc705ed71ec7ad3d03947acc7901469a0d1b804987322bd`
         - `deltas.json`: `57f1524c4b9a5529b02b99ff8baec47046be4ec3ef2084281f99017702f15e3e`
         
         ## Warnings

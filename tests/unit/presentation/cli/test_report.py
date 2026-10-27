@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 _CREATED_AT = datetime(2026, 10, 26, 12, 0, 0, tzinfo=UTC)
+_FINGERPRINT = "sha256:" + "0" * 64
 
 
 def _write_bundle(output_dir: Path) -> Path:
@@ -25,6 +26,8 @@ def _write_bundle(output_dir: Path) -> Path:
     )
     plan = generate_migration(
         DeltaSet.from_iterable((CreateSchema(target=ref, pg_schema=Schema(ref=ref)),)),
+        source_fingerprint=_FINGERPRINT,
+        target_fingerprint=_FINGERPRINT,
         slug="report-test",
         clock=lambda: _CREATED_AT,
         id_factory=lambda: "report-bundle",

@@ -3,16 +3,21 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import UTC
 from hashlib import sha256
 from importlib.metadata import version
 from typing import TYPE_CHECKING
 
+from pgschemadiff.shared.errors import MigrationError
+
 if TYPE_CHECKING:
     from pgschemadiff.application.migration.model import MigrationPlan
     from pgschemadiff.application.sql_emit.emitter import SqlStatement
     from pgschemadiff.domain.delta import DeltaBase
+
+_FINGERPRINT_PATTERN = re.compile(r"sha256:[0-9a-f]{64}")
 
 
 @dataclass(frozen=True)
@@ -131,13 +136,16 @@ def _render_manifest(
     up_sql: bytes,
 ) -> bytes:
     manifest = {
-        "format_version": 1,
+        "format_version": 2,
         "tool_version": version("pgschemadiff"),
         "id": plan.id,
         "slug": plan.slug,
         "created_at": _timestamp(plan),
         "source_fingerprint": plan.source_fingerprint,
         "target_fingerprint": plan.target_fingerprint,
+        "inspected_schemas": (
+            list(plan.inspected_schemas) if plan.inspected_schemas is not None else None
+        ),
         "delta_count": len(plan.delta_set),
         "overall_max_risk": (
             plan.overall_max_risk.value if plan.overall_max_risk is not None else None
@@ -170,6 +178,12 @@ def _render_readme(plan: MigrationPlan, files: dict[str, bytes]) -> bytes:
         lines.append(f"- Source fingerprint: `{plan.source_fingerprint}`")
     if plan.target_fingerprint is not None:
         lines.append(f"- Target fingerprint: `{plan.target_fingerprint}`")
+    schema_scope = (
+        "all user schemas"
+        if plan.inspected_schemas is None
+        else json.dumps(list(plan.inspected_schemas), ensure_ascii=False)
+    )
+    lines.append(f"- Inspected schemas: {schema_scope}")
     lines.extend(
         (
             f"- Delta count: {len(plan.delta_set)}",
@@ -225,6 +239,13 @@ def _render_readme(plan: MigrationPlan, files: dict[str, bytes]) -> bytes:
 
 def render_bundle(plan: MigrationPlan) -> RenderedBundle:
     """Render all bundle artifacts into ordered UTF-8 byte payloads."""
+    for label, fingerprint in (
+        ("source", plan.source_fingerprint),
+        ("target", plan.target_fingerprint),
+    ):
+        if not isinstance(fingerprint, str) or _FINGERPRINT_PATTERN.fullmatch(fingerprint) is None:
+            raise MigrationError(f"Migration bundle requires a valid {label} fingerprint.")
+
     up_sql, units = _render_up(plan)
     down_sql = _render_down(plan)
     deltas_json = (plan.delta_set.model_dump_json(indent=2) + "\n").encode("utf-8")

@@ -91,6 +91,7 @@ class MigrationPlan:
     assessments: tuple[MigrationDeltaAssessment, ...]
     units: tuple[MigrationPlanUnit, ...]
     overall_max_risk: RiskLevel | None
+    inspected_schemas: tuple[str, ...] | None = None
 
     def __post_init__(self) -> None:
         _validate_plan_metadata(self)

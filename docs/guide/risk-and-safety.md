@@ -44,10 +44,10 @@ Recommended workflow:
 1. Compare current/source with desired/target and review every delta and risk reason.
 2. Check existing data, dependencies, application compatibility, and PostgreSQL-version behavior.
 3. Generate a bundle with a limit that matches the changes you reviewed.
-4. Inspect `README.md`, `manifest.json`, `up.sql`, transaction units, and checksums.
-5. Back up important data; run `apply --dry-run` to validate the bundle and connectivity.
-6. Apply during an appropriate window with chosen timeouts and explicit destructive approval if required.
-7. Verify application behavior and database state; compare again to confirm the target schema.
+4. Inspect `README.md`, `manifest.json`, fingerprints and schema scope, `up.sql`, transaction units, and checksums.
+5. Back up important data; run `apply --dry-run` to check source state and connectivity.
+6. Apply during an appropriate window with chosen timeouts and explicit destructive approval if required. Use `--skip-source-check` only after reviewing why the source fingerprint differs.
+7. Review the post-apply fingerprint result, verify application behavior, and compare again to confirm the target schema.
 
 Dry-run does not prove permissions or future execution success. Completed units
 can remain applied after a later unit fails or an apply is cancelled; see

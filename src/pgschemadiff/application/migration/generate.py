@@ -109,6 +109,7 @@ def generate_migration(
     max_risk: RiskLevel = RiskLevel.DANGEROUS,
     source_fingerprint: str | None = None,
     target_fingerprint: str | None = None,
+    inspected_schemas: list[str] | tuple[str, ...] | None = None,
     slug: str = "diff",
     clock: Callable[[], datetime] = _utc_now,
     id_factory: Callable[[], str] = _new_plan_id,
@@ -190,4 +191,5 @@ def generate_migration(
         assessments=records,
         units=tuple(planned_units),
         overall_max_risk=overall_max_risk,
+        inspected_schemas=(tuple(inspected_schemas) if inspected_schemas is not None else None),
     )

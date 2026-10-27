@@ -28,8 +28,11 @@ from pgschemadiff.domain.identity import ObjectKind, ObjectRef, QualifiedName
 from pgschemadiff.domain.index import Index, IndexKeyColumn, IndexMethod
 from pgschemadiff.domain.schema import Schema
 from pgschemadiff.domain.table import Table
+from pgschemadiff.shared.errors import MigrationError
 
 _CREATED_AT = datetime(2026, 10, 24, 12, 30, 45, tzinfo=UTC)
+_SOURCE_FINGERPRINT = f"sha256:{'1' * 64}"
+_TARGET_FINGERPRINT = f"sha256:{'2' * 64}"
 
 
 def _ref(kind: ObjectKind, namespace: str, name: str) -> ObjectRef:
@@ -78,8 +81,9 @@ def _plan(*, realistic: bool) -> MigrationPlan:
 
     return generate_migration(
         DeltaSet.from_iterable(deltas),
-        source_fingerprint="source-hash" if realistic else None,
-        target_fingerprint="target-hash" if realistic else None,
+        source_fingerprint=_SOURCE_FINGERPRINT,
+        target_fingerprint=_TARGET_FINGERPRINT,
+        inspected_schemas=("app",) if realistic else None,
         clock=lambda: _CREATED_AT,
         id_factory=lambda: "render-plan" if realistic else "empty-plan",
     )
@@ -122,6 +126,32 @@ def test_render_bundle_snapshots_all_five_artifacts(
     assert tuple((name, content.decode("utf-8")) for name, content in bundle.files) == snapshot
 
 
+@pytest.mark.parametrize(
+    ("source_fingerprint", "target_fingerprint", "missing"),
+    [
+        pytest.param(None, _TARGET_FINGERPRINT, "source", id="missing-source"),
+        pytest.param(_SOURCE_FINGERPRINT, None, "target", id="missing-target"),
+        pytest.param("bad-fingerprint", _TARGET_FINGERPRINT, "source", id="invalid-source"),
+        pytest.param(_SOURCE_FINGERPRINT, "bad-fingerprint", "target", id="invalid-target"),
+    ],
+)
+def test_render_bundle_rejects_invalid_fingerprints(
+    source_fingerprint: str | None,
+    target_fingerprint: str | None,
+    missing: str,
+) -> None:
+    plan = generate_migration(
+        DeltaSet(),
+        source_fingerprint=source_fingerprint,
+        target_fingerprint=target_fingerprint,
+        clock=lambda: _CREATED_AT,
+        id_factory=lambda: "missing-fingerprint",
+    )
+
+    with pytest.raises(MigrationError, match=f"{missing} fingerprint"):
+        render_bundle(plan)
+
+
 def test_deltas_json_matches_diff_cli_serialization() -> None:
     plan = _plan(realistic=True)
 
@@ -137,6 +167,8 @@ def test_unlogged_delta_is_serialized_and_manifest_assesses_rewrite_risk() -> No
     )
     plan = generate_migration(
         DeltaSet.from_iterable((delta,)),
+        source_fingerprint=_SOURCE_FINGERPRINT,
+        target_fingerprint=_TARGET_FINGERPRINT,
         clock=lambda: _CREATED_AT,
         id_factory=lambda: "unlogged-persistence",
     )
@@ -157,6 +189,8 @@ def test_manifest_ranges_and_checksums_match_up_sql() -> None:
     lines = files["up.sql"].decode("utf-8").splitlines()
 
     assert manifest["tool_version"] == version("pgschemadiff")
+    assert manifest["format_version"] == 2
+    assert manifest["inspected_schemas"] == ["app"]
     assert manifest["checksums"]["up_sql_sha256"] == sha256(files["up.sql"]).hexdigest()
     for unit in manifest["units"]:
         statement_sql: list[bytes] = []
@@ -223,6 +257,7 @@ def test_readme_lists_checksums_and_rollback_warnings() -> None:
         assert sha256(files[name]).hexdigest() in readme
     assert "INVALID index" in readme
     assert "non-transactional units cannot be rolled back" in readme.lower()
+    assert '- Inspected schemas: ["app"]' in readme
 
 
 def test_sql_newlines_are_normalized_before_range_and_checksum_rendering() -> None:

@@ -8,6 +8,7 @@ from pgschemadiff.application.diff.compare_schemas import (
     SchemaComparisonResult,
     compare_schemas_with_snapshots,
 )
+from pgschemadiff.application.diff.fingerprint import schema_fingerprint
 from pgschemadiff.application.migration.generate import generate_migration
 from pgschemadiff.application.migration.render import render_bundle
 from pgschemadiff.application.sql_emit.risk import RiskLevel
@@ -33,6 +34,8 @@ def _run_pipeline(source: Database, target: Database) -> SchemaComparisonResult:
     plan = generate_migration(
         comparison.deltas,
         max_risk=RiskLevel.DESTRUCTIVE,
+        source_fingerprint=schema_fingerprint(comparison.source),
+        target_fingerprint=schema_fingerprint(comparison.target),
         clock=lambda: datetime(2026, 10, 26, tzinfo=UTC),
         id_factory=lambda: "bench-pipeline",
     )

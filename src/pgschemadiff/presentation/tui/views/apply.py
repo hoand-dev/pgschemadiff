@@ -25,6 +25,8 @@ from pgschemadiff.application.sql_emit.risk import RiskLevel
 from pgschemadiff.presentation.tui.views._common import Panel, SectionHeader, markup
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from textual.app import ComposeResult
     from textual.content import Content
 
@@ -130,6 +132,15 @@ class ApplyView(Widget):
             )
             self.query_one("#apply-summary", Static).update(markup("$summary", summary=summary))
             warning_content = _risk_warning(bundle)
+            if bundle.format_version == 1:
+                warning_content = (
+                    markup(
+                        "Bundle has no source fingerprint (format 1); "
+                        "the database state cannot be verified."
+                    )
+                    .append("\n")
+                    .append(warning_content)
+                )
             unit_count = len(bundle.units)
 
         self.query_one("#apply-warning", Static).update(warning_content)
@@ -165,8 +176,16 @@ class ApplyView(Widget):
         log = self.query_one("#apply-log", Static)
         log.update(_event_log_content(session.apply_event_timestamps, session.apply_events))
 
+        self._update_controls(session, bundle, path)
+
+    def _update_controls(
+        self,
+        session: TuiSession,
+        bundle: ValidatedBundle | None,
+        path: Path | None,
+    ) -> None:
         busy = session.apply_operation in {"loading", "dry-run", "apply"}
-        ready = bundle is not None and path is not None and profile is not None
+        ready = bundle is not None and path is not None and session.selected_profile is not None
         self.query_one("#apply-dry-run", Button).disabled = busy or not ready
         self.query_one("#apply-start", Button).disabled = busy or not ready
         cancel = self.query_one("#apply-cancel", Button)

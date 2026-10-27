@@ -11,6 +11,7 @@ import psycopg_pool
 import typer
 from rich.text import Text
 
+from pgschemadiff.application.diff.fingerprint import schema_fingerprint
 from pgschemadiff.application.migration.apply import (
     ApplyEvent,
     ApplyResult,
@@ -22,9 +23,15 @@ from pgschemadiff.application.migration.apply import (
     apply_migration,
 )
 from pgschemadiff.application.migration.bundle import ValidatedBundle, load_bundle
+from pgschemadiff.application.migration.guard import (
+    GuardResult,
+    SourceStateMismatchError,
+    verify_source_state,
+)
 from pgschemadiff.application.sql_emit.risk import RiskLevel
 from pgschemadiff.infrastructure.fs.bundle_reader import FilesystemBundleReader
 from pgschemadiff.infrastructure.postgres.applier import open_executor
+from pgschemadiff.presentation import composition
 from pgschemadiff.presentation.cli import output
 from pgschemadiff.presentation.composition import check_connectivity
 from pgschemadiff.presentation.timeouts import parse_timeout
@@ -61,6 +68,20 @@ async def _apply(
             approve_destructive=approve_destructive,
             on_event=_print_event,
         )
+
+
+async def _verify_source(bundle: ValidatedBundle, db_url: str) -> GuardResult:
+    schemas = list(bundle.inspected_schemas) if bundle.inspected_schemas is not None else None
+    async with composition.open_inspector(db_url, schemas=schemas) as inspector:
+        history = composition.create_history_reader(db_url)
+        return await verify_source_state(bundle, inspector, history)
+
+
+async def _verify_target(bundle: ValidatedBundle, db_url: str) -> bool:
+    schemas = list(bundle.inspected_schemas) if bundle.inspected_schemas is not None else None
+    async with composition.open_inspector(db_url, schemas=schemas) as inspector:
+        database = await inspector.inspect()
+    return schema_fingerprint(database) == bundle.target_fingerprint
 
 
 def _read_bundle(bundle_dir: Path) -> ValidatedBundle:
@@ -216,6 +237,19 @@ def _real_apply(
         f"{outcome} migration: units-applied={result.applied_unit_count}/"
         f"{result.unit_count} bundle={result.bundle_id}"
     )
+    if not result.resumed and bundle.format_version == 2:
+        try:
+            verified = asyncio.run(_verify_target(bundle, db_url))
+        except Exception:
+            verified = False
+        if verified:
+            typer.echo("Verified: database now matches the desired schema.")
+        else:
+            typer.echo(
+                "Warning: database does not match the desired schema after apply; "
+                "run diff to inspect.",
+                err=True,
+            )
 
 
 def _apply_cmd(
@@ -226,6 +260,7 @@ def _apply_cmd(
     statement_timeout: str = "0",
     dry_run: bool = False,
     yes: bool = False,
+    skip_source_check: bool = False,
 ) -> None:
     """Apply a validated migration bundle to PostgreSQL with risk confirmation."""
     try:
@@ -235,8 +270,42 @@ def _apply_cmd(
         _exit(str(error), 2)
 
     bundle = _read_bundle(bundle_dir)
+    if any(unit.max_risk is RiskLevel.BLOCKED for unit in bundle.units):
+        _exit("Migration bundle contains a BLOCKED unit and cannot be applied.", 2)
+
+    guard_result: GuardResult | None = None
+    if skip_source_check:
+        typer.echo("Warning: Source schema check skipped by --skip-source-check.", err=True)
+    if bundle.format_version == 1:
+        guard_result = GuardResult.SKIPPED_LEGACY
+        typer.echo(
+            "Bundle has no source fingerprint (format 1); the database state cannot be verified.",
+            err=True,
+        )
+    elif not skip_source_check:
+        try:
+            guard_result = asyncio.run(_verify_source(bundle, db_url))
+        except SourceStateMismatchError as error:
+            detail = str(error).removesuffix(".")
+            _exit(
+                f"Error: {detail}. Re-run generate against this database, or pass "
+                "--skip-source-check after review.",
+                2,
+            )
+        except (psycopg.Error, psycopg_pool.PoolTimeout):
+            _exit("Error: Database connection failed.", 1)
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            _exit("Apply cancelled; earlier units remain applied.", 3)
+        except Exception:
+            _exit("Error: Schema inspection failed.", 1)
+
     destructive, approve_destructive = _confirm_risk(bundle, dry_run=dry_run, yes=yes)
     if dry_run:
+        if skip_source_check:
+            typer.echo("Source state check: skipped (--skip-source-check).")
+        else:
+            assert guard_result is not None
+            typer.echo(f"Source state check: {guard_result.value}.")
         _dry_run(bundle, db_url, destructive=destructive)
         return
     _real_apply(
@@ -256,6 +325,7 @@ def apply_cmd(
     statement_timeout: str = "0",
     dry_run: bool = False,
     yes: bool = False,
+    skip_source_check: bool = False,
 ) -> None:
     """Run ``pgsd apply`` with a redacted fallback for unexpected failures."""
     try:
@@ -266,6 +336,7 @@ def apply_cmd(
             statement_timeout=statement_timeout,
             dry_run=dry_run,
             yes=yes,
+            skip_source_check=skip_source_check,
         )
     except typer.Exit:
         raise

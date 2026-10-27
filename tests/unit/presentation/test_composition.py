@@ -141,6 +141,50 @@ async def test_inspector_scope_uses_two_lazy_pools_with_cli_timeout(
 
 
 @pytest.mark.asyncio
+async def test_single_inspector_scope_uses_lazy_pool_and_schema_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pools: list[FakeSinglePool] = []
+    inspectors: list[FakeSingleInspector] = []
+
+    class FakeSinglePool:
+        def __init__(self, conninfo: str, *, open_timeout: float) -> None:
+            self.conninfo = conninfo
+            self.open_timeout = open_timeout
+            self.entered = False
+            self.exited = False
+            pools.append(self)
+
+        async def __aenter__(self) -> FakeSinglePool:
+            self.entered = True
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            self.exited = True
+
+    class FakeSingleInspector:
+        def __init__(self, pool: object, *, schemas: list[str] | None = None) -> None:
+            self.pool = pool
+            self.schemas = schemas
+            inspectors.append(self)
+
+    monkeypatch.setattr(composition, "Pool", FakeSinglePool)
+    monkeypatch.setattr(composition, "PgCatalogInspector", FakeSingleInspector)
+
+    scope = composition.open_inspector("target", schemas=["app"])
+    assert pools == []
+
+    async with scope as inspector:
+        assert id(inspector) == id(inspectors[0])
+        assert pools[0].entered
+
+    assert [(pool.conninfo, pool.open_timeout, pool.exited) for pool in pools] == [
+        ("target", 5.0, True)
+    ]
+    assert inspectors[0].schemas == ["app"]
+
+
+@pytest.mark.asyncio
 async def test_compare_conninfo_uses_inspector_scope_and_returns_comparison(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

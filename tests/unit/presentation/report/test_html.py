@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+import pgschemadiff.presentation.report.model as report_model
 from pgschemadiff.application.diff.compare_schemas import SchemaComparisonResult
 from pgschemadiff.application.migration.bundle import (
     BundleAssessment,
@@ -20,6 +21,7 @@ from pgschemadiff.presentation.report.html import render_report
 from pgschemadiff.presentation.report.model import ReportModel, from_bundle, from_comparison
 
 if TYPE_CHECKING:
+    import pytest
     from syrupy.assertion import SnapshotAssertion
 
 GENERATED_AT = datetime(2026, 10, 27, 1, 2, 3, tzinfo=UTC)
@@ -105,11 +107,19 @@ def _bundle(*, hostile: str = "") -> ValidatedBundle:
     )
 
 
-def test_empty_comparison_report_matches_snapshot(snapshot: SnapshotAssertion) -> None:
+def test_empty_comparison_report_matches_snapshot(
+    snapshot: SnapshotAssertion,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(report_model, "__version__", "0.1.0")
     assert render_report(_comparison_report(realistic=False)) == snapshot
 
 
-def test_realistic_comparison_report_matches_snapshot(snapshot: SnapshotAssertion) -> None:
+def test_realistic_comparison_report_matches_snapshot(
+    snapshot: SnapshotAssertion,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(report_model, "__version__", "0.1.0")
     assert render_report(_comparison_report(realistic=True)) == snapshot
 
 

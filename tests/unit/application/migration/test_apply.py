@@ -42,6 +42,8 @@ from pgschemadiff.domain.schema import Schema
 from pgschemadiff.domain.table import Table
 from pgschemadiff.shared.errors import ApplyMigrationError, RiskGateError
 
+_FINGERPRINT = "sha256:" + "0" * 64
+
 
 def _bundle() -> ValidatedBundle:
     schema_ref = ObjectRef(
@@ -74,6 +76,8 @@ def _bundle() -> ValidatedBundle:
     )
     plan = generate_migration(
         DeltaSet.from_iterable(deltas),
+        source_fingerprint=_FINGERPRINT,
+        target_fingerprint=_FINGERPRINT,
         clock=lambda: datetime(2026, 10, 24, 12, 30, 45, tzinfo=UTC),
         id_factory=lambda: "apply-test-bundle",
     )
@@ -436,6 +440,8 @@ async def test_cancellation_emits_event_finishes_cancelled_and_reraises() -> Non
 async def test_empty_bundle_is_noop_without_executor_calls() -> None:
     plan = generate_migration(
         DeltaSet(),
+        source_fingerprint=_FINGERPRINT,
+        target_fingerprint=_FINGERPRINT,
         clock=lambda: datetime(2026, 10, 24, 12, 30, 45, tzinfo=UTC),
         id_factory=lambda: "empty-apply-bundle",
     )

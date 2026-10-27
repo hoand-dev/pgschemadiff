@@ -21,6 +21,7 @@ from typer.testing import CliRunner
 
 import pgschemadiff.presentation.tui.app as tui_app_module
 from pgschemadiff.application.diff.compare_schemas import SchemaComparisonResult
+from pgschemadiff.application.diff.fingerprint import schema_fingerprint
 from pgschemadiff.application.migration.apply import apply_migration
 from pgschemadiff.application.migration.generate import assess_deltas, generate_migration
 from pgschemadiff.application.migration.history import (
@@ -271,6 +272,7 @@ def _migration_dependencies(
     compare: object | None = None,
     bundle_reader: object | None = None,
     executor_factory: object | None = None,
+    history_reader_factory: object | None = None,
 ) -> TuiDependencies:
     loader = _FakeProfileLoader(tmp_path / "profiles.yaml", profiles or [])
     return TuiDependencies(
@@ -280,6 +282,11 @@ def _migration_dependencies(
         bundle_reader=cast("BundleReader", bundle_reader or Mock()),
         executor_factory=cast("ExecutorFactory", executor_factory or Mock()),
         compare=cast("CompareCallable", compare) if compare is not None else _no_compare,
+        history_reader_factory=(
+            cast("Callable[[str], MigrationHistoryReader]", history_reader_factory)
+            if history_reader_factory is not None
+            else PostgresMigrationHistoryReader
+        ),
     )
 
 
@@ -431,10 +438,26 @@ def _bundle_files(
     *,
     max_risk: RiskLevel = RiskLevel.DANGEROUS,
     force_risk: RiskLevel | None = None,
+    format_version: int = 1,
+    source_database: Database | None = None,
+    target_database: Database | None = None,
 ) -> tuple[bytes, bytes]:
-    plan = generate_migration(DeltaSet.from_iterable([delta]), max_risk=max_risk)
+    source = source_database or Database(name="source")
+    target = target_database or Database(name="target")
+    plan = generate_migration(
+        DeltaSet.from_iterable([delta]),
+        max_risk=max_risk,
+        source_fingerprint=schema_fingerprint(source),
+        target_fingerprint=schema_fingerprint(target),
+        inspected_schemas=["public"] if format_version == 2 else None,
+    )
     files = dict(render_bundle(plan).files)
     manifest = json.loads(files["manifest.json"])
+    if format_version == 1:
+        manifest["format_version"] = 1
+        manifest.pop("inspected_schemas")
+        manifest["source_fingerprint"] = None
+        manifest["target_fingerprint"] = None
     if force_risk is not None:
         manifest["overall_max_risk"] = force_risk.value
         for assessment in manifest["assessments"]:
@@ -994,6 +1017,7 @@ async def test_apply_loads_saved_bundle_off_ui_loop_and_shows_safe_summary(
         assert "1 delta" in text
         assert "1 unit" in text
         assert "safe" in text
+        assert "Bundle has no source fingerprint (format 1)" in text
         assert "secret" not in text
         assert app.query_one("#apply-lock-timeout", Input).value == "5000ms"
         assert app.query_one("#apply-statement-timeout", Input).value == "0"
@@ -1041,6 +1065,7 @@ async def test_palette_apply_dry_run_starts_connectivity_check_without_executor(
         assert connected == [profile.target.dsn()]
         assert executor_factory.calls == []
         assert app.session.apply_status == (
+            "Bundle has no source fingerprint (format 1); the database state cannot be verified. "
             "Dry-run connectivity check passed; no migration SQL or history was touched."
         )
 
@@ -1087,6 +1112,192 @@ async def test_apply_always_opens_confirmation_and_cancel_does_not_open_executor
         assert isinstance(app.screen, MainScreen)
         assert executor_factory.calls == []
         assert app.session.apply_events == []
+
+
+@pytest.mark.unit
+async def test_apply_source_mismatch_blocks_confirmation_modal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_database = Database(name="source", server_version="17")
+    target_database = Database(name="target", server_version="18")
+    files = _bundle_files(
+        _create_schema_delta(),
+        format_version=2,
+        source_database=source_database,
+        target_database=target_database,
+    )
+    reader = _FakeBundleReader(files)
+    executor_factory = _RecordingExecutorFactory(_FakeMigrationExecutor())
+    history_factory = _RecordingHistoryReaderFactory(_RecordingHistoryReader())
+    app = PgsdApp(
+        dependencies=_migration_dependencies(
+            tmp_path,
+            _RecordingMigrationWriter(),
+            profiles=[_profile("pilot")],
+            bundle_reader=reader,
+            executor_factory=executor_factory,
+            history_reader_factory=history_factory,
+        )
+    )
+    found_database = Database(name="different", server_version="19")
+    inspected: list[tuple[str, list[str] | None]] = []
+
+    class FakeInspector:
+        async def inspect(self) -> Database:
+            return found_database
+
+    @asynccontextmanager
+    async def open_inspector(
+        conninfo: str,
+        *,
+        schemas: list[str] | None = None,
+    ) -> AsyncIterator[FakeInspector]:
+        inspected.append((conninfo, schemas))
+        yield FakeInspector()
+
+    monkeypatch.setattr(tui_app_module, "open_inspector", open_inspector, raising=False)
+
+    async with app.run_test(size=(150, 50)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        app.session.written_bundle_path = tmp_path / "saved-bundle"
+        app.switch_view("apply")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        await pilot.click("#apply-start")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        assert isinstance(app.screen, MainScreen)
+        assert (
+            "Database schema does not match the bundle's source state" in app.session.apply_status
+        )
+        assert inspected == [(_profile("pilot").target.dsn(), ["public"])]
+        assert executor_factory.calls == []
+
+
+@pytest.mark.unit
+async def test_dry_run_source_mismatch_skips_connectivity_check(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_database = Database(name="source", server_version="17")
+    target_database = Database(name="target", server_version="18")
+    files = _bundle_files(
+        _create_schema_delta(),
+        format_version=2,
+        source_database=source_database,
+        target_database=target_database,
+    )
+    profile = _profile("pilot")
+    app = PgsdApp(
+        dependencies=_migration_dependencies(
+            tmp_path,
+            _RecordingMigrationWriter(),
+            profiles=[profile],
+            bundle_reader=_FakeBundleReader(files),
+            history_reader_factory=_RecordingHistoryReaderFactory(_RecordingHistoryReader()),
+        )
+    )
+    connected: list[str] = []
+
+    class FakeInspector:
+        async def inspect(self) -> Database:
+            return Database(name="different", server_version="19")
+
+    @asynccontextmanager
+    async def open_inspector(
+        _conninfo: str,
+        *,
+        schemas: list[str] | None = None,
+    ) -> AsyncIterator[FakeInspector]:
+        assert schemas == ["public"]
+        yield FakeInspector()
+
+    async def check_connectivity(conninfo: str) -> None:
+        connected.append(conninfo)
+
+    monkeypatch.setattr(tui_app_module, "open_inspector", open_inspector, raising=False)
+    monkeypatch.setattr(tui_app_module, "_check_connectivity", check_connectivity)
+
+    async with app.run_test(size=(150, 50)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        app.session.written_bundle_path = tmp_path / "saved-bundle"
+        app.switch_view("apply")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        await pilot.click("#apply-dry-run")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        assert connected == []
+        assert (
+            "Database schema does not match the bundle's source state" in app.session.apply_status
+        )
+
+
+@pytest.mark.unit
+async def test_dry_run_reports_applied_bundle_source_check_as_skipped(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    files = _bundle_files(
+        _create_schema_delta(),
+        format_version=2,
+        source_database=Database(name="source", server_version="17"),
+        target_database=Database(name="target", server_version="18"),
+    )
+    bundle_id = json.loads(files[0])["id"]
+    applied_run = dataclasses.replace(_history_runs()[1], bundle_id=bundle_id)
+    profile = _profile("pilot")
+    connected: list[str] = []
+    app = PgsdApp(
+        dependencies=_migration_dependencies(
+            tmp_path,
+            _RecordingMigrationWriter(),
+            profiles=[profile],
+            bundle_reader=_FakeBundleReader(files),
+            history_reader_factory=_RecordingHistoryReaderFactory(
+                _RecordingHistoryReader((applied_run,))
+            ),
+        )
+    )
+
+    class FakeInspector:
+        async def inspect(self) -> Database:
+            pytest.fail("already-applied bundle must not claim an inspected source match")
+
+    @asynccontextmanager
+    async def open_inspector(
+        _conninfo: str,
+        *,
+        schemas: list[str] | None = None,
+    ) -> AsyncIterator[FakeInspector]:
+        assert schemas == ["public"]
+        yield FakeInspector()
+
+    async def check_connectivity(conninfo: str) -> None:
+        connected.append(conninfo)
+
+    monkeypatch.setattr(tui_app_module, "open_inspector", open_inspector, raising=False)
+    monkeypatch.setattr(tui_app_module, "_check_connectivity", check_connectivity)
+
+    async with app.run_test(size=(150, 50)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        app.session.written_bundle_path = tmp_path / "saved-bundle"
+        app.switch_view("apply")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        await pilot.click("#apply-dry-run")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        assert connected == [profile.target.dsn()]
+        assert "Source state check skipped (bundle already applied)." in app.session.apply_status
+        assert "Source state check: match." not in app.session.apply_status
 
 
 @pytest.mark.unit
@@ -1384,9 +1595,10 @@ async def test_dry_run_uses_connectivity_only_and_never_opens_executor(
         checked_target = checked[0].rsplit("/", maxsplit=1)[-1] if checked else ""
         assert checked_target == "pilot_target"
         assert executor_factory.calls == []
-        assert app.session.apply_status == (
-            "Dry-run connectivity check passed; no migration SQL or history was touched."
-        )
+    assert app.session.apply_status == (
+        "Bundle has no source fingerprint (format 1); the database state cannot be verified. "
+        "Dry-run connectivity check passed; no migration SQL or history was touched."
+    )
 
 
 @pytest.mark.unit
@@ -1522,21 +1734,35 @@ async def test_migration_rollback_toggle() -> None:
 
 
 @pytest.mark.unit
-async def test_migration_generation_renders_bundle_and_execution_units(
+async def test_migration_generation_renders_bundle_and_execution_units(  # noqa: PLR0915
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     writer = _RecordingMigrationWriter()
-    app = PgsdApp(dependencies=_migration_dependencies(tmp_path, writer))
+    profile = _profile("worker").model_copy(update={"schemas": ["public", "sales"]})
+    app = PgsdApp(dependencies=_migration_dependencies(tmp_path, writer, profiles=[profile]))
     caller_thread = threading.get_ident()
     generation_threads: list[int] = []
     render_threads: list[int] = []
     original_generate = generate_migration
     original_render = render_bundle
 
-    def track_generate(deltas: DeltaSet, *, max_risk: RiskLevel) -> MigrationPlan:
+    def track_generate(
+        deltas: DeltaSet,
+        *,
+        max_risk: RiskLevel,
+        source_fingerprint: str | None = None,
+        target_fingerprint: str | None = None,
+        inspected_schemas: list[str] | tuple[str, ...] | None = None,
+    ) -> MigrationPlan:
         generation_threads.append(threading.get_ident())
-        return original_generate(deltas, max_risk=max_risk)
+        return original_generate(
+            deltas,
+            max_risk=max_risk,
+            source_fingerprint=source_fingerprint,
+            target_fingerprint=target_fingerprint,
+            inspected_schemas=inspected_schemas,
+        )
 
     def track_render(plan: MigrationPlan) -> RenderedBundle:
         render_threads.append(threading.get_ident())
@@ -1548,7 +1774,16 @@ async def test_migration_generation_renders_bundle_and_execution_units(
     async with app.run_test(size=(150, 50)) as pilot:
         await app.workers.wait_for_complete()
         await pilot.pause()
-        _install_comparison(app, _create_schema_delta(comment=r"C:\[x]"))
+        desired_snapshot = Database(name="profile-source", schemas=(Schema(ref=_schema_ref()),))
+        current_snapshot = Database(name="profile-target")
+        comparison = SchemaComparisonResult(
+            source=desired_snapshot,
+            target=current_snapshot,
+            deltas=DeltaSet.from_iterable([_create_schema_delta(comment=r"C:\[x]")]),
+        )
+        app.session.last_comparison = comparison
+        app.query_one("#migration", MigrationView).update_from_session(app.session)
+        app.switch_view("migration")
         await pilot.pause()
         risk = app.query_one("#mig-risk", Select)
         assert risk.value == RiskLevel.DANGEROUS.value
@@ -1563,6 +1798,9 @@ async def test_migration_generation_renders_bundle_and_execution_units(
         assert plan is not None
         assert bundle is not None
         assert plan.slug == "diff"
+        assert plan.source_fingerprint == schema_fingerprint(current_snapshot)
+        assert plan.target_fingerprint == schema_fingerprint(desired_snapshot)
+        assert plan.inspected_schemas == tuple(profile.schemas)
         assert "CREATE SCHEMA" in _plain(app.query_one("#mig-up-sql", Static))
         assert r"C:\[x]" in _plain(app.query_one("#mig-up-sql", Static))
 
@@ -1751,7 +1989,12 @@ async def test_new_comparison_and_profile_change_invalidate_migration_state(tmp_
     async with app.run_test(size=(150, 50)) as pilot:
         await app.workers.wait_for_complete()
         await pilot.pause()
-        plan = generate_migration(_comparison(_create_schema_delta()).deltas)
+        plan_comparison = _comparison(_create_schema_delta())
+        plan = generate_migration(
+            plan_comparison.deltas,
+            source_fingerprint=schema_fingerprint(plan_comparison.target),
+            target_fingerprint=schema_fingerprint(plan_comparison.source),
+        )
         bundle = render_bundle(plan)
         app.session.last_comparison = _comparison(_create_schema_delta())
         app.session.migration_plan = plan

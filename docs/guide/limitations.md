@@ -34,6 +34,10 @@ triggers, and row-level security policies.
 - **An interrupted non-transactional statement is not automatically resumed.**
   Inspect its effects manually; a failed concurrent index build may leave an
   INVALID index that must be removed before retrying.
+- **The source fingerprint check is not atomic with apply.** Concurrent DDL can
+  change the database after verification and before migration execution. Avoid
+  concurrent schema changes during that window; locking across the guard and
+  migration is not currently provided.
 
 See [Bundles](bundles.md) for file integrity, transaction units, history, and
 resume details.

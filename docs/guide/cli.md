@@ -93,12 +93,18 @@ the migration—normally the source/current database used for `diff` and
 | `--statement-timeout TEXT` | `0` | Maximum statement execution time. Same syntax; `0` means unlimited. |
 | `--dry-run` | off | Validate bundle and check connectivity; execute no migration SQL. |
 | `--yes` | off | Approve destructive-risk units without an interactive prompt. |
+| `--skip-source-check` | off | Skip the format 2 source-fingerprint guard after review. |
 | `--help` | — | Show help. |
 
 Apply progress and errors go to stderr; the final success result goes to stdout.
-Dry-run unit summaries go to stdout. A destructive bundle needs interactive
-approval, or `--yes` when stdin is non-interactive. BLOCKED bundles are always
-refused.
+Dry-run guard results and unit summaries go to stdout. Format 2 bundles are
+checked against their recorded source schema and scope before confirmation or
+dry-run. A mismatch exits `2`; format 1 bundles remain usable with a warning.
+`--skip-source-check` bypasses this check and prints a warning. A destructive
+bundle needs interactive approval, or `--yes` when stdin is non-interactive.
+BLOCKED bundles are always refused. Successful non-resumed applies report
+whether the resulting schema matches the bundle's desired fingerprint; a
+post-apply mismatch is warning-only.
 
 ## `tui`
 
@@ -149,5 +155,5 @@ uppercase letters, dots, or other characters requiring PostgreSQL quoting.
 |---:|---|
 | `0` | Success, including a diff with changes when no risk gate fails. |
 | `1` | Runtime failure such as connection, inspection, comparison, or writing failure. |
-| `2` | Usage or policy failure: invalid option/file/bundle, exceeded risk gate, unapproved destructive change, or BLOCKED bundle. |
+| `2` | Usage or policy failure: invalid option/file/bundle, exceeded risk gate, unapproved destructive change, BLOCKED bundle, or source-schema mismatch. |
 | `3` | Apply failed or was cancelled after it started. Earlier completed units may remain applied. |

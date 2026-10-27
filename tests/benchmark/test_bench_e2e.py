@@ -8,6 +8,7 @@ from pgschemadiff.application.diff.compare_schemas import (
     SchemaComparisonResult,
     compare_schemas_with_snapshots,
 )
+from pgschemadiff.application.diff.fingerprint import schema_fingerprint
 from pgschemadiff.application.migration.generate import generate_migration
 from pgschemadiff.application.migration.render import render_bundle
 from pgschemadiff.application.sql_emit.risk import RiskLevel
@@ -68,6 +69,8 @@ def test_postgres_pipeline_at_ten_thousand_objects(
             plan = generate_migration(
                 comparison.deltas,
                 max_risk=RiskLevel.DESTRUCTIVE,
+                source_fingerprint=schema_fingerprint(comparison.source),
+                target_fingerprint=schema_fingerprint(comparison.target),
                 id_factory=lambda: "bench-e2e",
             )
             generate_elapsed = perf_counter() - generate_started

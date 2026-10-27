@@ -19,6 +19,7 @@ from textual.message import Message
 from textual.widgets import Button, ContentSwitcher, DataTable, Input
 
 from pgschemadiff.application.diff.compare_schemas import SchemaComparisonResult
+from pgschemadiff.application.diff.fingerprint import schema_fingerprint
 from pgschemadiff.application.migration.apply import (
     ApplyEvent,
     ApplyResult,
@@ -26,13 +27,21 @@ from pgschemadiff.application.migration.apply import (
 )
 from pgschemadiff.application.migration.bundle import ValidatedBundle, load_bundle
 from pgschemadiff.application.migration.generate import assess_deltas, generate_migration
+from pgschemadiff.application.migration.guard import (
+    GuardResult,
+    SourceStateMismatchError,
+    verify_source_state,
+)
 from pgschemadiff.application.migration.history import (
     MigrationHistoryUnavailableError,
     list_migration_history,
 )
 from pgschemadiff.application.migration.render import render_bundle
 from pgschemadiff.application.sql_emit.risk import RiskLevel
-from pgschemadiff.presentation.composition import check_connectivity as _check_connectivity
+from pgschemadiff.presentation.composition import (
+    check_connectivity as _check_connectivity,
+    open_inspector,
+)
 from pgschemadiff.presentation.timeouts import parse_timeout
 from pgschemadiff.presentation.tui.screens import (
     ConfirmApplyModal,
@@ -202,6 +211,32 @@ class ApplyOperationFinished(Message):
     ) -> None:
         super().__init__()
         self.result = result
+        self.error_message = error_message
+        self.cancelled = cancelled
+
+
+class ApplySourceCheckFinished(Message):
+    """Carry a pre-apply schema check result back to the UI loop."""
+
+    def __init__(
+        self,
+        profile: Profile,
+        bundle: ValidatedBundle,
+        *,
+        lock_timeout_ms: int,
+        statement_timeout_ms: int,
+        dry_run: bool,
+        guard_result: GuardResult | None = None,
+        error_message: str | None = None,
+        cancelled: bool = False,
+    ) -> None:
+        super().__init__()
+        self.profile = profile
+        self.bundle = bundle
+        self.lock_timeout_ms = lock_timeout_ms
+        self.statement_timeout_ms = statement_timeout_ms
+        self.dry_run = dry_run
+        self.guard_result = guard_result
         self.error_message = error_message
         self.cancelled = cancelled
 
@@ -588,10 +623,14 @@ class PgsdApp(App[None]):
         max_risk: RiskLevel,
     ) -> None:
         try:
+            profile = self.session.selected_profile
             plan = await asyncio.to_thread(
                 generate_migration,
                 comparison.deltas,
                 max_risk=max_risk,
+                source_fingerprint=schema_fingerprint(comparison.target),
+                target_fingerprint=schema_fingerprint(comparison.source),
+                inspected_schemas=(profile.schemas or None) if profile is not None else None,
             )
             bundle = await asyncio.to_thread(render_bundle, plan)
         except RiskGateError as error:
@@ -772,7 +811,7 @@ class PgsdApp(App[None]):
     def _refresh_apply_controls(self) -> None:
         apply_view = self.query_one("#apply", ApplyView)
         apply_view.update_from_session(self.session)
-        busy = self.session.apply_operation in {"dry-run", "apply"}
+        busy = self.session.apply_operation in {"loading", "dry-run", "apply"}
         self.query_one("#saved-profiles", DataTable).disabled = busy
         self.query_one("#btn-test-both", Button).disabled = (
             busy or self.session.selected_profile is None
@@ -824,26 +863,170 @@ class PgsdApp(App[None]):
                 self._refresh_apply_controls()
                 message.stop()
                 return
-            self._start_apply_worker(
+        self._start_apply_source_check(
+            profile,
+            bundle,
+            lock_timeout_ms=lock_timeout_ms,
+            statement_timeout_ms=statement_timeout_ms,
+            dry_run=message.dry_run,
+        )
+        message.stop()
+
+    def _start_apply_source_check(
+        self,
+        profile: Profile,
+        bundle: ValidatedBundle,
+        *,
+        lock_timeout_ms: int,
+        statement_timeout_ms: int,
+        dry_run: bool,
+    ) -> None:
+        self.session.apply_operation = "loading"
+        self.session.apply_status = "Checking target schema state…"
+        self._refresh_apply_controls()
+        self.run_worker(
+            self._run_apply_source_check(
                 profile,
                 bundle,
                 lock_timeout_ms=lock_timeout_ms,
                 statement_timeout_ms=statement_timeout_ms,
-                dry_run=True,
-                approve_destructive=False,
+                dry_run=dry_run,
+            ),
+            name="apply-source-check",
+            group="apply-source-check",
+            exclusive=True,
+        )
+
+    async def _run_apply_source_check(
+        self,
+        profile: Profile,
+        bundle: ValidatedBundle,
+        *,
+        lock_timeout_ms: int,
+        statement_timeout_ms: int,
+        dry_run: bool,
+    ) -> None:
+        guard_result: GuardResult | None = None
+        error_message: str | None = None
+        checking_connectivity = False
+        try:
+            if bundle.format_version == 1:
+                guard_result = GuardResult.SKIPPED_LEGACY
+            else:
+                dependencies = self.dependencies
+                if dependencies is None:
+                    raise RuntimeError
+                schemas = (
+                    list(bundle.inspected_schemas)
+                    if bundle.inspected_schemas is not None
+                    else None
+                )
+                async with open_inspector(profile.target.dsn(), schemas=schemas) as inspector:
+                    history = dependencies.history_reader_factory(profile.target.dsn())
+                    guard_result = await verify_source_state(bundle, inspector, history)
+            if dry_run:
+                checking_connectivity = True
+                await _check_connectivity(profile.target.dsn())
+        except asyncio.CancelledError:
+            self.post_message(
+                ApplySourceCheckFinished(
+                    profile,
+                    bundle,
+                    lock_timeout_ms=lock_timeout_ms,
+                    statement_timeout_ms=statement_timeout_ms,
+                    dry_run=dry_run,
+                    cancelled=True,
+                )
             )
-        else:
-            self._pending_apply_request = (
+            raise
+        except SourceStateMismatchError as error:
+            error_message = str(error)
+        except (PsycopgError, psycopg_pool.PoolTimeout):
+            error_message = "Database connection failed."
+        except Exception:
+            error_message = (
+                "Migration apply failed."
+                if checking_connectivity
+                else "Could not verify source schema state."
+            )
+
+        self.post_message(
+            ApplySourceCheckFinished(
                 profile,
                 bundle,
-                lock_timeout_ms,
-                statement_timeout_ms,
+                lock_timeout_ms=lock_timeout_ms,
+                statement_timeout_ms=statement_timeout_ms,
+                dry_run=dry_run,
+                guard_result=guard_result,
+                error_message=error_message,
             )
-            self.push_screen(
-                ConfirmApplyModal(profile, bundle),
-                callback=self._on_apply_confirmation,
+        )
+
+    def on_apply_source_check_finished(self, message: ApplySourceCheckFinished) -> None:
+        self.session.apply_operation = None
+        if message.cancelled:
+            self.session.apply_status = "Apply cancelled; earlier units remain applied."
+            self._refresh_apply_controls()
+            return
+        if (
+            message.profile != self.session.selected_profile
+            or message.bundle is not self.session.validated_bundle
+            or self.session.validated_bundle_path != self.session.written_bundle_path
+        ):
+            self.session.apply_status = "Could not load migration bundle."
+            self._refresh_apply_controls()
+            return
+        if message.error_message is not None:
+            self.session.apply_status = message.error_message
+            self._refresh_apply_controls()
+            return
+
+        result = message.guard_result
+        if result is None:
+            self.session.apply_status = "Could not verify source schema state."
+            self._refresh_apply_controls()
+            return
+        if message.dry_run:
+            if result is GuardResult.SKIPPED_LEGACY:
+                source_status = (
+                    "Bundle has no source fingerprint (format 1); "
+                    "the database state cannot be verified."
+                )
+            elif result is GuardResult.SKIPPED_RESUME:
+                source_status = "Source state check skipped (safe resume)."
+            elif result is GuardResult.SKIPPED_APPLIED:
+                source_status = "Source state check skipped (bundle already applied)."
+            else:
+                source_status = "Source state check: match."
+            self.session.apply_status = (
+                f"{source_status} Dry-run connectivity check passed; "
+                "no migration SQL or history was touched."
             )
-        message.stop()
+            self._refresh_apply_controls()
+            return
+
+        self._pending_apply_request = (
+            message.profile,
+            message.bundle,
+            message.lock_timeout_ms,
+            message.statement_timeout_ms,
+        )
+        if result is GuardResult.SKIPPED_LEGACY:
+            self.session.apply_status = (
+                "Bundle has no source fingerprint (format 1); "
+                "the database state cannot be verified."
+            )
+        elif result is GuardResult.SKIPPED_RESUME:
+            self.session.apply_status = "Source state check skipped (safe resume)."
+        elif result is GuardResult.SKIPPED_APPLIED:
+            self.session.apply_status = "Source state check skipped (bundle already applied)."
+        else:
+            self.session.apply_status = ""
+        self._refresh_apply_controls()
+        self.push_screen(
+            ConfirmApplyModal(message.profile, message.bundle),
+            callback=self._on_apply_confirmation,
+        )
 
     def _on_apply_confirmation(self, confirmed: bool | None) -> None:
         request = self._pending_apply_request

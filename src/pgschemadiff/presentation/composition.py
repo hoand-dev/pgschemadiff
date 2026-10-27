@@ -140,6 +140,22 @@ async def open_inspectors(
             yield source_inspector, target_inspector
 
 
+@asynccontextmanager
+async def open_inspector(
+    conninfo: str,
+    *,
+    schemas: list[str] | None = None,
+) -> AsyncIterator[PgCatalogInspector]:
+    """Open one catalog inspector using the CLI's pool timeout."""
+    async with Pool(conninfo, open_timeout=_POOL_OPEN_TIMEOUT) as pool:
+        yield PgCatalogInspector(pool, schemas=schemas)
+
+
+def create_history_reader(conninfo: str) -> MigrationHistoryReader:
+    """Construct the migration history reader for one connection string."""
+    return PostgresMigrationHistoryReader(conninfo)
+
+
 async def compare_conninfo(
     source_conninfo: str,
     target_conninfo: str,

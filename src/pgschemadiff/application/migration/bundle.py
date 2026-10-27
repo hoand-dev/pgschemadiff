@@ -12,6 +12,7 @@ from pgschemadiff.application.sql_emit.risk import RiskLevel
 from pgschemadiff.shared.errors import MigrationError
 
 _SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
+_FINGERPRINT_PATTERN = re.compile(r"sha256:[0-9a-f]{64}")
 _RISK_LEVELS = tuple(RiskLevel)
 
 
@@ -54,7 +55,7 @@ class BundleUnit:
 
 @dataclass(frozen=True)
 class ValidatedBundle:
-    """Immutable v1 bundle metadata and SQL ranges ready for application."""
+    """Immutable migration bundle metadata and SQL ranges ready for application."""
 
     format_version: int
     tool_version: str
@@ -68,6 +69,7 @@ class ValidatedBundle:
     assessments: tuple[BundleAssessment, ...]
     units: tuple[BundleUnit, ...]
     up_sql_sha256: str
+    inspected_schemas: tuple[str, ...] | None = None
 
 
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -137,6 +139,12 @@ def _require_risk(value: object, context: str) -> RiskLevel:
 def _require_sha256(value: object, context: str) -> str:
     if not isinstance(value, str) or _SHA256_PATTERN.fullmatch(value) is None:
         raise MigrationError(f"Migration manifest {context} must be a lowercase SHA-256 value.")
+    return value
+
+
+def _require_fingerprint(value: object, context: str) -> str:
+    if not isinstance(value, str) or _FINGERPRINT_PATTERN.fullmatch(value) is None:
+        raise MigrationError(f"Migration manifest {context} must be a sha256 fingerprint.")
     return value
 
 
@@ -358,6 +366,10 @@ def load_bundle(manifest_bytes: bytes, up_sql_bytes: bytes) -> ValidatedBundle:
         raise MigrationError("Migration manifest and up.sql must be supplied as bytes.")
 
     manifest = _load_manifest(manifest_bytes)
+    format_version = _require_int(manifest.get("format_version"), "format_version")
+    if format_version not in {1, 2}:
+        raise MigrationError(f"Unsupported migration bundle format_version {format_version}.")
+
     fields = frozenset(
         {
             "format_version",
@@ -374,21 +386,38 @@ def load_bundle(manifest_bytes: bytes, up_sql_bytes: bytes) -> ValidatedBundle:
             "checksums",
         }
     )
+    if format_version == 2:
+        fields = fields | {"inspected_schemas"}
     manifest = _require_object(manifest, fields, "root")
-    format_version = _require_int(manifest["format_version"], "format_version")
-    if format_version != 1:
-        raise MigrationError(f"Unsupported migration bundle format_version {format_version}.")
 
     tool_version = _require_string(manifest["tool_version"], "tool_version")
     bundle_id = _require_string(manifest["id"], "id")
     slug = _require_string(manifest["slug"], "slug")
     created_at = _require_string(manifest["created_at"], "created_at")
-    source_fingerprint = _require_optional_string(
-        manifest["source_fingerprint"], "source_fingerprint"
-    )
-    target_fingerprint = _require_optional_string(
-        manifest["target_fingerprint"], "target_fingerprint"
-    )
+    if format_version == 1:
+        source_fingerprint = _require_optional_string(
+            manifest["source_fingerprint"], "source_fingerprint"
+        )
+        target_fingerprint = _require_optional_string(
+            manifest["target_fingerprint"], "target_fingerprint"
+        )
+        inspected_schemas = None
+    else:
+        source_fingerprint = _require_fingerprint(
+            manifest["source_fingerprint"], "source_fingerprint"
+        )
+        target_fingerprint = _require_fingerprint(
+            manifest["target_fingerprint"], "target_fingerprint"
+        )
+        schemas_value = manifest["inspected_schemas"]
+        inspected_schemas = (
+            None
+            if schemas_value is None
+            else tuple(
+                _require_string(schema, "inspected_schemas")
+                for schema in _require_list(schemas_value, "inspected_schemas")
+            )
+        )
     delta_count = _require_int(manifest["delta_count"], "delta_count")
     if delta_count < 0:
         raise MigrationError("Migration manifest delta_count must not be negative.")
@@ -440,4 +469,5 @@ def load_bundle(manifest_bytes: bytes, up_sql_bytes: bytes) -> ValidatedBundle:
         assessments=assessments,
         units=units,
         up_sql_sha256=up_sql_sha256,
+        inspected_schemas=inspected_schemas,
     )

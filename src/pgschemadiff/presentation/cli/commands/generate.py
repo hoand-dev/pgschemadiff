@@ -9,12 +9,13 @@ import psycopg
 import psycopg_pool
 import typer
 
+from pgschemadiff.application.diff.fingerprint import schema_fingerprint
 from pgschemadiff.application.migration.generate import generate_migration
 from pgschemadiff.application.sql_emit.risk import RiskLevel
 from pgschemadiff.infrastructure.config.rename_loader import load_renames
 from pgschemadiff.infrastructure.fs.migration_writer import FilesystemMigrationWriter
+from pgschemadiff.presentation import composition
 from pgschemadiff.presentation.cli import output
-from pgschemadiff.presentation.cli.commands.diff import compare_urls
 from pgschemadiff.shared.errors import DiffError, InspectionError, MigrationError, RiskGateError
 
 if TYPE_CHECKING:
@@ -59,8 +60,8 @@ def generate_cmd(
         output.progress(step, 5, label)
 
     try:
-        delta_set = asyncio.run(
-            compare_urls(
+        comparison = asyncio.run(
+            composition.compare_conninfo(
                 source_url,
                 target_url,
                 schemas,
@@ -77,13 +78,20 @@ def generate_cmd(
     except Exception:
         output.error("Error: Schema diff failed.", 1)
 
-    if delta_set.is_empty():
+    if comparison.deltas.is_empty():
         typer.echo("No schema changes.", err=True)
         return
 
     output.progress(4, 5, "Generating migration")
     try:
-        plan = generate_migration(delta_set, max_risk=max_risk, slug=name)
+        plan = generate_migration(
+            comparison.deltas,
+            max_risk=max_risk,
+            slug=name,
+            source_fingerprint=schema_fingerprint(comparison.source),
+            target_fingerprint=schema_fingerprint(comparison.target),
+            inspected_schemas=schemas,
+        )
     except RiskGateError as error:
         output.error(str(error), 2)
     except MigrationError as error:

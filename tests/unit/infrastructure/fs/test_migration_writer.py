@@ -27,11 +27,14 @@ if TYPE_CHECKING:
     from pgschemadiff.application.migration.model import MigrationPlan
 
 _CREATED_AT = datetime(2026, 10, 24, 12, 30, 45, tzinfo=UTC)
+_FINGERPRINT = "sha256:" + "0" * 64
 
 
 def _plan() -> MigrationPlan:
     return generate_migration(
         DeltaSet.from_iterable([]),
+        source_fingerprint=_FINGERPRINT,
+        target_fingerprint=_FINGERPRINT,
         clock=lambda: _CREATED_AT,
         id_factory=lambda: "filesystem-plan",
     )

@@ -212,6 +212,11 @@ def apply(
         "--yes",
         help="Approve destructive migration units.",
     ),
+    skip_source_check: bool = typer.Option(
+        False,
+        "--skip-source-check",
+        help="Skip verification that the database matches the bundle source state.",
+    ),
 ) -> None:
     """Apply a migration bundle after validation and risk confirmation."""
     apply_cmd(
@@ -221,6 +226,7 @@ def apply(
         statement_timeout=statement_timeout,
         dry_run=dry_run,
         yes=yes,
+        skip_source_check=skip_source_check,
     )
 
 

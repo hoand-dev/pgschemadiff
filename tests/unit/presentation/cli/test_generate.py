@@ -8,6 +8,8 @@ import psycopg
 from typer.testing import CliRunner
 
 import pgschemadiff.presentation.cli.commands.generate as generate_command
+from pgschemadiff.application.diff.compare_schemas import SchemaComparisonResult
+from pgschemadiff.application.diff.fingerprint import schema_fingerprint
 from pgschemadiff.application.migration.generate import generate_migration
 from pgschemadiff.application.sql_emit.risk import RiskLevel
 from pgschemadiff.domain.database import Database
@@ -130,9 +132,11 @@ def _patch_compare(
 ) -> list[object | None]:
     source_url = "postgresql://source/db"
     target_url = "postgresql://target/db"
+    source_database = Database(name="source")
+    target_database = Database(name="target", server_version="17")
     _patch_infrastructure(
         monkeypatch,
-        {source_url: Database(name="source"), target_url: Database(name="target")},
+        {source_url: source_database, target_url: target_database},
     )
     renames_seen: list[object | None] = []
 
@@ -141,9 +145,9 @@ def _patch_compare(
         _target: FakeInspector,
         *,
         renames: object | None = None,
-    ) -> SimpleNamespace:
+    ) -> SchemaComparisonResult:
         renames_seen.append(renames)
-        return SimpleNamespace(deltas=delta_set)
+        return SchemaComparisonResult(source_database, target_database, delta_set)
 
     monkeypatch.setattr(
         composition,
@@ -160,9 +164,11 @@ def test_generate_writes_bundle_with_cli_options_and_prints_path_only(
 ) -> None:
     source_url = "postgresql://source/db"
     target_url = "postgresql://target/db"
+    source_database = Database(name="source")
+    target_database = Database(name="target", server_version="17")
     pools, inspectors = _patch_infrastructure(
         monkeypatch,
-        {source_url: Database(name="source"), target_url: Database(name="target")},
+        {source_url: source_database, target_url: target_database},
     )
     deltas = DeltaSet.from_iterable((_create_schema("app"),))
     renames_seen: list[object | None] = []
@@ -172,9 +178,9 @@ def test_generate_writes_bundle_with_cli_options_and_prints_path_only(
         _target: FakeInspector,
         *,
         renames: object | None = None,
-    ) -> SimpleNamespace:
+    ) -> SchemaComparisonResult:
         renames_seen.append(renames)
-        return SimpleNamespace(deltas=deltas)
+        return SchemaComparisonResult(source_database, target_database, deltas)
 
     monkeypatch.setattr(
         composition,
@@ -191,16 +197,29 @@ def test_generate_writes_bundle_with_cli_options_and_prints_path_only(
         raising=False,
     )
 
-    generation_calls: list[tuple[RiskLevel, str]] = []
+    generation_calls: list[
+        tuple[RiskLevel, str, str | None, str | None, tuple[str, ...] | None]
+    ] = []
 
     def generate(
         delta_set: DeltaSet,
         *,
         max_risk: RiskLevel,
         slug: str,
+        source_fingerprint: str | None = None,
+        target_fingerprint: str | None = None,
+        inspected_schemas: list[str] | tuple[str, ...] | None = None,
     ) -> MigrationPlan:
-        generation_calls.append((max_risk, slug))
-        return generate_migration(delta_set, max_risk=max_risk, slug=slug)
+        schemas = tuple(inspected_schemas) if inspected_schemas is not None else None
+        generation_calls.append((max_risk, slug, source_fingerprint, target_fingerprint, schemas))
+        return generate_migration(
+            delta_set,
+            max_risk=max_risk,
+            slug=slug,
+            source_fingerprint=source_fingerprint,
+            target_fingerprint=target_fingerprint,
+            inspected_schemas=inspected_schemas,
+        )
 
     monkeypatch.setattr(generate_command, "generate_migration", generate, raising=False)
 
@@ -250,10 +269,19 @@ def test_generate_writes_bundle_with_cli_options_and_prints_path_only(
     assert "max-risk=safe" in result.stderr
     assert "units=1" in result.stderr
     assert "safe=1 warning=0 dangerous=0 destructive=0" in result.stderr
-    assert generation_calls == [(RiskLevel.WARNING, "nightly")]
+    assert generation_calls == [
+        (
+            RiskLevel.WARNING,
+            "nightly",
+            schema_fingerprint(source_database),
+            schema_fingerprint(target_database),
+            ("public", "sales"),
+        )
+    ]
     assert len(writer.calls) == 1
     assert writer.calls[0][1] == tmp_path
     assert writer.calls[0][0].slug == "nightly"
+    assert writer.calls[0][0].inspected_schemas == ("public", "sales")
     assert bundle_path.is_dir()
     assert renames_seen == [loaded_renames]
     assert [pool.conninfo for pool in pools] == [source_url, target_url]
@@ -299,8 +327,12 @@ def test_risk_gate_rejection_exits_two_and_shows_offending_delta(
         _source: FakeInspector,
         _target: FakeInspector,
         **_kwargs: object,
-    ) -> SimpleNamespace:
-        return SimpleNamespace(deltas=DeltaSet.from_iterable((_drop_schema("legacy"),)))
+    ) -> SchemaComparisonResult:
+        return SchemaComparisonResult(
+            Database(name="source"),
+            Database(name="target"),
+            DeltaSet.from_iterable((_drop_schema("legacy"),)),
+        )
 
     monkeypatch.setattr(
         composition,
@@ -636,12 +668,16 @@ def test_generate_reports_progress_phases(
         *,
         renames: object | None = None,
         on_phase: Callable[[str], None] | None = None,
-    ) -> SimpleNamespace:
+    ) -> SchemaComparisonResult:
         _ = renames
         if on_phase is not None:
             for phase in ("inspect-source", "inspect-target", "compare"):
                 on_phase(phase)
-        return SimpleNamespace(deltas=DeltaSet.from_iterable((_create_schema("app"),)))
+        return SchemaComparisonResult(
+            source=Database(name="source"),
+            target=Database(name="target"),
+            deltas=DeltaSet.from_iterable((_create_schema("app"),)),
+        )
 
     monkeypatch.setattr(composition, "compare_conninfo", compare_conninfo)
 

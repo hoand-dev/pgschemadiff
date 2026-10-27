@@ -17,6 +17,7 @@ import typer
 from rich.console import Console
 from typer.testing import CliRunner
 
+from pgschemadiff.application.diff.fingerprint import schema_fingerprint
 from pgschemadiff.application.migration.apply import (
     ApplyResult,
     StatementFinished,
@@ -26,6 +27,8 @@ from pgschemadiff.application.migration.apply import (
     UnitStarted,
 )
 from pgschemadiff.application.sql_emit.risk import RiskLevel
+from pgschemadiff.domain.database import Database
+from pgschemadiff.presentation import composition
 from pgschemadiff.presentation.cli.commands import apply as apply_command
 from pgschemadiff.presentation.cli.main import app
 from pgschemadiff.shared.errors import ApplyMigrationError, RiskGateError
@@ -95,6 +98,26 @@ def _write_bundle(
     return bundle_dir
 
 
+_SOURCE_DATABASE = Database(name="source")
+_TARGET_DATABASE = Database(name="target", server_version="17")
+
+
+def _write_fingerprinted_bundle(bundle_dir: Path) -> Path:
+    bundle_dir = _write_bundle(bundle_dir)
+    manifest_path = bundle_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.update(
+        {
+            "format_version": 2,
+            "inspected_schemas": ["app"],
+            "source_fingerprint": schema_fingerprint(_SOURCE_DATABASE),
+            "target_fingerprint": schema_fingerprint(_TARGET_DATABASE),
+        }
+    )
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    return bundle_dir
+
+
 def _invoke(bundle_dir: Path, *options: str) -> Result:
     return CliRunner().invoke(app, ["apply", str(bundle_dir), _DATABASE_URL, *options])
 
@@ -120,6 +143,41 @@ async def _fake_executor(
 ) -> AsyncIterator[object]:
     _ = lock_timeout_ms, statement_timeout_ms
     yield object()
+
+
+class _FakeInspector:
+    def __init__(self, database: Database) -> None:
+        self.database = database
+
+    async def inspect(self) -> Database:
+        return self.database
+
+
+def _patch_inspector(
+    monkeypatch: pytest.MonkeyPatch,
+    databases: list[Database],
+) -> list[tuple[str, list[str] | None]]:
+    calls: list[tuple[str, list[str] | None]] = []
+
+    @asynccontextmanager
+    async def open_inspector(
+        conninfo: str,
+        schemas: list[str] | None = None,
+    ) -> AsyncIterator[_FakeInspector]:
+        calls.append((conninfo, schemas))
+        yield _FakeInspector(databases.pop(0))
+
+    class EmptyHistory:
+        async def list_history(self) -> tuple[object, ...]:
+            return ()
+
+    monkeypatch.setattr(composition, "open_inspector", open_inspector)
+    monkeypatch.setattr(
+        composition,
+        "create_history_reader",
+        lambda _conninfo: EmptyHistory(),
+    )
+    return calls
 
 
 def _install_successful_apply(
@@ -166,6 +224,7 @@ def test_apply_help_is_registered() -> None:
     assert "--statement-timeout" in result.stdout
     assert "--dry-run" in result.stdout
     assert "--yes" in result.stdout
+    assert "--skip-source-check" in result.stdout
 
 
 def test_apply_exit_routes_through_shared_error_output(
@@ -445,6 +504,202 @@ def test_dry_run_prints_units_and_checks_connectivity_without_executor(
     assert "does not prove" in result.stdout.lower()
     assert ("destructive-risk" in result.stderr.lower()) is warning
     _assert_password_redacted(result)
+
+
+def test_source_mismatch_exits_two_before_destructive_confirmation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle_dir = _write_fingerprinted_bundle(tmp_path / "bundle")
+    found = Database(name="different", server_version="18")
+    inspector_calls = _patch_inspector(monkeypatch, [found])
+    monkeypatch.setattr(
+        typer,
+        "confirm",
+        lambda _prompt: pytest.fail("source mismatch must precede confirmation"),
+    )
+
+    result = _invoke(bundle_dir)
+
+    assert result.exit_code == 2
+    assert "Error: Database schema does not match the bundle's source state" in result.stderr
+    assert schema_fingerprint(_SOURCE_DATABASE)[7:19] in result.stderr
+    assert schema_fingerprint(found)[7:19] in result.stderr
+    assert "--skip-source-check after review" in result.stderr
+    assert inspector_calls == [(_DATABASE_URL, ["app"])]
+
+
+def test_skip_source_check_bypasses_inspection_and_dry_run_reports_override(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle_dir = _write_fingerprinted_bundle(tmp_path / "bundle")
+    connected: list[str] = []
+
+    @asynccontextmanager
+    async def unexpected_inspector(*_args: object, **_kwargs: object) -> AsyncIterator[object]:
+        if not _args and not _kwargs:
+            yield object()
+            return
+        raise AssertionError("override must bypass source inspection")
+
+    monkeypatch.setattr(composition, "open_inspector", unexpected_inspector)
+    monkeypatch.setattr(
+        apply_command,
+        "check_connectivity",
+        lambda url: _record_connectivity(url, connected),
+    )
+
+    result = _invoke(bundle_dir, "--dry-run", "--skip-source-check")
+
+    assert result.exit_code == 0
+    assert connected == [_DATABASE_URL]
+    assert "Source state check: skipped (--skip-source-check)." in result.stdout
+    assert "Warning: Source schema check skipped by --skip-source-check." in result.stderr
+
+
+def test_dry_run_reports_matching_source_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle_dir = _write_fingerprinted_bundle(tmp_path / "bundle")
+    inspector_calls = _patch_inspector(monkeypatch, [_SOURCE_DATABASE])
+    connected: list[str] = []
+    monkeypatch.setattr(
+        apply_command,
+        "check_connectivity",
+        lambda url: _record_connectivity(url, connected),
+    )
+
+    result = _invoke(bundle_dir, "--dry-run")
+
+    assert result.exit_code == 0
+    assert "Source state check: match." in result.stdout
+    assert connected == [_DATABASE_URL]
+    assert inspector_calls == [(_DATABASE_URL, ["app"])]
+
+
+def test_dry_run_reports_applied_bundle_source_check_as_skipped(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle_dir = _write_fingerprinted_bundle(tmp_path / "bundle")
+    _patch_inspector(monkeypatch, [Database(name="already-applied", server_version="99")])
+
+    class AppliedHistory:
+        async def list_history(self) -> tuple[object, ...]:
+            return (SimpleNamespace(bundle_id="bundle-test-id", status="applied"),)
+
+    monkeypatch.setattr(composition, "create_history_reader", lambda _conninfo: AppliedHistory())
+    monkeypatch.setattr(apply_command, "check_connectivity", lambda _url: asyncio.sleep(0))
+
+    result = _invoke(bundle_dir, "--dry-run")
+
+    assert result.exit_code == 0
+    assert "Source state check: skipped_applied." in result.stdout
+    assert "Source state check: match." not in result.stdout
+
+
+def test_legacy_bundle_warns_and_skips_source_inspection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle_dir = _write_bundle(tmp_path / "bundle")
+    monkeypatch.setattr(
+        composition,
+        "open_inspector",
+        lambda *_args, **_kwargs: pytest.fail("legacy bundle must skip inspection"),
+    )
+    connected: list[str] = []
+    monkeypatch.setattr(
+        apply_command,
+        "check_connectivity",
+        lambda url: _record_connectivity(url, connected),
+    )
+
+    result = _invoke(bundle_dir, "--dry-run")
+
+    assert result.exit_code == 0
+    assert (
+        "Bundle has no source fingerprint (format 1); the database state cannot be verified."
+        in result.stderr
+    )
+    assert connected == [_DATABASE_URL]
+
+
+def test_legacy_bundle_keeps_warning_when_source_check_override_is_set(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle_dir = _write_bundle(tmp_path / "bundle")
+    monkeypatch.setattr(
+        composition,
+        "open_inspector",
+        lambda *_args, **_kwargs: pytest.fail("legacy bundle must skip inspection"),
+    )
+    monkeypatch.setattr(apply_command, "check_connectivity", lambda _url: asyncio.sleep(0))
+
+    result = _invoke(bundle_dir, "--dry-run", "--skip-source-check")
+
+    assert result.exit_code == 0
+    assert "Warning: Source schema check skipped by --skip-source-check." in result.stderr
+    assert (
+        "Bundle has no source fingerprint (format 1); the database state cannot be verified."
+        in result.stderr
+    )
+
+
+def test_successful_apply_verifies_desired_schema_after_apply(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle_dir = _write_fingerprinted_bundle(tmp_path / "bundle")
+    inspector_calls = _patch_inspector(monkeypatch, [_SOURCE_DATABASE, _TARGET_DATABASE])
+    _install_successful_apply(monkeypatch)
+
+    result = _invoke(bundle_dir)
+
+    assert result.exit_code == 0
+    assert "Verified: database now matches the desired schema." in result.stdout
+    assert inspector_calls == [(_DATABASE_URL, ["app"]), (_DATABASE_URL, ["app"])]
+
+
+def test_skip_source_check_allows_real_apply_but_keeps_post_apply_verification(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle_dir = _write_fingerprinted_bundle(tmp_path / "bundle")
+    inspector_calls = _patch_inspector(monkeypatch, [_TARGET_DATABASE])
+    _install_successful_apply(monkeypatch)
+
+    result = _invoke(bundle_dir, "--skip-source-check")
+
+    assert result.exit_code == 0
+    assert "Warning: Source schema check skipped by --skip-source-check." in result.stderr
+    assert "Verified: database now matches the desired schema." in result.stdout
+    assert inspector_calls == [(_DATABASE_URL, ["app"])]
+
+
+def test_post_apply_mismatch_is_warning_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle_dir = _write_fingerprinted_bundle(tmp_path / "bundle")
+    inspector_calls = _patch_inspector(
+        monkeypatch,
+        [_SOURCE_DATABASE, Database(name="unexpected", server_version="18")],
+    )
+    _install_successful_apply(monkeypatch)
+
+    result = _invoke(bundle_dir)
+
+    assert result.exit_code == 0
+    assert (
+        "Warning: database does not match the desired schema after apply; run diff to inspect."
+        in result.stderr
+    )
+    assert "Verified: database now matches the desired schema." not in result.stdout
+    assert len(inspector_calls) == 2
 
 
 def test_public_connectivity_check_executes_select_one_and_closes_connection(
