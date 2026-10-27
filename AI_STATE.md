@@ -39,12 +39,13 @@ Goal: inspect two Postgres DBs, show schema diff, generate safe migration SQL.
 1. Phase 5 production readiness (P5-CLI-01, P5-PKG-01, P5-BENCH-01, P5-REPORT-01, P5-I18N-01).
 
 ## Next Actions
-- P5-BENCH-01 done (CI `de0c099`: 12,440 objects end to end in 3.68 s). P5-CLI-01 done (CI `e4f3b6f`). P5-PKG-01 done (CI `bcb6b5d`; 0.1.0 builds, release.yml not yet triggered). P5-DOCS-01 done (CI `afd1391`; 9 cookbook recipes executed on PG18). TUI direction bug fixed in `04fb3bb`. P5-REPORT-01 done (CI `2003b75`). P5-SAFE-01 done (CI `c549bd2`; bundle format 2, apply refuses a database that is not the bundle's source state). P5-I18N-01 done (CI `98ac93f`). Phase 5 tasks complete; final whole-project review in progress.
+- P5-BENCH-01 done (CI `de0c099`: 12,440 objects end to end in 3.68 s). P5-CLI-01 done (CI `e4f3b6f`). P5-PKG-01 done (CI `bcb6b5d`; 0.1.0 builds, release.yml not yet triggered). P5-DOCS-01 done (CI `afd1391`; 9 cookbook recipes executed on PG18). TUI direction bug fixed in `04fb3bb`. P5-REPORT-01 done (CI `2003b75`). P5-SAFE-01 done (CI `c549bd2`; bundle format 2, apply refuses a database that is not the bundle's source state). P5-I18N-01 done (CI `98ac93f`). Phase 5 tasks complete; final review done 2026-10-27 (fixes `5268bde`, `44af1f2`, CI `d144374`).
 
 ## Ready To Merge
 - None.
 
 ## Needs Human
+- [ ] legacy-prototype-cleanup | `presentation/app.py`, `presentation/screens/`, `presentation/widgets/`, `presentation/styles.tcss`, `presentation/tui/_mock.py`, `presentation/tui/screens/ai.py` and their legacy tests are unused but still shipped in the wheel; deletion is blocked by the repo-file-acl issue. | options: fix ACL then delete / keep | since: 2026-10-27
 - [ ] release-0.1.0 | First PyPI release: add pending trusted publishers on PyPI/TestPyPI, create GitHub environments `pypi`/`testpypi` with reviewers (see `docs/RELEASING.md`); then approve TestPyPI dry run and tag `v0.1.0`. | options: do setup / postpone release | since: 2026-10-26
 - [ ] P1-TEST-02 | Inspector integration tests: PR #3 was closed by human; do not recreate without direction. | options: authorize a new attempt / leave M1 caveat open | since: 2026-06-22
 - [ ] repo-branch-protection | GitHub branch protection not confirmed (linear history / merge-commit policy). | options: confirm settings / leave unconfirmed | since: 2026-06-20 (non-blocking)
