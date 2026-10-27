@@ -504,7 +504,9 @@ def test_rejected_destructive_confirmation_uses_vietnamese_error_prefix(
     )
 
     assert result.exit_code == 2
-    assert result.stderr.endswith("Lỗi: Migration có thay đổi phá hủy dữ liệu chưa được phê duyệt.\n")
+    assert result.stderr.endswith(
+        "Lỗi: Migration có thay đổi phá hủy dữ liệu chưa được phê duyệt.\n"
+    )
 
 
 def test_dry_run_note_uses_vietnamese_and_unit_lines_stay_english(

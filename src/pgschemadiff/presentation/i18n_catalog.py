@@ -95,7 +95,8 @@ VI: dict[str, str] = {
     "diff.progress.inspect_target": "Đang đọc schema đích",
     "diff.progress.compare": "Đang so sánh",
     "generate.error.blocked_max_risk": (
-        "Lỗi: Không cho phép --max-risk blocked; thay đổi BLOCKED không bao giờ được đưa vào migration."
+        "Lỗi: Không cho phép --max-risk blocked; "
+        "thay đổi BLOCKED không bao giờ được đưa vào migration."
     ),
     "generate.error.output_directory": "Lỗi: --out phải là thư mục đã tồn tại.",
     "generate.error.risk_gate": "Lỗi: {detail}",
