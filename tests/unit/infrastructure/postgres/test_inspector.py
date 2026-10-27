@@ -897,13 +897,18 @@ async def test_inspect_calls_all_seventeen_queries() -> None:
 
 @pytest.mark.unit
 async def test_inspect_starts_repeatable_read_transaction() -> None:
-    """inspect() must issue BEGIN ISOLATION LEVEL REPEATABLE READ."""
+    """inspect() must open a read-only REPEATABLE READ transaction itself.
+
+    psycopg would otherwise send its own BEGIN first (non-autocommit), turning
+    the explicit BEGIN into a no-op inside a READ COMMITTED transaction.
+    """
     pool = _build_mock_pool()
     inspector = PgCatalogInspector(pool)
     await inspector.inspect()
 
     conn = pool.acquire.return_value.__aenter__.return_value
-    conn.execute.assert_any_call("BEGIN ISOLATION LEVEL REPEATABLE READ")
+    conn.set_autocommit.assert_awaited_once_with(True)
+    conn.execute.assert_any_call("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY")
 
 
 @pytest.mark.unit
@@ -936,7 +941,7 @@ async def test_inspect_sets_local_search_path_before_catalog_queries() -> None:
         *("catalog_cursor.execute" for _ in range(17)),
         "execute",
     ]
-    assert statements[0].args == ("BEGIN ISOLATION LEVEL REPEATABLE READ",)
+    assert statements[0].args == ("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY",)
     assert statements[1].args == ("SET LOCAL search_path = pg_catalog",)
 
 

@@ -560,6 +560,21 @@ def _build_partition_of(row: Any) -> PartitionOf | None:
 # ---------------------------------------------------------------------------
 
 
+async def begin_snapshot(conn: psycopg.AsyncConnection[Any]) -> None:
+    """Open the read-only REPEATABLE READ catalog transaction (ADR-0012).
+
+    In non-autocommit mode psycopg sends its own ``BEGIN`` before the first
+    statement, so an explicit ``BEGIN ISOLATION LEVEL ...`` would run inside an
+    already-open READ COMMITTED transaction and be ignored. Autocommit hands
+    transaction control to these statements; the caller ends it with ROLLBACK.
+    """
+    await conn.set_autocommit(True)
+    await conn.execute("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY")
+    # Deparsers qualify user objects outside pg_catalog. LOCAL keeps pooled
+    # sessions clean.
+    await conn.execute("SET LOCAL search_path = pg_catalog")
+
+
 class PgCatalogInspector:
     """Concrete SchemaInspector: reads pg_catalog via psycopg3 async.
 
@@ -603,12 +618,7 @@ class PgCatalogInspector:
 
     async def _run_inspect(self) -> Database:
         async with self._pool.acquire() as conn:
-            # Use REPEATABLE READ for snapshot consistency (ADR-0012)
-            await conn.set_autocommit(False)
-            await conn.execute("BEGIN ISOLATION LEVEL REPEATABLE READ")
-            # Deparsers qualify user objects outside pg_catalog. LOCAL keeps pooled
-            # sessions clean.
-            await conn.execute("SET LOCAL search_path = pg_catalog")
+            await begin_snapshot(conn)
             try:
                 async with conn.cursor(row_factory=psycopg.rows.namedtuple_row) as cur:
                     await cur.execute(_SQL_SCHEMAS)
