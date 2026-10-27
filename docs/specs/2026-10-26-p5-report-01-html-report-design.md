@@ -1,6 +1,6 @@
 # P5-REPORT-01 — HTML report design
 
-**Status:** Approved by reviewer; implementation pending.
+**Status:** Approved by reviewer; implementation complete (CI `2003b75`).
 **Date:** 2026-10-26
 **Task:** `docs/TASKS.md` P5-REPORT-01 "HTML diff report" ·
 roadmap row "DeltaSet/manifest → report; escape output, offline render, nội dung khớp CLI"

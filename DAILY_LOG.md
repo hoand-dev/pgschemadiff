@@ -462,4 +462,6 @@ NEEDS_HUMAN (open): 3 — P1-TEST-02 (PR #3 human-closed; do not recreate); bran
 - P5-PKG-01 (CI `bcb6b5d`): version 0.1.0 single-sourced, `Build package` CI job (build, twine check, content check, clean-venv smoke), `release.yml` (tag to PyPI, dispatch to TestPyPI, trusted publishing). Bundle snapshots now pin `tool_version`. Publish waits on human setup.
 - P5-DOCS-01 (CI `afd1391`): `docs/guide/` (getting started, CLI, TUI, bundles, risk, limitations) and nine cookbook recipes executed on PG18 (diff summary, up.sql excerpts, apply, idempotent re-diff).
 - **Bug fixed** `04fb3bb`: the TUI compared current=profile.source but applied/dry-ran/read history on profile.target, so a bundle would run inverse changes on the wrong database. Now current=profile.target.
-- Next: P5-REPORT-01.
+- P5-REPORT-01 (CI `2003b75`): `pgsd diff --format html` and `pgsd report BUNDLE_DIR`; stdlib renderer, everything escaped, no scripts, CSP blocks external resources; database names only.
+- Review: shared review venv lost its `py.typed` files mid-run (mypy 461 errors); rebuilt from lock. Briefs now forbid touching Python environments.
+- Next: P5-SAFE-01 (bundle format 2 with source/target fingerprints; apply refuses on mismatch).
