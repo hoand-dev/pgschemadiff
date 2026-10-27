@@ -8,7 +8,7 @@
 | Phase 3a | Migration generator (MVP-A) | M3: round-trip integration test green for MVP-A scope; `pgsd generate` + `pgsd apply` end-to-end | ✅ M3 reached 2026-10-26: PG18 round-trip corpus 48 passed, 0 xfail (CI `0c9536b`) |
 | Phase 3b | MVP-B object types | M4: views, matviews, functions, procedures, sequences, enums, triggers, RLS policies, composite/domain types all covered with round-trip tests | ✅ M4 reached 2026-10-26: all ten object types round-trip on PG18 (CI `c8bb1c9`: 136 integration passed) |
 | Phase 4 | TUI | M5: Textual TUI ships with the screens specified in `docs/ui-design.md` | ✅ M5 reached 2026-10-26 (CI `52b6eb9`): all seven views wired to real use cases; panels without a data source hidden (see `docs/ui-design.md` §10) |
-| Phase 5 | Production readiness | M6: HTML report, i18n, benchmark suite (10k objects < 10s), PyPI release, safe-migration cookbook | _not started_ |
+| Phase 5 | Production readiness | M6: HTML report, i18n, benchmark suite (10k objects < 10s), PyPI release, safe-migration cookbook | All tasks done 2026-10-27 (CI `44af1f2`), plus P5-SAFE-01 source-state guard; M6 waits only on the first PyPI publish (human setup in `docs/RELEASING.md`) |
 
 ## Milestone exit criteria — details
 
@@ -60,13 +60,13 @@
 
 ### M6 (Phase 5)
 
-- [ ] HTML diff report generator
-- [ ] EN + VI message catalog
-- [ ] Benchmark suite: 10k-object schema in < 10s end-to-end
-- [ ] `uv build` wheel + sdist; published to PyPI
-- [ ] Safe-migration cookbook in `docs/`
+- [x] HTML diff report generator (`diff --format html`, `pgsd report`)
+- [x] EN + VI message catalog (CLI)
+- [x] Benchmark suite: 10k-object schema in < 10s end-to-end (3.68 s on CI)
+- [ ] `uv build` wheel + sdist; published to PyPI — build and release workflow done; publish pending human setup
+- [x] Safe-migration cookbook in `docs/guide/cookbook/` (executed on PG18 in CI)
 
 ## Risk register
 
-See the master plan (`/root/.claude/plans/t-i-ang-thi-t-k-groovy-blum.md`) for
-the full Technical Debt & Risk table.
+Technical debt and open risks are tracked in `docs/TASKS.md` and in the
+known-limits list of `docs/guide/limitations.md`.

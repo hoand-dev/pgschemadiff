@@ -465,4 +465,6 @@ NEEDS_HUMAN (open): 3 — P1-TEST-02 (PR #3 human-closed; do not recreate); bran
 - P5-REPORT-01 (CI `2003b75`): `pgsd diff --format html` and `pgsd report BUNDLE_DIR`; stdlib renderer, everything escaped, no scripts, CSP blocks external resources; database names only.
 - Review: shared review venv lost its `py.typed` files mid-run (mypy 461 errors); rebuilt from lock. Briefs now forbid touching Python environments.
 - P5-SAFE-01 (CI `c549bd2`): bundle format 2 with source/target fingerprints and schema scope; apply and dry run re-inspect and refuse on mismatch (exit 2, CLI `--skip-source-check`); post-apply verification line. First push broke 118 application-level integration tests that render plans without fingerprints (not runnable locally); fixed with a placeholder-fingerprint helper.
-- Next: P5-I18N-01.
+- P5-I18N-01 (CI `98ac93f`): CLI messages via EN/VI catalog (`PGSD_LANG`, locale); machine-readable output unchanged. Reviewer reworded several Vietnamese texts.
+- **Final review fixes**: inspector snapshot was never REPEATABLE READ (psycopg's implicit BEGIN made the explicit one a no-op) — fixed in `5268bde` with a PG18 test; CreateIndex risk reason now describes the CONCURRENTLY build (`44af1f2`); README/ROADMAP/`--help` brought up to date.
+- Phase 5 tasks complete. Open: first PyPI publish (human), legacy prototype modules still shipped in the wheel (ACL blocks deletion), P0-CI-03 coverage gate.
