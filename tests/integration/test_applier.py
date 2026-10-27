@@ -10,7 +10,6 @@ import pytest
 
 from pgschemadiff.application.migration.apply import ApplyResult, apply_migration
 from pgschemadiff.application.migration.bundle import ValidatedBundle, load_bundle
-from pgschemadiff.application.migration.generate import generate_migration
 from pgschemadiff.application.migration.render import render_bundle
 from pgschemadiff.application.sql_emit.risk import RiskLevel
 from pgschemadiff.domain.column import Column
@@ -23,6 +22,7 @@ from pgschemadiff.infrastructure.postgres.applier import open_executor
 from pgschemadiff.infrastructure.postgres.inspector import PgCatalogInspector
 from pgschemadiff.infrastructure.postgres.pool import Pool
 from pgschemadiff.shared.errors import ApplyMigrationError
+from tests.integration._plans import generate_test_migration
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -71,7 +71,7 @@ def _index(
 
 
 def _bundle(deltas: Iterable[DeltaBase], bundle_id: str) -> ValidatedBundle:
-    plan = generate_migration(
+    plan = generate_test_migration(
         DeltaSet.from_iterable(deltas),
         max_risk=RiskLevel.DANGEROUS,
         slug="adapter-test",

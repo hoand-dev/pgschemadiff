@@ -10,7 +10,6 @@ import pytest
 
 from pgschemadiff.application.migration.apply import ApplyResult, apply_migration
 from pgschemadiff.application.migration.bundle import load_bundle
-from pgschemadiff.application.migration.generate import generate_migration
 from pgschemadiff.application.sql_emit.risk import RiskLevel, classify_risk
 from pgschemadiff.domain.delta import (
     AlterSequenceOptions,
@@ -26,6 +25,7 @@ from pgschemadiff.infrastructure.fs.migration_writer import FilesystemMigrationW
 from pgschemadiff.infrastructure.postgres.applier import open_executor
 from pgschemadiff.presentation.cli.commands.diff import compare_urls
 from pgschemadiff.shared.errors import ApplyMigrationError, RiskGateError
+from tests.integration._plans import generate_test_migration
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -1124,7 +1124,7 @@ async def test_pg18_round_trip_corpus(
     delta_set = await compare_urls(pg_test_dsn, pg_test_dsn2, schemas=None)
     assert not delta_set.is_empty(), scenario
 
-    plan = generate_migration(
+    plan = generate_test_migration(
         delta_set,
         max_risk=RiskLevel.DESTRUCTIVE,
         clock=lambda: datetime(2026, 10, 25, 12, 0, tzinfo=UTC),
@@ -1230,7 +1230,7 @@ async def test_unsupported_function_changes_fail_risk_gate_before_emission(
 
     assert any(classify_risk(delta).level is RiskLevel.BLOCKED for delta in delta_set)
     with pytest.raises(RiskGateError):
-        generate_migration(delta_set, max_risk=RiskLevel.DESTRUCTIVE)
+        generate_test_migration(delta_set, max_risk=RiskLevel.DESTRUCTIVE)
 
 
 @pytest.mark.integration
@@ -1274,7 +1274,7 @@ async def test_unsupported_procedure_changes_fail_risk_gate_before_emission(
 
     assert any(classify_risk(delta).level is RiskLevel.BLOCKED for delta in delta_set)
     with pytest.raises(RiskGateError):
-        generate_migration(delta_set, max_risk=RiskLevel.DESTRUCTIVE)
+        generate_test_migration(delta_set, max_risk=RiskLevel.DESTRUCTIVE)
 
 
 @pytest.mark.integration
@@ -1312,7 +1312,7 @@ async def test_incompatible_view_changes_fail_risk_gate_before_emission(
 
     assert any(isinstance(delta, ReplaceView) and delta.incompatible for delta in delta_set)
     with pytest.raises(RiskGateError):
-        generate_migration(delta_set, max_risk=RiskLevel.DESTRUCTIVE)
+        generate_test_migration(delta_set, max_risk=RiskLevel.DESTRUCTIVE)
 
 
 @pytest.mark.integration
@@ -1341,7 +1341,7 @@ async def test_indexed_materialized_view_definition_change_fails_risk_gate(
     assert not any(isinstance(delta, (CreateIndex, DropIndex)) for delta in delta_set)
     assert classify_risk(delta_set.deltas[0]).level is RiskLevel.BLOCKED
     with pytest.raises(RiskGateError):
-        generate_migration(delta_set, max_risk=RiskLevel.DESTRUCTIVE)
+        generate_test_migration(delta_set, max_risk=RiskLevel.DESTRUCTIVE)
 
 
 @pytest.mark.integration
@@ -1381,7 +1381,7 @@ async def test_sequence_option_migration_preserves_runtime_state(
 
     delta_set = await compare_urls(pg_test_dsn, pg_test_dsn2, schemas=None)
     assert any(isinstance(delta, AlterSequenceOptions) for delta in delta_set)
-    plan = generate_migration(
+    plan = generate_test_migration(
         delta_set,
         max_risk=RiskLevel.DESTRUCTIVE,
         clock=lambda: datetime(2026, 10, 25, 12, 0, tzinfo=UTC),
@@ -1433,7 +1433,7 @@ async def test_sequence_owner_transition_precedes_owned_by_change_for_pg18(
     _seed(pg_test_dsn2, desired_sql)
 
     delta_set = await compare_urls(pg_test_dsn, pg_test_dsn2, schemas=None)
-    plan = generate_migration(
+    plan = generate_test_migration(
         delta_set,
         max_risk=RiskLevel.DESTRUCTIVE,
         clock=lambda: datetime(2026, 10, 25, 12, 0, tzinfo=UTC),
@@ -1472,7 +1472,7 @@ async def test_sequence_owner_follows_table_owner_change_for_pg18(
     _seed(pg_test_dsn2, common)
 
     delta_set = await compare_urls(pg_test_dsn, pg_test_dsn2, schemas=None)
-    plan = generate_migration(
+    plan = generate_test_migration(
         delta_set,
         max_risk=RiskLevel.DESTRUCTIVE,
         clock=lambda: datetime(2026, 10, 25, 12, 0, tzinfo=UTC),
@@ -1530,7 +1530,7 @@ async def test_invalid_domain_check_validation_keeps_applied_unit_history(
     _seed(pg_test_dsn2, desired_sql)
 
     delta_set = await compare_urls(pg_test_dsn, pg_test_dsn2, schemas=None)
-    plan = generate_migration(
+    plan = generate_test_migration(
         delta_set,
         max_risk=RiskLevel.DESTRUCTIVE,
         clock=lambda: datetime(2026, 10, 25, 12, 0, tzinfo=UTC),
@@ -1592,7 +1592,7 @@ async def test_domain_check_inside_array_composite_or_range_is_blocked(
     delta_set = await compare_urls(pg_test_dsn, pg_test_dsn2, schemas=None)
 
     with pytest.raises(RiskGateError, match="Domain checks used inside"):
-        generate_migration(delta_set, max_risk=RiskLevel.DESTRUCTIVE)
+        generate_test_migration(delta_set, max_risk=RiskLevel.DESTRUCTIVE)
 
 
 @pytest.mark.integration
@@ -1606,4 +1606,4 @@ async def test_domain_base_type_change_is_blocked(
     delta_set = await compare_urls(pg_test_dsn, pg_test_dsn2, schemas=None)
 
     with pytest.raises(RiskGateError, match="base type or collation"):
-        generate_migration(delta_set, max_risk=RiskLevel.DESTRUCTIVE)
+        generate_test_migration(delta_set, max_risk=RiskLevel.DESTRUCTIVE)

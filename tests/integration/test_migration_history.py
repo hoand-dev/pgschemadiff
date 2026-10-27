@@ -13,7 +13,6 @@ import pytest
 
 from pgschemadiff.application.migration.apply import apply_migration
 from pgschemadiff.application.migration.bundle import ValidatedBundle, load_bundle
-from pgschemadiff.application.migration.generate import generate_migration
 from pgschemadiff.application.migration.history import (
     MigrationHistoryUnavailableError,
     list_migration_history,
@@ -36,6 +35,7 @@ from pgschemadiff.infrastructure.postgres.history import (
     _open_read_only_connection,
 )
 from pgschemadiff.shared.errors import ApplyMigrationError
+from tests.integration._plans import generate_test_migration
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -77,7 +77,7 @@ def _index(schema: str, table_name: str, name: str) -> Index:
 
 
 def _bundle(deltas: Iterable[DeltaBase], bundle_id: str) -> tuple[ValidatedBundle, str]:
-    plan = generate_migration(
+    plan = generate_test_migration(
         DeltaSet.from_iterable(deltas),
         max_risk=RiskLevel.DANGEROUS,
         slug="history-test",

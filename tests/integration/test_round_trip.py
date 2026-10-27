@@ -18,7 +18,6 @@ from typer.testing import CliRunner
 
 from pgschemadiff.application.migration.apply import apply_migration
 from pgschemadiff.application.migration.bundle import load_bundle
-from pgschemadiff.application.migration.generate import generate_migration
 from pgschemadiff.application.sql_emit.risk import RiskLevel
 from pgschemadiff.infrastructure.fs.bundle_reader import FilesystemBundleReader
 from pgschemadiff.infrastructure.fs.migration_writer import FilesystemMigrationWriter
@@ -26,6 +25,7 @@ from pgschemadiff.infrastructure.postgres.applier import open_executor
 from pgschemadiff.presentation.cli.commands.diff import compare_urls
 from pgschemadiff.presentation.cli.main import app
 from pgschemadiff.shared.errors import ApplyMigrationError
+from tests.integration._plans import generate_test_migration
 
 
 def _seed_desired_schema(dsn: str) -> None:
@@ -71,7 +71,7 @@ async def test_api_round_trip_applies_bundle_and_rejects_repeat(
     delta_set = await compare_urls(pg_test_dsn, pg_test_dsn2, schemas=None)
     assert not delta_set.is_empty()
 
-    plan = generate_migration(
+    plan = generate_test_migration(
         delta_set,
         max_risk=RiskLevel.DANGEROUS,
         clock=lambda: datetime(2026, 10, 24, 12, 30, 45, tzinfo=UTC),
